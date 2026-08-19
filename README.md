@@ -93,10 +93,38 @@ what a human must do, automate again from there.**
 cascade-search oscn --county caddo --lname Frazier --year 2013
 #   -> AwaitingHuman, token 0e96cf371939
 
+cascade-search gate ui        # <- the easy path: worklist in a browser
+```
+
+`gate ui` opens a local page (127.0.0.1, stdlib only, no build step) listing
+every parked gate as a plain-English description of the records being sought --
+"Every Caddo County case filed against a party named Frazier in 2013" -- with
+an Open button and a paste target. Solve the challenge, select-all, paste. The
+page archives with SHA-256 and drains the queue.
+
+That replaces a five-step ritual, three steps of which were filesystem
+bookkeeping rather than work only a human can do: open, solve, save, *find the
+file you just saved*, *type its path back into a terminal*.
+
+Two things the page does that the CLI never did:
+
+**It validates the artifact.** `gate resume` archived whatever it was handed,
+with a SHA-256, as the record of that search -- so handing back the wrong tab
+mid-flow wrote a permanent false record. The page checks the capture against
+the gate it claims to answer: it refuses an unpassed challenge page, refuses a
+page the party's name never appears in, and *accepts* a "Found No Records" page
+because an empty docket is a publishable negative, not a failed capture.
+
+**It collapses duplicates.** The same search can park twice under different
+tokens. Solving that Turnstile twice is pure waste, so those cards merge and
+one paste clears them all.
+
+The CLI path still works, unchanged:
+
+```bash
 cascade-search gate list
-cascade-search browser <url> --headed --save /tmp/page.html   # solve it yourself
+cascade-search browser <url> --headed --save /tmp/page.html
 cascade-search gate resume 0e96cf371939 --file /tmp/page.html
-#   -> archived with SHA-256, manifest line traced to the gate, queue drains
 ```
 
 **Ethical boundary, enforced in code.** `core/browser.py` carries an
@@ -195,7 +223,7 @@ do not grant storage rights; that is a policy field, not a footnote.
 
 ## Status
 
-Phase 1. **27 tests passing.** Browser escalation, the humanomation gate
+Phase 1. **43 tests passing.** Browser escalation, the humanomation gate
 (open/list/resume), and local extraction are built and working.
 
 Not yet built: async job-queue consumption, federated multi-engine merge

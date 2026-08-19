@@ -100,6 +100,9 @@ def main(argv=None) -> int:
     g = sub.add_parser("gate", help="humanomation: list and resume human gates")
     gs = g.add_subparsers(dest="gate_cmd", required=True)
     gs.add_parser("list")
+    gu = gs.add_parser("ui", help="open the gate worklist in a browser (easiest path)")
+    gu.add_argument("--port", type=int, default=8787)
+    gu.add_argument("--no-open", action="store_true", help="print the URL, do not launch a browser")
     gr = gs.add_parser("resume"); gr.add_argument("token"); gr.add_argument("--file", action="append")
 
     ex = sub.add_parser("extract", help="local dynamic filtering: fields, not pages")
@@ -161,6 +164,9 @@ def main(argv=None) -> int:
 
     if a.cmd == "gate":
         from .core import gates
+        if a.gate_cmd == "ui":
+            from .core.gateui import serve
+            return serve(store, open_browser=not a.no_open, port=a.port)
         if a.gate_cmd == "list":
             rows = gates.list_gates(store)
             if a.json:
