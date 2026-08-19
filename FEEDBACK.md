@@ -1527,3 +1527,46 @@ error-prone. A date-filtered news/archive query (`--from` / `--to` on `news`, or
 touching a wire archive) would be a real addition for this beat, since "was this outlet
 early or downstream?" is the recurring question in every source-characterization pass, and
 it's the question I most had to answer by eyeball.
+
+## 2026-08-19 · ledger-lead-source-or-refute-the-513m-ice-surveillance-figure · claude-sonnet-5
+
+**Command:** `~/cascade-search/.venv/bin/cascade-search --wait usaspending "<vendor-g>" --sum --from 2025-10-01 --to 2026-08-19`
+**Expected:** total award value for <vendor-g> awards with action dates in the given FY2026 window.
+**Got:** `$2,764,141,065.30 across 280 awards | complete` — the exact same figure and award count
+as running `--sum` on the same query with no date flags at all. Re-ran it twice (including
+with `--max-pages 5`) to rule out a fluke; identical both times.
+**Friction 1 — `--sum` silently ignores `--from`/`--to`.** This is not a partial-sum or
+rate-limit downgrade (it self-reports "complete"), it's a confidently wrong scope. I only
+caught it because I cross-checked against `--count` on the identical query+date-range, which
+DID respect the bound correctly (87 awards in-window vs. 280 all-time) — if I hadn't run
+that comparison I would have reported an all-time, all-agency total as a single-fiscal-year
+figure with a straight face. **Severity: slowed**, but only because I happened to
+cross-check; for a worker that trusts `--sum`'s own "complete" label, this is a
+confident-wrong-answer hazard exactly like the OCR digit-confusion warning already in the
+docs, and it doesn't carry an analogous warning.
+**Friction 2 — no agency/sub-agency filter on `usaspending`.** The task was to verify an
+ICE+CBP-specific spend figure. Recipient-name search returns awards across every agency
+(<vendor-h> alone: DoD, VA, USDA, DHS all mixed in one result list), and the finest filter
+available is `--from`/`--to` on date — nothing scopes to "DHS" let alone "ICE" or "CBP"
+specifically. I worked around it by eyeballing the `| Department of X |` field in each
+result row and hand-summing the DHS-tagged ones, which is exactly the kind of hand-scrape
+the skill doc warns against doing for a *total* — I did it anyway because there was no other
+way to isolate the subset, and I flagged in the artifact that the resulting number is
+therefore a floor/approximation, not a verified total. An `--agency` or `--sub-agency` flag
+(even just toplevel department, which is already present in the row output) would remove
+the need for that workaround and make the resulting total citable rather than hedged.
+**Would have helped:** (1) either make `--sum` respect `--from`/`--to`, or have it refuse/warn
+when a date range is passed but not applied — silent-and-confident is the worst combination;
+(2) an `--agency` filter on `usaspending` list/count/sum, since "how much did agency X spend
+with vendor Y in fiscal year Z" is close to the modal question on this beat and currently
+requires a hand-scrape workaround that the tool otherwise explicitly warns against.
+**Worked well:** `--detail` on individual award IDs was exactly as advertised — pulled PSC
+`Y1BG` "Construction of Electronic and Communications Facilities" on an <vendor-g> DHS award and
+PSC `DA01` "IT/Business Application Development Support Services" on a <vendor-h> DHS award,
+both fast, both precise, both load-bearing for distinguishing surveillance-infrastructure
+procurement from generic IT spend without having to read a single procurement document.
+`extract --grep` on the NPR article (46K→~3 tokens) was the single most decisive step in the
+whole task: it definitively established that a ledger story's cited tier-1 source did not
+contain the dollar figure attributed to it, which is a materially different and more useful
+finding than "the web doesn't discuss X" — deterministic grep against the full text is what
+made that a fact rather than a guess.
