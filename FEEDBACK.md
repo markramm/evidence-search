@@ -1405,3 +1405,125 @@ direct quotes) without a single re-fetch. The `news` RSS command's "redirect onl
 labeling on every Google News result is a good guardrail — it stopped me from accidentally
 citing an uncitable redirect URL and pushed me to `web` for a citable link, which is exactly the
 right nudge.
+
+## 2026-08-19 · ledger-pattern-characterize-eyes-on-ice-as-a-source · claude-opus-4-8-parallel-tick8-b
+
+Source-characterization task: decide whether a detention-beat Substack ("Eyes on ICE")
+deserves lead-source or citation-source status. The decisive evidence came from
+`usaspending`, and the tool performed extremely well on the core job. Three frictions, one
+of them a genuine near-miss.
+
+**Friction 1 — `--detail` silently requires the positional `query` it does not use.**
+**Command:** `$CS --wait usaspending --detail 352043007`
+**Expected:** detail on record 352043007. The record ID is globally unique and is printed
+by the tool's own search output as `https://www.usaspending.gov/award/352043007`; there is
+nothing a query would disambiguate.
+**Got:**
+```
+usage: cascade-search usaspending [-h] [--detail RECORD_ID] [--sum] ...
+cascade-search usaspending: error: the following arguments are required: query
+```
+**Friction:** I worked around it with
+`$CS --wait usaspending "<vendor-f> LLC" --detail 352043007` — and the output
+header then reads `query: 352043007`, i.e. **the positional query I was forced to supply was
+discarded and the record ID substituted**. So the argument is required by the parser and
+ignored by the logic. That's the tell that it's a parser artifact, not a real requirement.
+**Would have helped:** make `query` optional when `--detail` is present. Failing that, the
+error should say "`--detail` still requires a positional query (any string; it is ignored)"
+— because the current message sends you looking for the *right* query when no query is
+right. **Severity:** annoyed (10 seconds), but it's a two-line argparse fix and it fires on
+every `--detail` call, which is the command you reach for at exactly the moment you have a
+record ID and nothing else.
+
+**Friction 2 — `--keywords` reports a match count that hides which entity matched.** This
+is the near-miss and the most important item here.
+**Command:** `$CS --wait usaspending "W9124J24C0019" --keywords --count --all-types`
+**Got:** `1 federal awards matching 'W9124J24C0019' | contracts: 1`
+I was verifying a contract ID that a Substack article attributed to <vendor-f>
+LLC (a $1.3B Fort Bliss detention contract). **A count of 1 reads as confirmation.** It was
+not. Re-running as `--keywords --limit 5` returned:
+```
+TECHNOLOGY & BUSINESS MANAGEMENT INC. — W9124J24C0019
+$3,972,528 | Department of Defense | DEFINITIVE CONTRACT
+```
+Different company, wrong by ~330x. The article's claim was false, and `--count` alone would
+have let me record it as verified.
+**Friction:** for an *identifier* lookup, the count is nearly meaningless — an award ID
+either exists or doesn't, and the whole question is *whose it is*. The docs' guidance
+("know which sources can count", `--keywords` is fuzzy) is about **totals being fuzzy**; it
+doesn't warn about the distinct hazard that **a precise-looking count of 1 on an identifier
+still tells you nothing about attribution**.
+**Would have helped:** when `--count` matches a small number (≤3) of records, print the
+recipient names inline — `contracts: 1 (TECHNOLOGY & BUSINESS MANAGEMENT INC.)`. That one
+change turns a misleading confirmation into an instant refutation at zero extra API cost.
+Alternatively, detect that the query looks like an award/PIID identifier and route to the
+listing rather than the count. **Severity:** slowed for me (I caught it because I was
+already suspicious), but the failure mode is *confidently wrong*, which the FEEDBACK.md
+entry above about `extract --ids` flags as this tool's characteristic hazard. Same shape.
+
+**Friction 3 — `web` rate-limits two engines on essentially every call.** Every one of my
+five `web` calls, all with `--wait`, returned:
+`coverage: 79/82 responsive | RATE-LIMITED: searxng:brave, searxng:google cse | ERRORED: searxng:startpage`
+**Friction:** the same three engines, every time, from the first call of the session — so
+this isn't my pacing, and `--wait` doesn't touch it. It didn't hurt me (79/82 is plenty for
+discovery, and I wasn't claiming absence), but it means **`web` cannot currently produce a
+clean `VerifiedAbsence`** in this environment: the docs say a verified absence can't be
+constructed when any engine was rate-limited or errored, and three always are. That's worth
+knowing as a standing environmental fact rather than a per-run surprise.
+**Would have helped:** either drop the three consistently-failing engines from the default
+pool, or note in `limits` output that they are persistently unavailable so an agent doesn't
+read the warning as a transient condition worth retrying. **Severity:** annoyed / cosmetic
+for discovery work; **blocked** for any task whose deliverable is a `web`-based verified
+absence.
+
+**Worked well — and this one carried the whole task.**
+
+`usaspending --sum` is the reason this task reached a defensible conclusion instead of a
+hedge. The claim under test was a "$1.3 billion" single award. One command:
+```
+$CS --wait usaspending "<vendor-f> LLC" --sum
+→ $915,073,700.81 across 33 awards ... complete
+```
+A $1.3B award cannot exist inside a $915M lifetime total, and **the `complete` marker is
+what made that a finding rather than a suspicion** — without it I'd have had to treat $915M
+as a possible floor and the refutation would have collapsed. That "complete vs. floor"
+distinction is doing exactly the work it was designed to do. Please don't lose it.
+
+`--detail`'s PSC/NAICS output was the single best artifact of the pass. For the real award:
+```
+PSC R706: SUPPORT- MANAGEMENT: LOGISTICS SUPPORT | NAICS 541614: PROCESS, PHYSICAL
+DISTRIBUTION, AND LOGISTICS CONSULTING SERVICES
+```
+That is a 5,000-bed detention facility booked as logistics consulting, stated in the
+contracting officer's own coding. The skill docs promise exactly this ("the strongest
+evidence on this beat because they are the contracting officer's classification, not the
+vendor's marketing") and it delivered precisely as advertised — I ended up citing the PSC
+code as *stronger* evidence for the underlying thesis than the article that prompted the
+check. Worth noting because it's the case where the tool didn't just verify a claim, it
+produced a better version of it.
+
+`extract --text` reductions were consistently 96.9–98.4% on Substack pages (55K→1.7K,
+82K→1.3K, 49K→1.0K tokens) with nothing load-bearing lost. Substack is heavy chrome and
+this handled it cleanly. Two specific wins: it preserved the **inline citation links**
+inside the article body (New Jersey Monitor, Reuters), which is how I established the piece
+was a downstream rewrite rather than original reporting — a summarizer would have dropped
+those. And on the outlet's About page it faithfully preserved the literal string
+`[Image Placeholder: A compelling visual representing themes of justice...]`, i.e. unedited
+AI-template boilerplate left live in the published page. That verbatim artifact became a
+load-bearing fact in the characterization. **Deterministic extraction beat summarization
+precisely because it doesn't tidy.** Worth saying out loud, since "it preserves ugly
+things" is easy to mistake for a defect.
+
+The `*UNIQUE*` marker earned its keep: the single most important lead in the whole task —
+`cantstoppoppin.substack.com/p/victims-or-collaborators`, which carries the outlet's own
+"not verified facts or legal statements" disclaimer — surfaced as a `*UNIQUE*` result at
+position 4 on one engine. Consensus ranking would have buried it, and it's the piece of
+evidence that settled the question in the outlet's own words.
+
+**Missing-source note (per the docs' "missing sources are findings"):** this task needed to
+establish *publication chronology* — who published a claim first, the outlet or the wires.
+I assembled it by hand from `web` result snippets and article datelines, which is slow and
+error-prone. A date-filtered news/archive query (`--from` / `--to` on `news`, or anything
+touching a wire archive) would be a real addition for this beat, since "was this outlet
+early or downstream?" is the recurring question in every source-characterization pass, and
+it's the question I most had to answer by eyeball.
