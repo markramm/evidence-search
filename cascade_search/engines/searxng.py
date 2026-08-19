@@ -162,10 +162,29 @@ def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
     return rate_limited, errored, unknown
 
 
+def _exact_terms(query: str) -> list[str]:
+    """Quoted phrases in the query, which the caller meant literally."""
+    import re as _re
+    return [t for t in _re.findall(r'"([^"]{2,})"', query)]
+
+
 def search(query: str, categories: str = "general", pageno: int = 1,
            base: str | None = None, store: Store | None = None,
-           limiter: Limiter | None = None, use_cache: bool = True):
-    """Query a SearXNG instance and rebuild honest coverage from its metadata."""
+           limiter: Limiter | None = None, use_cache: bool = True,
+           exact: bool = False):
+    """Query a SearXNG instance and rebuild honest coverage from its metadata.
+
+    `exact=True` keeps only results whose title or snippet actually contains
+    every quoted phrase. The upstream engines largely IGNORE quotes -- verified
+    against a live instance, where `"<person-h>"` and `<person-h>` returned
+    26 and 28 results with the same near-miss profile matches on top. Two workers
+    hit this on person-name searches and had no way to say "this exact string or
+    nothing", which matters most for the case a name search is usually FOR:
+    establishing that someone is genuinely absent from an index.
+
+    We cannot make the engines honour quotes, so we filter locally and report
+    what was dropped rather than pretending the upstream did it.
+    """
     store = store or Store()
     limiter = limiter or Limiter(store)
     base = (base or DEFAULT_BASE).rstrip("/")
@@ -251,7 +270,23 @@ def search(query: str, categories: str = "general", pageno: int = 1,
         # degraded search as though every engine had answered.
         store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=3600)
 
+    dropped = 0
+    if exact:
+        terms = _exact_terms(query)
+        if terms:
+            kept = []
+            for r in out:
+                hay = f"{r.title} {r.snippet}".lower()
+                if all(t.lower() in hay for t in terms):
+                    kept.append(r)
+            dropped = len(out) - len(kept)
+            out = kept
+            cov.exact_filtered = dropped
+
     if not out:
-        return verified_absence(query, cov, f"searxng ({categories}) across "
-                                            f"{len(queried)} engines")
+        searched = f"searxng ({categories}) across {len(queried)} engines"
+        if exact and dropped:
+            searched += (f" [exact-phrase filter dropped all {dropped} near-miss "
+                         "results; the phrase itself appears in none of them]")
+        return verified_absence(query, cov, searched)
     return Hit(query=query, coverage=cov, results=out)

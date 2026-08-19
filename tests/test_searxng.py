@@ -195,3 +195,35 @@ def test_html_response_explains_the_json_format_switch(monkeypatch):
     out = searxng.search("q", base="http://x", store=s, limiter=L)
     assert isinstance(out, AccessBlocker)
     assert "formats" in out.detail and "json" in out.detail
+
+
+def test_exact_filter_drops_results_lacking_the_quoted_phrase(monkeypatch):
+    """Upstream engines largely ignore quotes -- verified against a live instance,
+    where `"<person-h>"` and `<person-h>` returned 26 and 28 results with the
+    same near-miss profile matches on top.
+
+    This matters most for what a name search is usually FOR: establishing that
+    someone is genuinely absent. Near-miss tokens make a real absence look like a
+    thin hit.
+    """
+    _reply(monkeypatch, {"results": [
+        {"url": "https://a/1", "title": "<person-h>, Border Patrol", "content": "",
+         "engines": ["bing"]},
+        {"url": "https://a/2", "title": "<person-h>", "content": "",
+         "engines": ["bing"]},
+    ], "unresponsive_engines": []})
+    s, L = _kit()
+    out = searxng.search('"<person-h>"', base="http://x", store=s, limiter=L, exact=True)
+    assert [r.title for r in out.results] == ["<person-h>, Border Patrol"]
+    assert out.coverage.exact_filtered == 1
+
+
+def test_exact_filter_reports_when_it_emptied_the_result_set(monkeypatch):
+    """A thin result set must be legible: say the filter did it, not the corpus."""
+    _reply(monkeypatch, {"results": [
+        {"url": "https://a/1", "title": "<person-h>", "content": "", "engines": ["bing"]},
+    ], "unresponsive_engines": []})
+    s, L = _kit()
+    out = searxng.search('"<person-h>"', base="http://x", store=s, limiter=L, exact=True)
+    assert isinstance(out, VerifiedAbsence)
+    assert "exact-phrase filter" in out.searched

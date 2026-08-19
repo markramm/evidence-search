@@ -32,7 +32,15 @@ def _emit(outcome, as_json: bool) -> int:
             for i, r in enumerate(outcome.results, 1):
                 mark = " *UNIQUE*" if r.unique_to_engine and len(r.engines) else ""
                 print(f"{i:3}. {r.title[:100]}{mark}")
-                print(f"     {r.url}")
+                # A 320-char opaque redirect is noise, not a citation. Show the
+                # publisher -- which IS in the feed -- and say plainly that the
+                # link will not serve as a source.
+                if r.meta.get("citable") is False:
+                    pub = r.meta.get("publisher") or "publisher"
+                    print(f"     [{pub}] -- redirect only, not citable; find it on "
+                          f"{pub}'s site or via `web`")
+                else:
+                    print(f"     {r.url}")
                 if r.snippet:
                     print(f"     {r.snippet[:140]}")
         elif isinstance(outcome, VerifiedAbsence):
@@ -93,6 +101,9 @@ def main(argv=None) -> int:
                    help="general, news, science, files, images…")
     w.add_argument("--page", type=int, default=1)
     w.add_argument("--base", help="instance URL (default $SEARXNG_URL or 127.0.0.1:8888)")
+    w.add_argument("--exact", action="store_true",
+                   help='keep only results actually containing the "quoted phrases" '
+                        "(upstream engines largely ignore quotes)")
 
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
@@ -163,7 +174,7 @@ def main(argv=None) -> int:
     if a.cmd == "web":
         from .engines.searxng import search as web_search
         return _emit(web_search(a.query, a.categories, a.page, a.base,
-                                store, limiter, use_cache), a.json)
+                                store, limiter, use_cache, exact=a.exact), a.json)
 
     if a.cmd == "docs":
         from .sources import docs as docs_src

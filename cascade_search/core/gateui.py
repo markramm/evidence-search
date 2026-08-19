@@ -14,7 +14,6 @@ work in five years with no npm install.
 """
 from __future__ import annotations
 
-import html
 import json
 import time
 import webbrowser

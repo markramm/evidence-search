@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import html
-import json
 
 CSS = """
 *,*::before,*::after{box-sizing:border-box}
@@ -149,7 +148,6 @@ document.querySelectorAll('.gate').forEach(wire);
 
 
 def render(gates: list[dict]) -> str:
-    e = html.escape
     if gates:
         n = len(gates)
         cards = "\n".join(_card(g) for g in gates)
