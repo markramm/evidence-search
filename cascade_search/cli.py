@@ -56,7 +56,10 @@ def _emit(outcome, as_json: bool) -> int:
                 print("ESCALATABLE: a real browser session could plausibly pass this gate.")
         elif isinstance(outcome, RateLimited):
             print(f"source:    {outcome.source}")
-            print(f"retry after: {outcome.retry_after_s}s")
+            # "retry after: Nones" when the source gave no interval -- say what
+            # is actually true instead of appending a unit to a null.
+            print(f"retry after: {outcome.retry_after_s}s" if outcome.retry_after_s
+                  else "retry after: unspecified by the source")
             print(f"detail:    {outcome.detail}")
             print("\nTOOLING-LIMITED NEGATIVE -- explicitly NOT content-exhausted. Retry.")
         elif isinstance(outcome, AwaitingHuman):
@@ -432,6 +435,9 @@ def main(argv=None) -> int:
             print(f"raw ~{stats['raw_tokens_est']:,} tok -> extracted ~{stats['extracted_tokens_est']:,} tok "
                   f"({_delta})\n")
             for m in payload.get("matches", []):
+                if m["pattern"] == "__truncated__":
+                    print(f"  !! {m['context']}")
+                    continue
                 print(f"  [{m['pattern']}] ...{m['context']}...")
             if payload.get("identifiers") and (_pdf_provenance or {}).get("ocr"):
                 # Identifiers are precisely what OCR corrupts -- 0/O, 1/l, 5/S,

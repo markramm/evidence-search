@@ -393,3 +393,35 @@ def test_global_flags_are_accepted_after_the_subcommand():
     from cascade_search.cli import main
     assert main(["extract", "/etc/hosts", "--text", "--json"]) == 0
     assert main(["--json", "extract", "/etc/hosts", "--text"]) == 0
+
+
+def test_grep_cap_is_per_pattern_and_never_skips_a_pattern():
+    """The cap used to be global with an early return.
+
+    A first pattern with 40 matches meant later patterns were NEVER SEARCHED,
+    and the result read as "zero matches, 100.0% reduction, exit 0" -- a false
+    absence produced by the search path itself. Found by a worker whose terms
+    were provably present in the document.
+    """
+    from cascade_search.core.extract import grep
+    text = ("COMMON " * 200) + " RARETERM " + ("filler " * 50)
+    hits = grep(text, ["COMMON", "RARETERM"], is_html=False)
+    pats = {h["pattern"] for h in hits}
+    assert "RARETERM" in pats, "a later pattern must still be searched"
+    assert "COMMON" in pats
+
+
+def test_grep_reports_its_true_match_count_when_capped():
+    """A capped result must not read as a complete one."""
+    from cascade_search.core.extract import grep
+    hits = grep("HIT " * 500, ["HIT"], is_html=False, max_hits=10)
+    real = [h for h in hits if h["pattern"] == "HIT"]
+    note = [h for h in hits if h["pattern"] == "__truncated__"]
+    assert len(real) == 10
+    assert note and "500 times" in note[0]["context"]
+
+
+def test_grep_does_not_flag_truncation_when_under_the_cap():
+    from cascade_search.core.extract import grep
+    hits = grep("one HIT here", ["HIT"], is_html=False)
+    assert not any(h["pattern"] == "__truncated__" for h in hits)

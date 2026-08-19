@@ -47,6 +47,11 @@ def page_text(html: str, max_chars: int = 0) -> str:
 
 def grep(html_or_text: str, patterns: list[str], context_chars: int = 160,
          is_html: bool = True, max_hits: int = 40) -> list[dict]:
+    """Return matching passages. `max_hits` is PER PATTERN, not global.
+
+    Every pattern is always searched to completion, and a pattern that exceeds
+    the cap reports its true total rather than silently showing a prefix.
+    """
     """Return only the passages matching the caller's patterns.
 
     This is the highest-leverage primitive here: a worker asking 'does this page
@@ -55,18 +60,35 @@ def grep(html_or_text: str, patterns: list[str], context_chars: int = 160,
     """
     text = page_text(html_or_text) if is_html else html_or_text
     out: list[dict] = []
+    # Per-pattern accounting. The cap used to be global with an early `return`,
+    # so a first pattern with 40 matches meant later patterns were NEVER
+    # SEARCHED -- reported as zero matches at "100.0% reduction", exit 0. A
+    # false absence produced by the search path itself, which is the failure
+    # this package exists to prevent. Found by a worker whose terms were
+    # provably present in the document.
+    truncated: dict[str, int] = {}
     for pat in patterns:
         try:
             rx = re.compile(pat, re.I)
         except re.error:
             rx = re.compile(re.escape(pat), re.I)
+        n = 0
         for m in rx.finditer(text):
+            n += 1
+            if n > max_hits:
+                continue          # keep counting; stop collecting
             a = max(0, m.start() - context_chars)
             b = min(len(text), m.end() + context_chars)
             out.append({"pattern": pat, "match": m.group(0),
                         "context": re.sub(r"\s+", " ", text[a:b]).strip()})
-            if len(out) >= max_hits:
-                return out
+        if n > max_hits:
+            truncated[pat] = n
+    if truncated:
+        # Say so rather than letting a capped result read as a complete one.
+        out.append({"pattern": "__truncated__", "match": "",
+                    "context": "; ".join(
+                        f"{p!r} matched {c} times, showing first {max_hits}"
+                        for p, c in truncated.items())})
     return out
 
 
