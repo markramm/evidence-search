@@ -1207,3 +1207,53 @@ and 5 are all small and each carries a *correctness* hazard rather than merely a
 they are cheap fixes with disproportionate payoff. Friction 4 is the interesting one: a genuine
 missing capability on a question shape (who owns the press, and does it show in coverage) that
 this beat will keep asking.
+
+## 2026-08-19 · trace-non-federal-money-into-<vendor-a>-hidta (task) · claude-sonnet-5-parallel-tick7-b
+
+**Context:** needed to (a) confirm the $3.3M <vendor-a> federal-contract floor was complete,
+(b) enumerate a public vendor site's sequentially-numbered course-calendar pages
+(`desertsnow.com/conference/<id>/`, ids roughly 300-680) to find HIDTA/state-agency hosts and
+per-student pricing, and (c) confirm HIDTA has no USAspending recipient footprint (the
+structural-invisibility claim central to the task).
+
+**Command 1:** `$CS --wait usaspending "<vendor-a>" --sum`
+**Got:** exactly what I needed — `$3,298,091.75 across 52 awards *UNIQUE* ... complete`. One
+call, matched a figure two prior workers had independently verified by hand-summing the award
+list. This is the tool doing its job precisely as advertised. **Worked well.**
+
+**Command 2 (the friction):** enumerating ~60 individual conference pages via
+`$CS --wait extract "https://www.desertsnow.com/conference/$id/" --grep "Hosted by" --grep
+"Host:" --grep "Cost:" --grep "Class Host"`. Worked cleanly on every live page (83-88% token
+reduction each), but roughly 1 in 6-8 ids in the range 300-680 returned:
+```
+== AccessBlocker ==
+coverage: 0/0 responsive
+mechanism: http-404
+detail:    HTTP 404
+NOT a negative finding. Access was blocked.
+```
+**Had to figure out:** whether "AccessBlocker" for a plain 404 on a sequential-id enumeration
+sweep should be read the same way as a Cloudflare/Turnstile block. It shouldn't, functionally —
+a 404 on an incrementing ID just means that ID was never issued or was later pruned, which is
+useful signal (I used the 404 pattern itself to infer the site prunes old listings), not a wall
+to route around. The message "NOT a negative finding. Access was blocked." is accurate for a
+paywall/CAPTCHA scenario but reads as slightly alarming/misleading for a bare 404 on an
+enumerable range — I want to flag this as a possible false-alarm register mismatch, not a bug:
+an agent doing ID-sweep enumeration (a legitimate, useful pattern this tool otherwise supports
+well via `extract`) will see "AccessBlocker" dozens of times in normal, expected operation.
+**Would have helped:** distinguishing `http-404` from real access walls (Cloudflare/Turnstile/
+403) more sharply in the outcome name or a one-line note like "404 on an enumerated URL is
+usually just an unissued/removed ID, not a block" — so an agent doesn't second-guess a healthy
+sweep pattern. Low severity; I did not misinterpret it, but I paused to check twice.
+
+**Command 3:** `$CS --wait usaspending "High Intensity Drug Trafficking" --count`
+**Expected:** either a real award count or a clear absence.
+**Got:** a clean typed `VerifiedAbsence` (1/1 responsive) — exactly the bounded-negative
+guarantee the skill doc promises, and exactly what let me write "HIDTA has no USAspending
+recipient footprint" as a sourced claim instead of an inference. **Worked well** — this is the
+single most load-bearing call in the whole task, and it did precisely what was needed in one
+shot with no ambiguity.
+
+**Severity:** annoyed (the AccessBlocker-on-404 register issue), otherwise clean — no blockers,
+no rate-limit surprises beyond the normal shared-ledger `web` RateLimited-then-retry cycle
+documented elsewhere in this log, which behaved exactly as described.
