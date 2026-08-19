@@ -75,6 +75,7 @@ fi
 | `propublica_disclosures` | none | 15/min | SvelteKit `__data.json`; param is **`q=`** not `search=`. |
 | `docs` | none | 25/min | Documentation `llms.txt` indexes. Sites: `claude-code`, `claude-api`. |
 | `searxng` | none | 30/min | General web via a LOCAL container. 251 engines; coverage rebuilt from its metadata. |
+| `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — the countable primitive. |
 | `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
 
@@ -248,6 +249,23 @@ Scoring stays ours. SearXNG ranks by consensus (`weight * len(positions)`), so
 a result four engines agree on scores 4×. On this beat that buries the obscure
 trade-press hit or agency subpage only one index carries, so we keep its
 per-result `engines` set and let `unique_to_engine` mark those instead.
+
+**`usaspending` is the counting source.** Where `web` cannot count and
+`courtlistener` counts filings, this counts federal money:
+
+```bash
+cascade-search usaspending "Relentless LLC" --count     # 52 awards, by type
+cascade-search usaspending "Relentless LLC" --limit 10  # the awards themselves
+cascade-search usaspending "detention" --keywords --count
+```
+
+Two search modes, and the difference decides whether the number means anything.
+`--recipient` (default) matches the recipient NAME — precise, and the right mode
+for a vendor total. `--keywords` is full-text across award descriptions and is
+FUZZY: searching "Force Science" returns NURAD Technologies, because the words
+appear somewhere in the record. Keyword counts therefore carry an explicit
+caveat, because a count of records *containing* words is not a count of awards
+*to* anyone.
 
 **`web` is discovery, not census.** Its engines largely ignore quoted phrases,
 and SearXNG's engine model declares `paging`, `time_range_support`, `safesearch`

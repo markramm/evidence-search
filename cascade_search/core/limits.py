@@ -46,7 +46,9 @@ POLICIES: dict[str, Policy] = {
     ),
     "usaspending": Policy(
         windows=[(60, 30)], min_interval_s=0.5,
-        note="No documented limit found; pacing conservatively.",
+        note="No key, no advertised limit (checked 2026-08-19: no rate headers). "
+             "Paced conservatively anyway -- an unmetered public API is a courtesy, "
+             "not a license. spending_by_award_count returns a REAL total.",
     ),
     "propublica_disclosures": Policy(
         windows=[(60, 15)], min_interval_s=1.0,

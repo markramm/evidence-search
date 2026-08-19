@@ -102,6 +102,19 @@ def main(argv=None) -> int:
     w.add_argument("--page", type=int, default=1)
     w.add_argument("--base", help="instance URL (default $SEARXNG_URL or 127.0.0.1:8888)")
 
+    us = sub.add_parser("usaspending", help="federal awards (no key; real counts)")
+    us.add_argument("query")
+    us.add_argument("--count", action="store_true",
+                    help="return the REAL total by award type instead of a page of awards")
+    us.add_argument("--keywords", action="store_true",
+                    help="full-text keyword search (FUZZY) instead of recipient-name match")
+    us.add_argument("--all-types", action="store_true",
+                    help="grants/loans/direct payments too, not just contracts")
+    us.add_argument("--from", dest="date_from", help="award start on/after YYYY-MM-DD")
+    us.add_argument("--to", dest="date_to", help="award start on/before YYYY-MM-DD")
+    us.add_argument("--page", type=int, default=1)
+    us.add_argument("--limit", type=int, default=25)
+
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
     dc.add_argument("--site", default="claude-code")
@@ -172,6 +185,18 @@ def main(argv=None) -> int:
         from .engines.searxng import search as web_search
         return _emit(web_search(a.query, a.categories, a.page, a.base,
                                 store, limiter, use_cache), a.json)
+
+    if a.cmd == "usaspending":
+        from .sources import usaspending as usa
+        types = usa.ALL_AWARD_TYPES if a.all_types else usa.CONTRACT_TYPES
+        if a.count:
+            return _emit(usa.counts(a.query, by_recipient=not a.keywords,
+                                    award_types=types, date_from=a.date_from,
+                                    date_to=a.date_to, store=store, limiter=limiter), a.json)
+        return _emit(usa.search(a.query, by_recipient=not a.keywords, award_types=types,
+                                date_from=a.date_from, date_to=a.date_to,
+                                limit=a.limit, page=a.page, store=store,
+                                limiter=limiter, use_cache=use_cache), a.json)
 
     if a.cmd == "docs":
         from .sources import docs as docs_src
