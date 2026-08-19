@@ -58,3 +58,42 @@ def test_no_ocr_reports_the_document_as_unread(monkeypatch, tmp_path):
     txt, prov = pdf.read(tmp_path / "f.pdf", allow_ocr=False)
     assert prov["source"] == "none"
     assert prov["ocr"] is False
+
+
+def test_remote_pdfs_are_decoded_not_grepped_as_binary(monkeypatch, tmp_path, capsys):
+    """The PDF guard lived only on the LOCAL branch.
+
+    `extract <pdf-url>` therefore grepped raw binary, matched nothing, and
+    reported "100.0% reduction" -- a FALSE ABSENCE in the tool built to prevent
+    them. The same file by local path found the passage. Worker-reported on a
+    live Kane County records task.
+    """
+    import cascade_search.cli as cli
+    from cascade_search.core import pdf as pdfmod
+
+    pdf_bytes = b"%PDF-1.7\n" + b"binary" * 200
+
+    def fake_fetch(url, **kw):
+        return (pdf_bytes if kw.get("binary") else "%PDF-1.7\nmangled"), None
+
+    monkeypatch.setattr(cli, "_fetch", fake_fetch, raising=False)
+    import cascade_search.core.http as http
+    monkeypatch.setattr(http, "fetch", fake_fetch)
+    monkeypatch.setattr(pdfmod, "text_layer",
+                        lambda p, timeout=120: "SEC. 11101. AUTHORIZATION " * 40)
+
+    code = cli.main(["extract", "https://example.gov/x.pdf", "--grep", "11101"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "PDF text layer" in out, "remote PDF must report its decode source"
+    assert "11101" in out, "must find the passage, not grep binary"
+
+
+def test_remote_pdf_is_refetched_as_bytes(monkeypatch):
+    """Re-encoding the decoded text corrupts the PDF -- enough that a file with
+    a perfect text layer fell back to OCR. The bytes must come off the wire
+    undecoded."""
+    import inspect
+    import cascade_search.cli as cli
+    src = inspect.getsource(cli.main)
+    assert "binary=True" in src, "remote PDF path must re-fetch as bytes"

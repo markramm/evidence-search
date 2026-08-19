@@ -184,7 +184,15 @@ def main(argv=None) -> int:
 
     sub.add_parser("limits", help="show per-source rate policy and current usage")
 
-    a = p.parse_args(argv)
+    # Global flags must PRECEDE the subcommand, and argparse's bare
+    # "unrecognized arguments: --json" gives no hint which way to move it.
+    # Accept the other order rather than making the caller find out.
+    _argv = list(sys.argv[1:] if argv is None else argv)
+    for _g in ("--json", "--no-cache", "--wait"):
+        if _g in _argv and _argv.index(_g) > 0:
+            _argv.remove(_g)
+            _argv.insert(0, _g)
+    a = p.parse_args(_argv)
     store = Store(); limiter = Limiter(store); use_cache = not a.no_cache
     if getattr(a, "wait", False):
         limiter.wait_for_spacing = True
@@ -307,6 +315,35 @@ def main(argv=None) -> int:
                 raw, out = _fetch(a.target, source="docs", query=a.target)
             if out:
                 return _emit(out, a.json)
+
+            # A REMOTE pdf was never decoded: the guard lived only on the local
+            # branch, so `extract <pdf-url>` grepped raw binary, matched nothing,
+            # and reported "100.0% reduction" -- a FALSE ABSENCE in the tool
+            # built to prevent them. Same file by local path found the passage.
+            if raw and raw.lstrip()[:5].startswith("%PDF"):
+                import tempfile as _tf
+                from .core import pdf as _pdf
+                # Re-fetch as BYTES. `fetch` decoded the response as text, and
+                # re-encoding that string corrupts the PDF -- enough that a file
+                # with a perfect text layer fell back to OCR. The bytes have to
+                # come off the wire undecoded.
+                _bin, _berr = _fetch(a.target, source="docs", query=a.target, binary=True)
+                if _berr:
+                    return _emit(_berr, a.json)
+                with _tf.NamedTemporaryFile(suffix=".pdf", delete=False) as _tmp:
+                    _tmp.write(_bin)
+                    _tmp_path = _P(_tmp.name)
+                try:
+                    raw, _prov = _pdf.read(_tmp_path, allow_ocr=not a.no_ocr,
+                                           max_pages=a.ocr_pages)
+                    if _prov["source"] == "ocr":
+                        print(f"cascade-search: remote PDF had NO TEXT LAYER "
+                              f"({_prov['text_layer_chars']} chars) -- fell back to OCR, "
+                              f"{_prov['pages_ocred']} page(s). NOT verbatim, NOT "
+                              "human-verified.", file=sys.stderr)
+                    _pdf_provenance = _prov
+                finally:
+                    _tmp_path.unlink(missing_ok=True)
         else:
             _path = _P(a.target).expanduser()
             _head = b""

@@ -494,3 +494,46 @@ but which cost the most time.
 **Corroborating tick2-d's finding from earlier today:** `extract` on `usaspending.gov/award/{id}` (the React SPA page, not the API) also returned near-zero useful content for me (`raw ~729 tok -> extracted ~4 tok`), same as their report. Direct `curl` to `api.usaspending.gov/api/v2/awards/{id}/` was the right workaround both times — worth promoting to a documented pattern (or building into the `usaspending`/`record` client directly) since two independent workers hit the identical wall and found the identical fix within the same day.
 
 **Severity:** slowed overall (no wrong output shipped — every figure in the final KB write-up was individually verified against a working access path — but three separate detours: all-types HTTP 422, a false-positive that took real cross-checking to defuse, and a silent truncation bug that could have corrupted every one of the 8 flagged-award records if I hadn't tried to parse them as JSON).
+
+## 2026-08-19 · <county-a> ESAC vendor-attribution FOIA (synthesis-heavy task) · agent:claude-opus-4-8-parallel-tick2-e
+**Task:** determine who <county-a> actually paid with federal equitable-sharing "Training and Education" money — a question the ESAC/ISP forms structurally cannot answer, so the job was finding *which corpus could*, not running a lookup. I was asked specifically to report on whether the tool supports **synthesis** rather than just lookup.
+
+**On synthesis specifically — the honest answer is that it supported the two ends and not the middle, and the middle is where the finding came from.** The tool was excellent at *bounding* (proving the federal corpus can't answer this) and at *verifying* (checking my claims against FAR and ILCS text). But the actual discovery — that <county-a> publishes a payee-level Claims Paid Report nobody in three prior passes had found — came from a `web` search whose top-10 I read for *structure* rather than for an answer: result #2 was a PDF agenda packet whose snippet mentioned "3,118 payments." Nothing in the tool surfaced that as significant; it ranked 2nd because of keyword overlap, not because it was the corpus-shaped answer. That's fine — but it means the synthesis step was entirely mine, and the tool's contribution was not burying the lead. Worth knowing that's the current ceiling.
+
+**Worked well — `usaspending --count` + `--limit` turned "we couldn't find it" into a structural argument.** 52 awards / $3,298,091.75, zero mentioning Illinois or any county. The value wasn't the absence; it was that a *countable* corpus let me say **why** the absence is meaningless — a county spending federal equitable-sharing money isn't a federal contracting party, so USAspending couldn't show this payment even if it happened. A fuzzy source could not have supported that sentence. This is the single best thing the tool did for me.
+
+**Worked well — `extract --grep` against FAR Part 5 and 5 ILCS 140 as a fact-checker.** 140,170 → 3,272 tok and 166,469 → 1,423 tok, and in one case it **corrected me**: I had started to write that the ~$24,500 award clustering sat under the simplified acquisition threshold. It doesn't — the SAT was $150,000 in 2010-11; $25,000 is the FAR 5.101(a)(1) *public-synopsis* threshold. Pulling the regulation text cheaply enough that verifying was reflexive rather than a chore is what caught it. Same for 5 ILCS 140 (5 business days / 50 free pages / $0.15 cap) — all three went into a FOIA draft as verified rather than remembered.
+
+**Friction 1 — `extract` on a large REMOTE PDF silently returns nothing while reporting "100.0% reduction". Severity: slowed; would have been *blocked* if I'd trusted it. This is the one I'd fix.**
+Same file, same pattern, two paths:
+```
+$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf" --grep "VENDOR"
+== Extract == https://www.kanecountyil.gov/...
+raw ~3,630,887 tok -> extracted ~3 tok (100.0% reduction)
+EXIT=0
+```
+```
+$ curl -sL -o kane2019.pdf "https://www.kanecountyil.gov/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf"
+$ cascade-search extract kane2019.pdf --grep "VENDOR"
+== Extract == kane2019.pdf
+source:   PDF text layer (1,046,318 chars, exact)
+raw ~261,579 tok -> extracted ~527 tok (99.8% reduction)
+[6 matching passages]
+EXIT=0
+```
+**Observation, not conclusion:** the local path prints a `source:` line and reads a 1,046,318-char text layer; the remote path prints no `source:` line and reports raw token count ~14x higher (3,630,887 vs 261,579), suggesting it's measuring raw PDF bytes rather than a decoded text layer — i.e. the text-layer decode isn't happening on the fetched-bytes path. (First observed on a different, larger packet: `AG PKT 26-01 Finance.pdf`, 59MB, `raw ~14,030,552 tok -> extracted ~3 tok` on three different greps.)
+**Why it's the dangerous kind:** "100.0% reduction" and exit 0 are exactly what a *successful* extract looks like. I only caught it because zero hits for "VENDOR" in a 59MB county claims register was implausible enough to check by hand. A worker with a more plausible query would have written a verified-absence off a file the tool never read. The OCR path already shouts when its output is untrustworthy — this path should too.
+**Would have helped:** emit the `source:` line on every path and fail loudly (or warn) when a PDF yields no decodable text layer, instead of reporting a near-100% reduction on an empty result. Corroborates the pattern in the tick2-a entry above (silent truncation) — same failure *class*: near-empty output dressed as a good reduction ratio.
+
+**Friction 2 — `--json` placement is documented ambiguously and the error doesn't help. Severity: annoyed.**
+```
+$ cascade-search --wait usaspending "<vendor-a>" --limit 52 --json
+cascade-search: error: unrecognized arguments: --json
+```
+It's a global pre-subcommand flag (`cascade-search --json --wait usaspending ...`). SKILL.md shows it once, as `$CS --json web "query" | jq ...`, in a list where every *other* line puts flags after the subcommand — so the one correct example reads like the odd one out rather than the rule. **Would have helped:** one line in the commands block — "`--json` and `--wait` are global; they go before the subcommand." Cheap fix, and I lost a call to it.
+
+**Friction 3 — no `--json` on `extract`, so structured docs have to be re-parsed by hand. Severity: annoyed, worked around.** These claims reports are genuine tables (VENDOR | NATURE OF CLAIM | DEPT | FUND | AMOUNT | DATE). `--tables` exists and is the obvious fit, but on a 400-page packet where table rows are interleaved with narrative I couldn't get it to give me rows I could trust, so I fell back to `pdftotext -layout` + my own parser. **Would have helped:** `extract --tables --json` emitting row arrays, even best-effort with a confidence flag. Not a blocker — but "the corpus is tabular and the tool reads it as prose" is the recurring shape of this beat's documents (ESAC extracts, ISP XLSX, county claims registers).
+
+**A note on `web` that is a compliment and a caveat.** `web "<county-a> Illinois vendor payments checkbook transparency accounts payable disbursements"` is what cracked this task — the county's own agenda-packet PDFs surfaced at #2 and #4, and the `*UNIQUE*` markers were right that these were single-engine finds. But the top hit for both of my Kane-County-payment queries was the *Illinois State Comptroller*, which is the wrong corpus by construction (it holds State of Illinois payments; <county-a> is a unit of local government and its disbursements never pass through it). Ranking put the authoritative-looking-but-structurally-irrelevant source first and the actual answer fourth-ish. No fix implied — just: on government-finance questions the top hit is often the biggest agency rather than the right jurisdiction, and reading down mattered here.
+
+**Severity:** slowed overall. Nothing wrong shipped, and one wrong thing (the SAT/synopsis-threshold mixup) was caught *by* the tool. But Friction 1 is a live correctness hazard for exactly the "defensible negative" use case the tool exists for — a silent empty read on a large remote PDF is indistinguishable from a clean extraction.

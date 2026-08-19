@@ -385,3 +385,11 @@ def test_extract_announces_display_truncation(tmp_path, capsys):
     assert "TRUNCATED for display" in out
     assert "9,000 chars total" in out
     assert "--json" in out, "must name the way to get the full text"
+
+
+def test_global_flags_are_accepted_after_the_subcommand():
+    """argparse's bare 'unrecognized arguments: --json' gave no hint which way
+    to move the flag. A worker lost time to it; accept either order."""
+    from cascade_search.cli import main
+    assert main(["extract", "/etc/hosts", "--text", "--json"]) == 0
+    assert main(["--json", "extract", "/etc/hosts", "--text"]) == 0
