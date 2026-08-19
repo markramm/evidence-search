@@ -425,3 +425,18 @@ def test_grep_does_not_flag_truncation_when_under_the_cap():
     from cascade_search.core.extract import grep
     hits = grep("one HIT here", ["HIT"], is_html=False)
     assert not any(h["pattern"] == "__truncated__" for h in hits)
+
+
+def test_a_blocked_host_with_a_known_json_route_says_so():
+    """A worker found loc.gov's ?fo=json endpoint by hand after the HTML 403'd.
+
+    Good instinct, wasted pass. The blocker now names the route -- but only for
+    hosts where it was VERIFIED, and only as a hint, because it does not
+    generalise: loc.gov /item/ JSON works while /collections/ JSON is blocked
+    too. An automatic rewrite would have been wrong.
+    """
+    import cascade_search.core.http as http
+    assert "www.loc.gov" in http._JSON_ESCAPE_HATCH
+    hint = http._JSON_ESCAPE_HATCH["www.loc.gov"]
+    assert "fo=json" in hint
+    assert "collections" in hint, "must state the limit of the workaround"

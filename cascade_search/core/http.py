@@ -60,6 +60,22 @@ def detect_blocker(status: int, body: str) -> Blocker | None:
     return None
 
 
+#: Hosts whose HTML is Cloudflare-walled but which expose an unblocked machine
+#: endpoint. Verified 2026-08-19; both halves matter, so neither is guessed.
+#:
+#: loc.gov: `/item/<id>/` HTML returns 403 while `/item/<id>/?fo=json` returns
+#: 200 with the full catalog record. It is NOT a general bypass -- 
+#: `/collections/...?fo=json` is blocked too -- so this is offered as a hint on
+#: the blocked path, never as an automatic rewrite.
+_JSON_ESCAPE_HATCH = {
+    "www.loc.gov": ("loc.gov item pages are Cloudflare-walled, but the catalog "
+                    "record is served unblocked at the same URL with `?fo=json` "
+                    "(verified on /item/ paths; /collections/ is blocked either way)"),
+    "loc.gov": ("loc.gov item pages are Cloudflare-walled, but the catalog record "
+                "is served unblocked at the same URL with `?fo=json`"),
+}
+
+
 def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
           headers: dict | None = None, binary: bool = False):
     """Return (payload, outcome_or_None).
@@ -87,6 +103,14 @@ def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
     text = "" if binary else r.text
     mech = detect_blocker(r.status_code, text if not binary else "")
     if mech:
+        # Name a known machine-readable route rather than letting a worker
+        # rediscover it. One found the loc.gov JSON endpoint by hand after the
+        # HTML 403'd, which is a good instinct and a wasted pass.
+        from urllib.parse import urlsplit as _us
+        hint = _JSON_ESCAPE_HATCH.get((_us(url).hostname or "").lower(), "")
+        detail = f"HTTP {r.status_code}"
+        if hint and "fo=json" not in url:
+            detail += f". TRY: {hint}"
         return None, AccessBlocker(query=query, mechanism=mech, url=url,
-                                   detail=f"HTTP {r.status_code}")
+                                   detail=detail)
     return (r.content if binary else r.text), None
