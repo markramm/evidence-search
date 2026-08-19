@@ -57,6 +57,14 @@ POLICIES: dict[str, Policy] = {
         windows=[(60, 25)], min_interval_s=0.3,
         note="Documentation llms.txt/sitemap indexes. No key, no search engine.",
     ),
+    # A local instance we operate: the constraint is the UPSTREAM engines it
+    # proxies, not the container. Paced so a fan-out of workers cannot make
+    # SearXNG hammer Google on our behalf and get the whole instance banned.
+    "searxng": Policy(
+        windows=[(60, 30)], min_interval_s=0.4, index_origin="mixed",
+        note="Local container (SEARXNG_URL, default 127.0.0.1:8888). Limits protect "
+             "the UPSTREAM engines it proxies. Needs `formats: [json]` in settings.yml.",
+    ),
     "news_rss": Policy(windows=[(60, 20)], min_interval_s=0.5, index_origin="google"),
     "wayback": Policy(windows=[(60, 15)], min_interval_s=1.0, index_origin="own-crawl"),
     # Terms: standard plans do NOT grant storage rights (brave.com/search/api).

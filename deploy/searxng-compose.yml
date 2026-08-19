@@ -1,0 +1,39 @@
+# A SearXNG instance for cascade-search — LOCAL, not a public service.
+#
+# Bound to 127.0.0.1 deliberately. An open SearXNG instance gets scraped by
+# others, and a shared instance means shared rate limits across users, which is
+# the 200-call problem one layer up: the atomic ledger in limits.py governs the
+# workers on THIS machine and cannot govern someone else's.
+#
+# Datacenter IPs also fare worse here, not better — Google and Bing throttle
+# cloud ranges aggressively, so a hosted instance degrades exactly the engines
+# it exists to reach.
+#
+# Compose is here for hosts that already run docker/podman-compose. On macOS
+# prefer `deploy/searxng.sh up`, which picks the LIGHTEST runtime present --
+# Docker Desktop runs a Linux VM plus an Electron UI, which is a lot of machine
+# to proxy search queries.
+#
+#   deploy/searxng.sh up                                   # preferred on macOS
+#   docker compose -f deploy/searxng-compose.yml up -d     # if you use compose
+#   cascade-search web "query"
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: cascade-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"      # localhost only. Do not publish.
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/
+      # No limiter: the only client is our own ledger, and bot-detection
+      # against ourselves just produces false RateLimited outcomes.
+      - SEARXNG_LIMITER=false
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    logging:
+      driver: json-file
+      options: { max-size: "1m", max-file: "1" }

@@ -1,0 +1,30 @@
+# cascade-search instance settings.
+#
+# The one line that matters: `formats` must include `json`. SearXNG ships with
+# the JSON API DISABLED, and without it every request returns HTML and the
+# adapter reports a non-json AccessBlocker.
+use_default_settings: true
+
+server:
+  # Replace with `openssl rand -hex 32`. Only reachable on localhost, but a
+  # default secret is still a default secret.
+  secret_key: "CHANGE-ME-openssl-rand-hex-32"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json          # <- required by cascade-search
+  safe_search: 0
+  autocomplete: ""
+  # Fail fast: a slow engine should surface as unresponsive (which we translate
+  # into dirty coverage) rather than stall a worker's dispatch cycle.
+  max_ban_time_on_fail: 120
+  ban_time_on_fail: 5
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 100
+  pool_maxsize: 20

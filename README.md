@@ -74,6 +74,7 @@ fi
 | `courtlistener` | optional token | **5/min · 50/hr · 125/day, concurrent** | `storage.courtlistener.com` serves PDFs where `/recap` 403s. |
 | `propublica_disclosures` | none | 15/min | SvelteKit `__data.json`; param is **`q=`** not `search=`. |
 | `docs` | none | 25/min | Documentation `llms.txt` indexes. Sites: `claude-code`, `claude-api`. |
+| `searxng` | none | 30/min | General web via a LOCAL container. 251 engines; coverage rebuilt from its metadata. |
 | `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
 
@@ -177,11 +178,54 @@ the *worker's*. Both are needed.
 
 ## What this does NOT do
 
-**It is not a general web search replacement.** It covers the sources this beat
-uses — courts, contracts, disclosures, news, docs. Asked an open-ended question,
-it will politely return the wrong thing: dogfooding it on a vendor-pricing
-question returned product announcements, because news RSS indexes news. That is
-why `docs` exists, and why Phase 3 (federated general engines) is still needed.
+**It is not a general web search replacement** — though `searxng` now closes
+most of that gap. It covers the sources this beat uses: courts, contracts,
+disclosures, news, docs, and (via a local SearXNG container) the general web.
+
+## General web, on our terms
+
+```bash
+deploy/searxng.sh up          # start a local instance
+cascade-search web "query"
+```
+
+SearXNG is 251 maintained engine scrapers behind one JSON API. That catalogue
+is the asset. Its *failure semantics* are not, and this client does not adopt
+them — two things in its source are disqualifying for a defensible negative:
+
+* `json_engine.py` returns an **empty list** when an engine hits a blocked HTTP
+  status, so a wall and an empty shelf are indistinguishable in `results`.
+* failures live in a parallel `unresponsive_engines` channel that an operator
+  can switch **off** per engine via `display_error_messages`.
+
+So the adapter treats the results array as untrusted on its own and rebuilds
+coverage from what the API does report honestly:
+
+```
+queried    = engines enabled on the instance   (/config, cached)
+failed     = unresponsive_engines              (per search)
+responsive = queried - failed
+```
+
+A search where 3 of 8 engines were throttled **cannot** certify that a thing
+does not exist — it downgrades to `RateLimited`, exactly as a single blocked
+source does. A partial sweep is also never cached, since replaying it would
+present a degraded search as though every engine had answered.
+
+Scoring stays ours. SearXNG ranks by consensus (`weight * len(positions)`), so
+a result four engines agree on scores 4×. On this beat that buries the obscure
+trade-press hit or agency subpage only one index carries, so we keep its
+per-result `engines` set and let `unique_to_engine` mark those instead.
+
+**Run it locally, not as a service.** The instance binds to 127.0.0.1 by
+design. A shared instance means shared rate limits across users — the 200-call
+problem one layer up, which the atomic ledger cannot govern across machines.
+Datacenter IPs also fare *worse* here: Google and Bing throttle cloud ranges
+hardest, so hosting degrades the very engines it exists to reach.
+
+`deploy/searxng.sh` picks the lightest runtime present — Apple's native
+`container` (macOS 26+), else podman or colima, with Docker Desktop last
+because it runs a Linux VM plus an Electron app to proxy search queries.
 
 ## Design notes
 
@@ -223,11 +267,11 @@ do not grant storage rights; that is a policy field, not a footnote.
 
 ## Status
 
-Phase 1. **43 tests passing.** Browser escalation, the humanomation gate
+Phase 1. **54 tests passing.** Browser escalation, the humanomation gate
 (open/list/resume), and local extraction are built and working.
 
-Not yet built: async job-queue consumption, federated multi-engine merge
-(Phase 3 -- the general-web gap under "What this does NOT do"), local semantic
-layer.
+Not yet built: async job-queue consumption, cross-source federated merge
+(Phase 3b — ranking one result set across `web`/`news`/`courtlistener`
+together), local semantic layer, MCP shim (Phase 2).
 
 Spec: `cascade-research/notes/spec-cascade-search-federated-research-tool.md`

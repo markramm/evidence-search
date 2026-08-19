@@ -86,6 +86,13 @@ def main(argv=None) -> int:
     pp = sub.add_parser("propublica", help="ProPublica Trump-team financial disclosures")
     pp.add_argument("query")
 
+    w = sub.add_parser("web", help="general web via a local SearXNG container")
+    w.add_argument("query")
+    w.add_argument("--categories", default="general",
+                   help="general, news, science, files, images…")
+    w.add_argument("--page", type=int, default=1)
+    w.add_argument("--base", help="instance URL (default $SEARXNG_URL or 127.0.0.1:8888)")
+
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
     dc.add_argument("--site", default="claude-code")
@@ -139,6 +146,11 @@ def main(argv=None) -> int:
     if a.cmd == "propublica":
         from .sources import propublica_disclosures
         return _emit(propublica_disclosures.search(a.query, store, limiter, use_cache), a.json)
+
+    if a.cmd == "web":
+        from .engines.searxng import search as web_search
+        return _emit(web_search(a.query, a.categories, a.page, a.base,
+                                store, limiter, use_cache), a.json)
 
     if a.cmd == "docs":
         from .sources import docs as docs_src
