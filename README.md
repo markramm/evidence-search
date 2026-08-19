@@ -249,6 +249,19 @@ a result four engines agree on scores 4×. On this beat that buries the obscure
 trade-press hit or agency subpage only one index carries, so we keep its
 per-result `engines` set and let `unique_to_engine` mark those instead.
 
+**`web` is discovery, not census.** Its engines largely ignore quoted phrases,
+and SearXNG's engine model declares `paging`, `time_range_support`, `safesearch`
+and `language_support` but nothing about exact-phrase support — there is no way
+to ask an engine whether it honours quotes. So `web` result sets are fuzzy and
+their totals are not countable.
+
+We deliberately do **not** filter locally to compensate. Filtering one page of an
+N-page result set produces a number that looks like a count and is not one:
+narrowing 30 results to 23 says nothing about the other pages. That is the
+page-cap bug in a new place, and a bad count is worse than no count. Instead the
+tier says what it is, and a `web` absence is labelled weaker than one from a
+corpus with known query semantics.
+
 **Run it locally, not as a service.** The instance binds to 127.0.0.1 by
 design. A shared instance means shared rate limits across users — the 200-call
 problem one layer up, which the atomic ledger cannot govern across machines.

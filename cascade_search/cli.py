@@ -101,9 +101,6 @@ def main(argv=None) -> int:
                    help="general, news, science, files, images…")
     w.add_argument("--page", type=int, default=1)
     w.add_argument("--base", help="instance URL (default $SEARXNG_URL or 127.0.0.1:8888)")
-    w.add_argument("--exact", action="store_true",
-                   help='keep only results actually containing the "quoted phrases" '
-                        "(upstream engines largely ignore quotes)")
 
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
@@ -174,7 +171,7 @@ def main(argv=None) -> int:
     if a.cmd == "web":
         from .engines.searxng import search as web_search
         return _emit(web_search(a.query, a.categories, a.page, a.base,
-                                store, limiter, use_cache, exact=a.exact), a.json)
+                                store, limiter, use_cache), a.json)
 
     if a.cmd == "docs":
         from .sources import docs as docs_src

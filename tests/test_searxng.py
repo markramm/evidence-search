@@ -197,33 +197,35 @@ def test_html_response_explains_the_json_format_switch(monkeypatch):
     assert "formats" in out.detail and "json" in out.detail
 
 
-def test_exact_filter_drops_results_lacking_the_quoted_phrase(monkeypatch):
-    """Upstream engines largely ignore quotes -- verified against a live instance,
-    where `"<person-h>"` and `<person-h>` returned 26 and 28 results with the
-    same near-miss profile matches on top.
+def test_web_absence_is_labelled_as_a_weak_negative(monkeypatch):
+    """A zero from a fuzzy tier must not read like a corpus-backed absence.
 
-    This matters most for what a name search is usually FOR: establishing that
-    someone is genuinely absent. Near-miss tokens make a real absence look like a
-    thin hit.
+    SearXNG's engine model declares paging, time_range_support, safesearch and
+    language_support -- and NOTHING about exact-phrase support. There is no way
+    to ask an engine whether it honours quotes, and observation says most do
+    not: `"<person-h>"` returned 26 results against 28 unquoted, same
+    near-miss profiles on top.
+
+    We deliberately do not filter locally to compensate. Filtering one page of
+    an N-page set yields a number that looks like a count and is not one -- the
+    CourtListener page-cap bug in a new place. Better to say the tier is fuzzy.
     """
-    _reply(monkeypatch, {"results": [
-        {"url": "https://a/1", "title": "<person-h>, Border Patrol", "content": "",
-         "engines": ["bing"]},
-        {"url": "https://a/2", "title": "<person-h>", "content": "",
-         "engines": ["bing"]},
-    ], "unresponsive_engines": []})
-    s, L = _kit()
-    out = searxng.search('"<person-h>"', base="http://x", store=s, limiter=L, exact=True)
-    assert [r.title for r in out.results] == ["<person-h>, Border Patrol"]
-    assert out.coverage.exact_filtered == 1
-
-
-def test_exact_filter_reports_when_it_emptied_the_result_set(monkeypatch):
-    """A thin result set must be legible: say the filter did it, not the corpus."""
-    _reply(monkeypatch, {"results": [
-        {"url": "https://a/1", "title": "<person-h>", "content": "", "engines": ["bing"]},
-    ], "unresponsive_engines": []})
-    s, L = _kit()
-    out = searxng.search('"<person-h>"', base="http://x", store=s, limiter=L, exact=True)
+    _reply(monkeypatch, {"results": [], "unresponsive_engines": []})
+    s_, L = _kit()
+    out = searxng.search('"<person-h>"', base="http://x", store=s_, limiter=L)
     assert isinstance(out, VerifiedAbsence)
-    assert "exact-phrase filter" in out.searched
+    assert "DISCOVERY tier" in out.searched
+    assert "quoted phrases" in out.searched
+
+
+def test_no_local_exact_filtering():
+    """Guard against reintroducing it.
+
+    Local filtering is not a substitute for upstream query semantics, and on a
+    counting task it actively manufactures a wrong figure.
+    """
+    from cascade_search.engines import searxng as m
+    assert m.EXACT_PHRASE_SUPPORTED is False
+    import inspect
+    src = inspect.getsource(m.search)
+    assert "exact" not in src.split('"""')[2], "no local exact-filter in the body"

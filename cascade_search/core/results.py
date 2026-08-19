@@ -58,9 +58,6 @@ class Coverage:
     #: Set when a payload was served but refused local caching. Deliberately
     #: NOT part of is_clean: a storage problem is not a retrieval problem.
     cache_write_refused: str | None = None
-    #: Results dropped by a local exact-phrase filter, when the upstream engines
-    #: ignored the caller's quotes. Reported so a thin result set is legible.
-    exact_filtered: int = 0
 
     @property
     def is_clean(self) -> bool:
