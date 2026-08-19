@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from urllib.parse import quote
 
@@ -49,14 +50,49 @@ from ..core.store import Store, cache_key
 SOURCE = "searxng"
 DEFAULT_BASE = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
 
-#: Error text from searx/webutils.py `exception_classname_to_text`. These mean
-#: "the engine was throttled or banned" -- tooling-limited, explicitly not
-#: content-exhausted, and a retry is warranted.
-_RATE_LIMIT_SIGNALS = ("too many requests", "suspended", "timeout", "timed out")
+# --- failure classification ---------------------------------------------------
+#
+# SearXNG does NOT expose the stable identifier. `UnresponsiveEngine` carries
+# `error_type` (an exception class name) and `suspended` (a bool), but
+# `get_translated_errors` in searx/webutils.py collapses both into ONE
+# gettext()-translated string before the JSON is built:
+#
+#     error_msg = gettext(exception_classname_to_text[e.error_type])
+#     if e.suspended: error_msg = gettext('Suspended') + ': ' + error_msg
+#
+# So the only signal that reaches us is prose, in whatever locale the request
+# negotiated. Verified against a live instance: an Accept-Language of de-DE
+# turns "too many requests" into "zu viele Anfragen" and "Suspended:" into
+# "Ausgesetzt:". SearXNG ships 60 locales, so string-matching English alone is
+# a silent misclassification waiting to happen.
+#
+# Three defenses, in order:
+#   1. PIN the locale. We send `locale=en` and `Accept-Language: en-US` so the
+#      instance answers in the language we can read. This is the real fix.
+#   2. Match the English strings from `exception_classname_to_text`, plus the
+#      few non-English forms most likely to survive a misconfigured instance.
+#   3. NEVER guess. An unrecognised message is recorded as UNKNOWN and dirties
+#      coverage, so it can still never certify an absence -- but it is labelled
+#      as unclassified rather than silently filed as a hard error.
 
-#: These mean the door was shut: a wall, not an empty shelf.
-_BLOCK_SIGNALS = ("captcha", "access denied", "http error", "connection error",
-                  "proxy error", "unexpected crash", "parsing error", "server api error")
+#: Throttling: tooling-limited, explicitly not content-exhausted.
+_RATE_LIMIT_SIGNALS = (
+    "too many requests", "timeout", "timed out",
+    # a suspended engine is one SearXNG itself backed off from
+    "suspended",
+    # highest-traffic locales, as insurance against an instance that ignores
+    # our pinned locale
+    "zu viele anfragen", "trop de requêtes", "demasiadas peticiones",
+    "ausgesetzt", "suspendu", "suspendido",
+)
+
+#: A wall: the door was shut, which is not an empty shelf.
+_BLOCK_SIGNALS = (
+    "captcha", "access denied", "http error", "connection error",
+    "protocol error", "network error", "proxy error", "ssl error",
+    "server api error", "parsing error", "unexpected crash",
+    "zugriff verweigert", "accès refusé", "acceso denegado",
+)
 
 _CONFIG_TTL = 3600
 
@@ -83,25 +119,36 @@ def _enabled_engines(base: str, store: Store) -> list[str]:
     return names
 
 
-def _classify(errors: list) -> tuple[list[str], dict[str, str]]:
-    """Split SearXNG's unresponsive engines into rate-limited vs errored.
+def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
+    """Split unresponsive engines into (rate_limited, errored, unclassified).
 
-    The API hands back [engine, human_message] pairs, already translated. We
-    match on the English source strings from `exception_classname_to_text`.
+    Returns the unclassified names too, so a message we cannot read is visible
+    as such rather than being quietly filed under a category we guessed at.
+    Either way it dirties coverage: an unreadable failure is still a failure.
     """
     rate_limited: list[str] = []
     errored: dict[str, str] = {}
+    unknown: list[str] = []
+
     for item in errors or []:
         if isinstance(item, (list, tuple)) and len(item) >= 2:
             name, msg = str(item[0]), str(item[1])
         else:
-            name, msg = str(item), "unresponsive"
+            name, msg = str(item), ""
         low = msg.lower()
-        if any(s in low for s in _RATE_LIMIT_SIGNALS):
+
+        # Check blocks FIRST: "Suspended: CAPTCHA" is a wall the instance has
+        # additionally backed off from, and the wall is the more actionable
+        # fact -- a CAPTCHA will not clear itself by waiting.
+        if any(sig in low for sig in _BLOCK_SIGNALS):
+            errored[name] = msg
+        elif any(sig in low for sig in _RATE_LIMIT_SIGNALS):
             rate_limited.append(name)
         else:
-            errored[name] = msg if any(s in low for s in _BLOCK_SIGNALS) else msg
-    return rate_limited, errored
+            unknown.append(name)
+            errored[name] = f"unclassified: {msg}" if msg else "unclassified"
+
+    return rate_limited, errored, unknown
 
 
 def search(query: str, categories: str = "general", pageno: int = 1,
@@ -125,9 +172,12 @@ def search(query: str, categories: str = "general", pageno: int = 1,
                            source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
 
     t0 = time.time()
+    # Pin the locale: the failure channel is prose, and we must be able to read
+    # it. Without this the instance answers in whatever the request negotiated.
     url = (f"{base}/search?q={quote(query)}&format=json"
-           f"&categories={quote(categories)}&pageno={pageno}")
-    body, blocked = fetch(url, source=SOURCE, query=query)
+           f"&categories={quote(categories)}&pageno={pageno}&locale=en")
+    body, blocked = fetch(url, source=SOURCE, query=query,
+                          headers={"Accept-Language": "en-US,en;q=0.9"})
     if blocked:
         blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"},
                                     elapsed_ms=int((time.time() - t0) * 1000))
@@ -150,7 +200,7 @@ def search(query: str, categories: str = "general", pageno: int = 1,
                     "format DISABLED; add `formats: [html, json]` under `search:` "
                     "in settings.yml."))
 
-    rate_limited, errored = _classify(data.get("unresponsive_engines"))
+    rate_limited, errored, unclassified = _classify(data.get("unresponsive_engines"))
     enabled = _enabled_engines(base, store)
     failed = set(rate_limited) | set(errored)
     # Fall back to the engines that actually returned rows if /config is
@@ -162,6 +212,12 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     cov = Coverage(queried=queried, responsive=responsive,
                    rate_limited=rate_limited, errored=errored,
                    indexes=["mixed"], elapsed_ms=int((time.time() - t0) * 1000))
+    if unclassified:
+        # Loud, not silent: if this fires, the instance is answering in a locale
+        # we did not expect and the signal map needs updating.
+        print(f"cascade-search: unclassified searxng failure(s) for "
+              f"{', '.join(unclassified)} -- treated as errors, coverage dirty. "
+              f"Is the instance ignoring `locale=en`?", file=sys.stderr)
 
     out = []
     for r in data.get("results", []):

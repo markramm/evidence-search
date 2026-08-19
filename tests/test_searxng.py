@@ -34,6 +34,72 @@ def _reply(monkeypatch, payload):
     monkeypatch.setattr(searxng, "fetch", lambda *a, **k: (json.dumps(payload), None))
 
 
+def test_classification_survives_a_translated_locale():
+    """The failure channel is gettext-translated PROSE, not a stable code.
+
+    searx/webutils.py collapses `error_type` and `suspended` into one localised
+    string before the JSON is built, and SearXNG ships 60 locales. Verified
+    live: a de-DE Accept-Language turns "too many requests" into "zu viele
+    Anfragen". We pin `locale=en`, and still recognise the common non-English
+    forms in case an instance ignores it.
+    """
+    rl, er, unknown = searxng._classify([["brave", "zu viele Anfragen"]])
+    assert rl == ["brave"] and not unknown
+
+    rl, er, unknown = searxng._classify([["x", "trop de requêtes"]])
+    assert rl == ["x"] and not unknown
+
+
+def test_a_wall_outranks_a_backoff():
+    """'Suspended: CAPTCHA' is both, and the wall is the actionable half.
+
+    A CAPTCHA does not clear itself by waiting, so classifying it as merely
+    rate-limited would invite a pointless retry.
+    """
+    rl, er, _ = searxng._classify([["startpage", "Suspended: CAPTCHA"]])
+    assert "startpage" in er and rl == []
+
+    rl, er, _ = searxng._classify([["bing", "Suspended: timeout"]])
+    assert rl == ["bing"] and not er
+
+
+def test_an_unreadable_failure_is_flagged_not_guessed():
+    """Never silently file an unrecognised message under a guessed category.
+
+    It still dirties coverage -- an unreadable failure is a failure -- but it
+    is labelled unclassified so the signal map can be fixed.
+    """
+    rl, er, unknown = searxng._classify([["y", "リクエストが多すぎます"]])
+    assert unknown == ["y"]
+    assert "unclassified" in er["y"]
+    assert rl == []
+
+
+def test_unclassified_failures_still_bar_a_verified_absence(monkeypatch):
+    _reply(monkeypatch, {"results": [], "unresponsive_engines": [
+        ["google", "something we have never seen"]]})
+    s, L = _kit()
+    out = searxng.search("q", base="http://x", store=s, limiter=L)
+    assert isinstance(out, RateLimited)
+    assert not isinstance(out, VerifiedAbsence)
+
+
+def test_search_pins_the_locale(monkeypatch):
+    """Without this the instance answers in whatever the request negotiated."""
+    seen = {}
+
+    def spy(url, **kw):
+        seen["url"] = url
+        seen["headers"] = kw.get("headers") or {}
+        return json.dumps({"results": [], "unresponsive_engines": []}), None
+
+    monkeypatch.setattr(searxng, "fetch", spy)
+    s, L = _kit()
+    searxng.search("q", base="http://x", store=s, limiter=L)
+    assert "locale=en" in seen["url"]
+    assert "en" in seen["headers"].get("Accept-Language", "")
+
+
 def test_partial_sweep_cannot_certify_absence(monkeypatch):
     """THE guarantee, extended across the federated tier.
 
