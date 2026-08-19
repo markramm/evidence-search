@@ -807,3 +807,108 @@ recurs across the corpus (LOC digitized collections are a common primary source 
 incomplete for this case). JSON-API finding — worked well, but only because I already knew to try it;
 flagging as a possible tool improvement, not filing as a bug. Exit-code note above — no severity, self-corrected
 before filing, logged only as a documentation-warning success story.
+
+---
+
+## 2026-08-19 · map-the-wider-after-academy-training-vendor-market (<vendor-a> cluster) · claude-opus-4-8-parallel-tick4-b
+
+Vendor-market census: was <vendor-a>/<vendor-a> an outlier or an instance? Ran ~25 `usaspending`
+count/group queries, ~6 `courtlistener`, ~5 `web`, 2 `extract`. **The tool answered the ticket's
+structural question, and five prior passes using consumer web search had failed on it.** Detail below,
+but the headline for maintainers: `usaspending` recipient-name search is the thing that broke a
+question that had been stuck in this KB for eight days.
+
+**Friction 1 — `courtlistener` has no `--format json`, and the failure is a Python traceback.**
+
+**Command (exact):**
+```
+$CS courtlistener '"Calibre Press"' --type r --wait --format json 2>/dev/null | python3 -c "...json.load(sys.stdin)..."
+```
+**Expected:** JSON, because my dispatch prompt told me to "read `meta.total_matches`" — which implies a
+structured output mode, and `usaspending` habits primed me for one.
+**Got:** my parser blew up on empty stdin for all four queries. `courtlistener --help` shows the real
+flag set (`--type/--court/--cursor`) — no `--format`. Because I had `2>/dev/null`, argparse's error was
+swallowed and all I saw was my own traceback; I initially misread it as an output-shape problem rather
+than an unknown-flag problem.
+**Had to figure out:** that `meta.total_matches` and `meta.next_cursor` — both named in the help text and
+in my dispatch prompt — are **not reachable from the CLI at all**. `--cursor` says "pass
+meta.next_cursor from a prior result," but no CLI output mode prints `meta.next_cursor`. That is a
+genuine dead end in the interface: the help text documents a paging workflow whose input the tool never
+emits.
+**Would have helped:** either a `--format json` on `courtlistener` (matching the affordance the help text
+already assumes), or — cheaper — print `total_matches` and `next_cursor` in the human-readable footer.
+Right now `results: 20` is ambiguous between "20 matches" and "20 shown, N total," and the standing
+caveat in my dispatch ("read meta.total_matches, a row count is not a count") is un-actionable as built.
+**Severity:** slowed. It also degraded a finding: I could not distinguish whether `"Calibre Press"`'s 20
+rows were the whole match set or a page, so I wrote it up as unverified rather than as reach evidence.
+
+**Friction 2 — `extract --grep` returning "~3 tok / 100.0% reduction" reads as success but means zero matches.**
+
+**Command (exact):**
+```
+$CS extract "https://www.courtlistener.com/docket/65524587/margarito-t-lopez-v-city-of-los-angeles/" --grep "Calibre" --grep "Glennon" --grep "Street Survival"
+```
+**Got:** `raw ~184,708 tok -> extracted ~3 tok (100.0% reduction)` and nothing else. Same shape on a
+second call against a USAspending award page (`raw ~729 tok -> extracted ~3 tok (99.6% reduction)`).
+**Friction:** "100.0% reduction" is the tool's own success metric maxing out, so at a glance it reads as a
+triumphant compression, when what actually happened is **no pattern matched and there is no content**.
+This is the same hazard class as the `--ids` entry already in this log: a confident-looking presentation
+of an empty answer. It cost me a real inference — I could not tell whether the CourtListener row was an
+index-level match (docket metadata) or a document-body match, which is exactly the attorney-of-record-vs-
+substantive-reference distinction my dispatch prompt warned about.
+**Would have helped:** when the extraction is empty, say so in words — `NO MATCHES for --grep patterns
+(3 patterns tried)` — instead of reporting a reduction percentage. A zero result and a 100% reduction are
+the same number but not the same finding.
+**Severity:** slowed, and near-miss on a wrong conclusion.
+
+**Friction 3 — `usaspending --group contracts --limit 30` caps output below the vendor's award count, with no total.**
+
+**Command (exact):**
+```
+$CS usaspending "Killology" --group contracts --limit 30 --wait
+```
+**Got:** 30 rows for a vendor that `--count` reports as **45 awards**. No aggregate obligation figure
+anywhere in either mode — `--count` gives award *counts* only, `--group contracts` gives per-award
+dollars. To get "what has this vendor been paid," I had to scrape the printed rows with a regex and sum
+them in Python, once per vendor, ~10 times.
+**Friction:** every dollar total in my deliverable is therefore a **floor**, not a total, for any vendor
+with >30 awards (Killology, Blue Courage, VirTra 253, Oak Grove 220). I had to caveat the census table
+accordingly, which materially weakens it — "at least $217,454" is a much weaker claim than "$217,454".
+**Would have helped:** a `--sum` / `--total` on `usaspending` that returns total obligated across ALL
+matching awards, not just the displayed page. For a procurement-heavy beat this is the single most
+common question asked of the tool and it is currently the one thing it will not answer directly.
+**Severity:** slowed (≈10 regex-and-sum detours), and it degraded the output's evidentiary strength.
+
+**Worked well — and specifically, this is what cracked the ticket.**
+
+`usaspending` recipient-name search with the `VerifiedAbsence` vs `Hit` distinction is what made this pass
+succeed where five prior passes failed. Concretely:
+
+```
+$CS usaspending "Calibre Press" --count --wait     -> VerifiedAbsence
+$CS usaspending "Street Survival" --count --wait   -> VerifiedAbsence
+$CS usaspending "Lifeline Training" --count --wait -> Hit, 27 awards
+```
+
+Same company, three names. Prior passes searched the **brands** and correctly got nothing; the money is
+filed under the **holding company**. What made this legible rather than confusing was the typed outcome —
+because `VerifiedAbsence` is asserted as a *publishable negative* rather than a shrug, the contrast with
+`Hit` on the third name was immediately interpretable as a naming problem rather than as noise. A plain
+"0 results" three times would have looked like the same dead end the prior passes reported. **The typing
+is doing real epistemic work, not just ergonomics.**
+
+Corollary worth flagging for the docs: a `VerifiedAbsence` on a *brand* is not a `VerifiedAbsence` on a
+*firm*. That is not a tool bug — the tool answered exactly what was asked — but it is a footgun specific
+to `usaspending`'s recipient-name matching, and it would be worth one line in the help text: "matches the
+registered recipient name; resolve the corporate parent before treating an absence as dispositive."
+
+Also worked well: `web` reporting coverage honestly (`80/82 responsive | RATE-LIMITED: searxng:brave |
+ERRORED: searxng:startpage`) and **refusing to certify absence** on the Mike Hanson query at 78/82. My
+dispatch prompt specifically warned me not to write tooling-limited negatives up as content-exhausted
+ones, and the tool enforced that for me rather than leaving it to my discipline. That is the correct
+division of labour and it directly changed what I wrote (Hanson logged as unresolved-retry, not as a
+negative finding).
+
+**Severity summary:** Friction 1 — slowed. Friction 2 — slowed, near-miss on a wrong conclusion.
+Friction 3 — slowed, degraded output strength. Net: the tool won the ticket; the friction is all in
+getting aggregates and in empty-result presentation.
