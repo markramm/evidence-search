@@ -912,3 +912,54 @@ negative finding).
 **Severity summary:** Friction 1 — slowed. Friction 2 — slowed, near-miss on a wrong conclusion.
 Friction 3 — slowed, degraded output strength. Net: the tool won the ticket; the friction is all in
 getting aggregates and in empty-result presentation.
+
+## 2026-08-19 · brief-write-draft-series-2-keystone-panopticon-was-the-wrong-metaphor-to-v1 · claude-sonnet-5
+
+**Context:** claimed a "brief-write/draft" task instructing me to write a 4,500-6,000w
+RAMM keystone brief on the panopticon-vs-Agre-capture frame correction. Did not end up
+needing cascade-search at all — the actual finding was that the deliverable already
+existed (fact-checked, publish-audited, with-Amy since 2026-06-11), so the task closed
+as a stale-ticket discovery rather than a research task. Logging this because the
+absence of cascade-search usage is itself informative for triage, and because the
+discovery method is a `~/kb/kb search` / Pyrite task-list finding worth naming.
+
+**Command:** `~/kb/kb search "panopticon wrong metaphor keystone" -k drafts --limit 10`
+
+**Expected:** a ranked list of loosely-related theme/draft entries to orient on.
+
+**Got:** the top hit (`dc-launch-order-checklist`) contained the exact answer in its
+snippet — a highlighted `with-amy · fc complete` status line with a live Drive-doc
+link for the precise piece the task asked me to write. One search call resolved the
+whole task. This is `~/kb/kb search`, not cascade-search, but it is the tool that
+actually mattered for this ticket and it worked well: FTS ranking surfaced a launch
+checklist over dozens of theme/task files that also mention "panopticon."
+
+**Friction:** none in the tooling. The friction was upstream, in the task itself —
+the claimed ticket's body asserted "the brief EXISTS but is not yet drafted" as
+settled fact, sourced to a 2026-06-11 brief-gap survey. Two *other* task files for
+the identical deliverable (`write-keystone-brief-series-2-...` and
+`brief-write-the-panopticon-was-the-wrong-metaphor-...`) were both already `status:
+done` in the same `~/kb/kb task list` output space, and the actual draft file had
+been sitting in `drafts/drafts/` with a completed audit trail for over two months.
+Nothing in `~/kb/kb task list --status open` flagged this as likely-redundant before
+I claimed it — I only found out by reading the task body, then checking the
+`Produces:` path by hand.
+
+**Would have helped:** if task claiming (or the investigation-research skill's Step 1
+picker) did a cheap pre-check — does the `Produces:` path, or an obvious slug match,
+already exist as a file? — before surfacing a task as open. This is a Pyrite/
+task-hygiene gap, not a cascade-search gap, but it cost real wall-clock: I read three
+overlapping task files and a 398-line draft plus its audit sidecar before concluding
+"do nothing, close it." A worker with less discipline than "verify the Produces: path
+before writing" could easily have shipped a second competing draft against a piece
+already sitting in Amy's editorial queue.
+
+**Worked well:** `~/kb/kb search` scoped to `-k drafts` surfaced the ground-truth
+status in the first hit. The audit-sidecar convention (separate `.audit.yaml` with
+fact_check_log / publish_audit / revision_log / pre_publish_blockers) made it fast to
+confirm the draft was not a rough stub — it had already cleared fact-check and a
+publish audit, which is what made "close as done, do not duplicate" the confident
+right call rather than a guess.
+
+**Severity:** slowed (on the task-hygiene issue, not on any search tool). No
+cascade-search friction to report this pass — clean non-use.
