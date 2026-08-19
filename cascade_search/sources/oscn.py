@@ -25,6 +25,30 @@ from ..core.store import Store
 
 BASE = "https://www.oscn.net/dockets"
 SOURCE = "oscn"
+
+#: Valid `db=` values: Oklahoma's 77 counties, lowercased, plus the appellate
+#: databases. A worker had to GUESS `oklahoma` from the `caddo` example in the
+#: docs, with no way to tell in advance whether the right token was `oklahoma`,
+#: `oklahoma-county`, or a FIPS code -- and a wrong county produces a result
+#: that reads like an absence rather than an error. Encoded so the client can
+#: reject a bad value instead of silently searching nothing.
+COUNTIES = {
+    "adair", "alfalfa", "atoka", "beaver", "beckham", "blaine", "bryan",
+    "caddo", "canadian", "carter", "cherokee", "choctaw", "cimarron",
+    "cleveland", "coal", "comanche", "cotton", "craig", "creek", "custer",
+    "delaware", "dewey", "ellis", "garfield", "garvin", "grady", "grant",
+    "greer", "harmon", "harper", "haskell", "hughes", "jackson", "jefferson",
+    "johnston", "kay", "kingfisher", "kiowa", "latimer", "leflore", "lincoln",
+    "logan", "love", "major", "marshall", "mayes", "mcclain", "mccurtain",
+    "mcintosh", "murray", "muskogee", "noble", "nowata", "okfuskee",
+    "oklahoma", "okmulgee", "osage", "ottawa", "pawnee", "payne",
+    "pittsburg", "pontotoc", "pottawatomie", "pushmataha", "rogermills",
+    "rogers", "seminole", "sequoyah", "stephens", "texas", "tillman", "tulsa",
+    "wagoner", "washington", "washita", "woods", "woodward",
+}
+#: Appellate and statewide databases, which take the same `db=` parameter.
+APPELLATE = {"appellate", "oksc", "okca", "okcr", "all"}
+VALID_DBS = COUNTIES | APPELLATE
 CASE_RE = re.compile(r"\b([A-Z]{2,3}-\d{4}-\d{5})\b")
 
 
@@ -75,6 +99,28 @@ def search(county: str, lname: str = "", fname: str = "", year: int | None = Non
            use_cache: bool = True, escalate: bool = True):
     """Search a county docket by party surname, optionally bounded to a year."""
     q = " ".join(f"{lname} {fname} {county} {year or ''}".split())
+
+    # Reject an unknown county rather than searching it. OSCN answers a bad
+    # `db=` with a page that parses as "no records", so a typo would read as a
+    # verified absence -- a wrong negative on a records question, which is the
+    # failure this package exists to prevent.
+    db = county.strip().lower().replace(" ", "").replace("_", "")
+    if db not in VALID_DBS:
+        import difflib
+        near = difflib.get_close_matches(db, sorted(VALID_DBS), n=3, cutoff=0.6)
+        from ..core.results import AccessBlocker, Blocker, Coverage
+        return AccessBlocker(
+            query=q, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "unknown-county"}),
+            mechanism=Blocker.NOT_FOUND, url=f"{BASE}/Results.aspx?db={county}",
+            detail=(f"{county!r} is not an OSCN database. "
+                    + (f"Did you mean: {', '.join(near)}? " if near else "")
+                    + "Valid values are Oklahoma's 77 counties lowercased with no "
+                      "spaces (e.g. caddo, oklahoma, tulsa, rogermills), or an "
+                      "appellate db (oksc, okca, okcr). This is refused rather than "
+                      "searched because OSCN answers a bad db= with a page that "
+                      "parses as 'no records' -- a typo would read as an absence."))
+    county = db
+
     return run_source(
         q, source=SOURCE, url=_url(county, lname, fname, year),
         searched=f"oscn:{county} district court docket index",

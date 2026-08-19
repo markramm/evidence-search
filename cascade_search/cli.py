@@ -82,9 +82,13 @@ def main(argv=None) -> int:
     n.add_argument("query")
 
     o = sub.add_parser("oscn", help="Oklahoma State Courts Network")
-    o.add_argument("--county", required=True)
+    o.add_argument("--county",
+                   help="Oklahoma county lowercased, no spaces (caddo, oklahoma, "
+                        "tulsa, rogermills) or an appellate db (oksc/okca/okcr). "
+                        "--list-counties to see all 77.")
     o.add_argument("--lname"); o.add_argument("--fname")
     o.add_argument("--year", type=int); o.add_argument("--case")
+    o.add_argument("--list-counties", action="store_true", help="print valid db= values")
 
     c = sub.add_parser("courtlistener", help="CourtListener (5/min, 50/hr, 125/day)")
     c.add_argument("query", help='QUOTE phrases when counting: "Force Science '
@@ -186,8 +190,16 @@ def main(argv=None) -> int:
 
     if a.cmd == "oscn":
         from .sources import oscn
+        if a.list_counties:
+            print("Counties (77):")
+            for i, c_ in enumerate(sorted(oscn.COUNTIES)):
+                print(f"  {c_:16}", end="\n" if i % 4 == 3 else "")
+            print("\n\nAppellate:", ", ".join(sorted(oscn.APPELLATE)))
+            return 0
         if a.case:
             return _emit(oscn.case(a.county, a.case, store, limiter), a.json)
+        if not a.county:
+            print("--county is required (or use --list-counties)", file=sys.stderr); return 2
         return _emit(oscn.search(a.county, a.lname or "", a.fname or "",
                                  a.year, store, limiter, use_cache), a.json)
 

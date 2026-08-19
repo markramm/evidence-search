@@ -334,3 +334,41 @@ def test_a_storage_failure_never_loses_the_caller_results():
         {"caseName": "X v. Y", "docket_id": 1, "cause": "42:1983"}]})
     out = _parse(body, query="q", store=Broken())
     assert len(out) == 1 and out[0].meta["cause"] == "42:1983"
+
+
+def test_oscn_rejects_an_unknown_county_instead_of_searching_it():
+    """OSCN answers a bad db= with a page that parses as "no records".
+
+    So a typo would read as a VERIFIED ABSENCE on a records question -- a wrong
+    negative, which is the failure this package exists to prevent. A worker had
+    to guess `oklahoma` from the `caddo` example with no way to check.
+    """
+    from cascade_search.core.results import AccessBlocker
+    from cascade_search.sources import oscn
+    out = oscn.search("oklohoma", lname="Smith")
+    assert isinstance(out, AccessBlocker)
+    assert "oklahoma" in out.detail, "should suggest the near match"
+    assert "absence" in out.detail
+
+
+def test_oscn_county_list_is_complete_and_normalises():
+    from cascade_search.sources import oscn
+    assert len(oscn.COUNTIES) == 77, "Oklahoma has 77 counties"
+    for c in ("caddo", "oklahoma", "tulsa", "rogermills", "mcclain"):
+        assert c in oscn.COUNTIES
+    assert {"oksc", "okca", "okcr"} <= oscn.APPELLATE
+
+
+def test_gate_creation_dedupes_on_url(tmp_path):
+    """One search parked three times under three tokens meant a person would
+    have solved the identical Turnstile three times. Nine open gates covered
+    five distinct URLs."""
+    from cascade_search.core.store import Store
+    s = Store(tmp_path / "t.db")
+    p = {"url": "https://www.oscn.net/dockets/Results.aspx?db=tulsa", "query": "x"}
+    t1 = s.create_job("oscn", "awaiting_human", p)
+    t2 = s.create_job("oscn", "awaiting_human", dict(p))
+    t3 = s.create_job("oscn", "awaiting_human", {"url": "https://other", "query": "y"})
+    assert t1 == t2, "same target must reuse the original token"
+    assert t1 != t3
+    assert len(s.list_jobs("awaiting_human")) == 2

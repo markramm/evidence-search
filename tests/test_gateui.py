@@ -42,8 +42,20 @@ def test_null_payload_fields_never_reach_the_operator():
 
 
 def test_duplicate_targets_collapse_to_one_card():
-    """The live queue held the same OSCN search parked twice."""
-    s = _store_with(OSCN, dict(OSCN))
+    """The live queue held the same OSCN search parked twice.
+
+    Creation now dedupes on URL, so new duplicates cannot arise -- but the UI
+    must still collapse rows that predate that fix, and rows whose payloads
+    differ while pointing at the same target. Built by writing jobs directly,
+    since create_job would now refuse to make a second one.
+    """
+    import json as _json
+    import time as _time
+    s = _store_with(OSCN)
+    # a legacy duplicate, as it would sit in an existing store
+    s.conn.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
+                   ("legacy0000dup", "oscn", "awaiting_human",
+                    _json.dumps(OSCN), _time.time(), _time.time(), None))
     cards = collect(s)
     assert len(cards) == 1
     assert len(cards[0]["also"]) == 1

@@ -330,6 +330,31 @@ class Store:
 
     # ---- jobs (incl. humanomation gates, spec P8) --------------------------
     def create_job(self, source: str, state: str, payload: dict) -> str:
+        """Create a job, or return the token of an equivalent one already open.
+
+        Gates are content-addressable in practice: same source, same URL, same
+        thing for a human to do. Minting a fresh token per attempt meant one
+        OSCN search parked three times under three tokens, and a person clearing
+        the queue would have solved the identical Turnstile three times. Nine
+        open gates covered five distinct URLs.
+
+        Deduping here rather than at either call site covers both paths --
+        `gates.open_gate` and `browser.fetch` -- which drifted independently.
+        """
+        url = (payload or {}).get("url")
+        if url and state == "awaiting_human":
+            row = self.conn.execute(
+                "SELECT token FROM jobs WHERE source=? AND state=? "
+                "AND json_extract(payload, '$.url')=? ORDER BY created_at LIMIT 1",
+                (source, state, url)).fetchone()
+            if row:
+                # Refresh updated_at so the queue reflects renewed interest,
+                # but keep the ORIGINAL token: anything already holding it stays
+                # valid.
+                self.conn.execute("UPDATE jobs SET updated_at=? WHERE token=?",
+                                  (time.time(), row[0]))
+                return row[0]
+
         token = uuid.uuid4().hex[:12]
         now = time.time()
         self.conn.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
