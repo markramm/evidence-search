@@ -95,3 +95,43 @@ def test_wait_covers_spacing_but_never_a_budget_window():
     allowed, retry, why = L2.reserve("courtlistener")
     assert not allowed, "--wait must never wait out a budget window"
     assert "window" in why
+
+
+def test_backoff_escalates_on_a_run_of_failures_not_a_blip():
+    """A source that is hard-down should not be retried on a healthy schedule.
+
+    brave and startpage failed on every query across an afternoon of real work;
+    fixed windows retried them identically each time, spending budget to relearn
+    what the previous calls had established.
+    """
+    L = Limiter(Store(_db()))
+    assert L.backoff_remaining("news_rss")[0] == 0
+
+    L.note_failure("news_rss", "CAPTCHA")
+    assert L.backoff_remaining("news_rss")[0] == 0, "one failure is a blip"
+
+    for _ in range(3):
+        L.note_failure("news_rss", "CAPTCHA")
+    wait, streak, reason = L.backoff_remaining("news_rss")
+    assert streak == 4 and wait > 0 and "CAPTCHA" in reason
+
+    L.note_success("news_rss")
+    assert L.backoff_remaining("news_rss")[0] == 0, "success must reset the streak"
+
+
+def test_backoff_refuses_the_reservation_before_spending_a_slot():
+    """Refuse early: do not burn a ledger slot on a call that has failed 4 times."""
+    s = Store(_db())
+    L = Limiter(s)
+    for _ in range(4):
+        L.note_failure("news_rss", "CAPTCHA")
+    allowed, retry, why = L.reserve("news_rss")
+    assert not allowed and "backing off" in why
+    assert s.count_calls("news_rss", 60) == 0, "no ledger row for a refused call"
+
+
+def test_backoff_is_capped():
+    L = Limiter(Store(_db()))
+    for _ in range(40):
+        L.note_failure("news_rss", "down")
+    assert L.backoff_remaining("news_rss")[0] <= L.policy("news_rss").backoff_max_s

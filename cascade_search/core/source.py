@@ -89,6 +89,18 @@ def run_source(
     body, blocked = http_fetch(url, source=source, query=query, headers=headers)
     queried = [source]
 
+    # Feed the escalating-backoff counter. A source that keeps failing should be
+    # retried on a widening interval rather than on the same schedule as a
+    # healthy one; a success clears the streak, so this punishes a RUN of
+    # failures, never a blip.
+    try:
+        if blocked is not None:
+            limiter.note_failure(source, str(getattr(blocked, "mechanism", "error")))
+        else:
+            limiter.note_success(source)
+    except Exception:
+        pass
+
     # A browser-passable wall is what the browser tier exists for. If the
     # browser cannot clear it either, its AwaitingHuman gate is returned as-is:
     # a gate is a handoff, not a dead end.

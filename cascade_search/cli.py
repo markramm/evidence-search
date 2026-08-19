@@ -91,6 +91,9 @@ def main(argv=None) -> int:
                                  'Institute" -> 155 matches, unquoted -> 51,622')
     c.add_argument("--type", default="r", choices=["r", "rd", "o", "p"])
     c.add_argument("--court")
+    c.add_argument("--cursor",
+                   help="next page: pass meta.next_cursor from a prior result "
+                        "(v4 pages by cursor, not page number)")
 
     pp = sub.add_parser("propublica", help="ProPublica Trump-team financial disclosures")
     pp.add_argument("query")
@@ -175,7 +178,8 @@ def main(argv=None) -> int:
 
     if a.cmd == "courtlistener":
         from .sources import courtlistener
-        return _emit(courtlistener.search(a.query, a.type, a.court, store, limiter, use_cache), a.json)
+        return _emit(courtlistener.search(a.query, a.type, a.court, store, limiter,
+                                          use_cache, cursor=a.cursor), a.json)
 
     if a.cmd == "propublica":
         from .sources import propublica_disclosures

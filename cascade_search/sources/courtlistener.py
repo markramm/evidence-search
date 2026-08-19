@@ -85,9 +85,17 @@ def _parse(body: str, query: str = "", store=None) -> list[Result]:
             # curation exists at all
             "firm", "attorney", "party",
         ) if r.get(k) not in (None, "", [], {})}
+        nxt = data.get("next") or ""
+        next_cursor = ""
+        if nxt and "cursor=" in nxt:
+            from urllib.parse import unquote as _unq
+            next_cursor = _unq(nxt.split("cursor=", 1)[1].split("&")[0])
         meta.update({"record_id": record_id, "total_matches": total,
                      "returned_this_page": returned,
-                     "more_available": bool(data.get("next"))})
+                     "more_available": bool(nxt),
+                     "next_cursor": next_cursor,
+                     "paging_note": ("v4 pages by CURSOR, not page number. Pass "
+                                     "meta.next_cursor to --cursor for the next page.")})
 
         # The heaviest field, summarised: descriptions are what say whether a
         # filing is an expert disclosure. Full text stays in the record.
@@ -109,7 +117,7 @@ def _parse(body: str, query: str = "", store=None) -> list[Result]:
 
 def search(query: str, kind: str = "r", court: str | None = None,
            store: Store | None = None, limiter: Limiter | None = None,
-           use_cache: bool = True):
+           use_cache: bool = True, cursor: str | None = None):
     """Search. kind: r=RECAP dockets, rd=documents, o=opinions, p=people."""
     # Resolve the store here rather than letting run_source default it, so the
     # parser has somewhere to persist full records even when the caller passed
@@ -118,11 +126,16 @@ def search(query: str, kind: str = "r", court: str | None = None,
     url = f"{API}/search/?q={quote(query)}&type={kind}"
     if court:
         url += f"&court={court}"
+    # v4 paginates by CURSOR, not page number: `&page=2` is silently ignored and
+    # returns page 1 again. A --page flag here would have been a lie, so the
+    # caller passes the opaque cursor from a prior result's meta.next_cursor.
+    if cursor:
+        url += f"&cursor={quote(cursor)}"
     return run_source(
         query, source=SOURCE, url=url,
         searched=f"courtlistener search (type={kind})",
         parse=lambda b: _parse(b, query, store), store=store, limiter=limiter, use_cache=use_cache,
-        cache_params={"kind": kind, "court": court}, headers=_headers(),
+        cache_params={"kind": kind, "court": court, "cursor": cursor}, headers=_headers(),
     )
 
 

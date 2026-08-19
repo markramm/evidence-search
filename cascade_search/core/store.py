@@ -46,6 +46,19 @@ CREATE TABLE IF NOT EXISTS records (
     fetched_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_records_source_q ON records(source, query);
+-- Consecutive failures per source, for escalating backoff.
+--
+-- Fixed windows assume every call has an equal chance of working. A source
+-- that is hard-down does not: retrying it on schedule burns budget and wall
+-- clock to learn what the last four calls already established. SearXNG models
+-- this with continuous_errors driving ban_time_on_fail up to a ceiling; this
+-- is the same idea over the shared ledger, so the backoff is shared too.
+CREATE TABLE IF NOT EXISTS failures (
+    source TEXT PRIMARY KEY,
+    consecutive INTEGER NOT NULL,
+    last_at REAL NOT NULL,
+    reason TEXT
+);
 CREATE TABLE IF NOT EXISTS jobs (
     token TEXT PRIMARY KEY, source TEXT NOT NULL, state TEXT NOT NULL,
     payload TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
@@ -176,6 +189,28 @@ class Store:
         self.conn.execute(
             "INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",
             (key, source, json.dumps(payload), now, now + ttl_s if ttl_s else None))
+
+    # ---- failure backoff --------------------------------------------------
+    def record_failure(self, source: str, reason: str = "") -> int:
+        """Count a consecutive failure. Returns the new streak length."""
+        row = self.conn.execute(
+            "SELECT consecutive FROM failures WHERE source=?", (source,)).fetchone()
+        n = (row[0] if row else 0) + 1
+        self.conn.execute("INSERT OR REPLACE INTO failures VALUES (?,?,?,?)",
+                          (source, n, time.time(), reason[:200]))
+        return n
+
+    def clear_failures(self, source: str) -> None:
+        """A success resets the streak. Backoff punishes a RUN, not a blip."""
+        self.conn.execute("DELETE FROM failures WHERE source=?", (source,))
+
+    def failure_state(self, source: str):
+        row = self.conn.execute(
+            "SELECT consecutive, last_at, reason FROM failures WHERE source=?",
+            (source,)).fetchone()
+        if not row:
+            return 0, 0.0, ""
+        return row[0], row[1], row[2] or ""
 
     # ---- full upstream records ------------------------------------------
     def put_record(self, record_id: str, source: str, query: str, payload: dict) -> None:

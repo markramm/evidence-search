@@ -25,6 +25,12 @@ class Policy:
     # one process. An in-memory counter cannot cap fan-out: 12 workers each get
     # their own, and the cap protects nothing.
     session_window_s: float = 3600.0
+    #: Escalating backoff after consecutive failures: 2**(n-1) * base, capped.
+    #: A source that is hard-down should not be retried on the same schedule as
+    #: a healthy one -- that spends budget to relearn what the last four calls
+    #: established.
+    backoff_base_s: float = 15.0
+    backoff_max_s: float = 900.0
     cacheable: bool = True          # False where terms forbid storing results
     index_origin: str = "n/a"       # own-crawl | bing | google | mixed | n/a
     note: str = ""
@@ -95,12 +101,38 @@ class Limiter:
     def policy(self, source: str) -> Policy:
         return POLICIES.get(source, DEFAULT_POLICY)
 
+    def backoff_remaining(self, source: str) -> tuple[float, int, str]:
+        """(seconds still to wait, streak length, reason). 0 when clear."""
+        p = self.policy(source)
+        n, last, reason = self.store.failure_state(source)
+        if n < 2:            # one failure is a blip; two is a pattern
+            return 0.0, n, reason
+        import time as _t
+        wait = min(p.backoff_max_s, p.backoff_base_s * (2 ** (n - 2)))
+        remaining = (last + wait) - _t.time()
+        return (max(0.0, remaining), n, reason)
+
+    def note_failure(self, source: str, reason: str = "") -> int:
+        return self.store.record_failure(source, reason)
+
+    def note_success(self, source: str) -> None:
+        self.store.clear_failures(source)
+
     def reserve(self, source: str) -> tuple[bool, float | None, str]:
         """Atomically claim one call. (allowed, retry_after_s, reason).
 
         This is the gate every fetch must pass. Never sleeps; the caller decides.
         """
         p = self.policy(source)
+
+        # Refuse early when a source is in escalating backoff, before spending a
+        # ledger slot on a call that has failed n times running.
+        remaining, streak, reason = self.backoff_remaining(source)
+        if remaining > 0:
+            return False, round(remaining, 1), (
+                f"{source}: backing off after {streak} consecutive failures "
+                f"({reason[:60]}) -- {int(remaining)}s left")
+
         allowed, retry, why = self.store.reserve_call(
             source, p.windows, min_interval_s=p.min_interval_s,
             session_max=p.session_max, session_window_s=p.session_window_s)

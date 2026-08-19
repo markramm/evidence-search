@@ -87,8 +87,19 @@ IDENTIFIERS = {
     # 5 chars, same mixture requirement (e.g. 4ZVJ2)
     "cage":           r"\b(?=[A-Z0-9]{5}\b)(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5}\b",
     "ein":            r"\b\d{2}-\d{7}\b",
-    # require thousands or cents -- bare "$1" is noise
-    "money":          r"\$\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b|\$\d+\.\d{2}\b",
+    # Three forms, because reporting writes money three ways and missing one
+    # produces a confident-looking wrong answer. A worker ran --ids on an article
+    # headlined "$313 Million Contract" and got back exactly one figure --
+    # $70,035,000 -- at "100.0% reduction", because only the digit-grouped form
+    # matched. The headline number was invisible.
+    #   1. digit-grouped:  $313,769,023   $250,000.00
+    #   2. scaled prose:   $313 million   $1.2 billion   $4.5bn
+    #   3. trailing-unit:  70 million dollars
+    # Bare "$1" stays excluded as noise: thousands, cents, or a scale word.
+    "money":          r"\$\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b"
+                      r"|\$\d+\.\d{2}\b"
+                      r"|\$\s?\d+(?:\.\d+)?\s*(?:million|billion|trillion|thousand|[mbk]n?\b)"
+                      r"|\b\d+(?:\.\d+)?\s*(?:million|billion|trillion)\s+dollars\b",
     "date":           r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/(?:19|20)\d{2}\b",
     "usc_statute":    r"\b\d+\s+U\.?S\.?C\.?\s*§*\s*\d+[a-z]?\b|\b\d+\s+ILCS\s+[\d/.]+\b"
                       r"|\b\d+\s+O\.S\.\s*§*\s*\d+\b",

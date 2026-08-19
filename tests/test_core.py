@@ -314,7 +314,11 @@ def test_full_records_are_stored_while_results_stay_curated():
     rec = s.get_record("courtlistener:5409345")
     assert rec is not None
     assert rec["payload"]["pacer_case_id"] == 263338
-    assert len(rec["payload"]) > len(r.meta) - 4
+    # The record holds fields the curated view deliberately omits. Assert that
+    # directly rather than comparing lengths -- the earlier arithmetic version
+    # broke the moment paging metadata was added to meta, which told us nothing.
+    omitted = set(rec["payload"]) - set(r.meta)
+    assert "pacer_case_id" in omitted and "assigned_to_id" in omitted
 
 
 def test_a_storage_failure_never_loses_the_caller_results():
