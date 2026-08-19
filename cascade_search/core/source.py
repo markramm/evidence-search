@@ -16,7 +16,7 @@ import time
 from typing import Callable
 
 from .limits import Limiter
-from .results import (Coverage, Hit, RateLimited, Result, replay_cached,
+from .results import (Coverage, Hit, Probe, RateLimited, Result, replay_cached,
                       verified_absence)
 from .store import CachePoisoned, Store, cache_key
 
@@ -40,6 +40,10 @@ def run_source(
     escalate: bool = False,
     absent_when=None,
     archive_as: str | None = None,
+    exact_match_supported: bool | None = None,
+    corpus: str = "",
+    not_searched: list[str] | None = None,
+    caveats: list[str] | None = None,
 ):
     """Run one source end to end and return a typed Outcome.
 
@@ -142,6 +146,13 @@ def run_source(
             mechanism=Blocker.SERVER_ERROR, url=url,
             detail=f"payload shape changed ({e}) -- the source may have altered its format")
 
+    def _probe(n: int) -> list[Probe]:
+        """One probe per endpoint hit -- the auditable record of the question."""
+        return [Probe(source=source, endpoint=url, query=query,
+                      params=dict(cache_params or {}), corpus=corpus or searched,
+                      result_count=n, exact_match_supported=exact_match_supported,
+                      at=time.time())]
+
     if archive_as:
         from .archive import archive as _archive
         _archive(body.encode() if isinstance(body, str) else body,
@@ -155,7 +166,8 @@ def run_source(
     if absent_when is not None and absent_when(body):
         if use_cache:
             store.put(key, source, [], ttl_s=ttl_s)
-        return verified_absence(query, cov, searched)
+        return verified_absence(query, cov, searched, probes=_probe(0),
+                                not_searched=not_searched, caveats=caveats)
 
     if use_cache:
         try:
@@ -172,5 +184,6 @@ def run_source(
             cov.cache_write_refused = str(e)
 
     if not results:
-        return verified_absence(query, cov, searched)
+        return verified_absence(query, cov, searched, probes=_probe(0),
+                                not_searched=not_searched, caveats=caveats)
     return Hit(query=query, coverage=cov, results=results)

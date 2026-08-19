@@ -135,6 +135,15 @@ def search(query: str, kind: str = "r", court: str | None = None,
         query, source=SOURCE, url=url,
         searched=f"courtlistener search (type={kind})",
         parse=lambda b: _parse(b, query, store), store=store, limiter=limiter, use_cache=use_cache,
+        corpus=("CourtListener: federal + some state courts. RECAP holds only what a user "
+                "has purchased from PACER and uploaded."),
+        exact_match_supported=query.strip().startswith('"'),
+        not_searched=["state courts absent from CourtListener",
+                      "PACER documents nobody has purchased into RECAP",
+                      "sealed and expunged matters"],
+        caveats=([] if query.strip().startswith('"') else
+                 ["UNQUOTED query: CourtListener tokenises, so this searched for the WORDS, "
+                  "not the phrase. Re-run quoted before relying on this negative."]),
         cache_params={"kind": kind, "court": court, "cursor": cursor}, headers=_headers(),
     )
 

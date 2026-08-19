@@ -45,8 +45,24 @@ def _emit(outcome, as_json: bool) -> int:
                     print(f"     {r.snippet[:140]}")
         elif isinstance(outcome, VerifiedAbsence):
             print(f"searched: {outcome.searched}")
-            print("\nPUBLISHABLE NEGATIVE: the right corpus was searched by the right")
-            print("method and every engine responded. This is a finding, not a failure.")
+            for pr in outcome.probes:
+                print(f"  probe:  {pr.describe()}")
+                if pr.corpus:
+                    print(f"          corpus: {pr.corpus}")
+            if outcome.not_searched:
+                print(f"NOT searched: {', '.join(outcome.not_searched)}")
+            for c in outcome.caveats:
+                print(f"  !! {c}")
+            print()
+            if outcome.is_absolute:
+                print("PUBLISHABLE NEGATIVE: every endpoint exact-matched, nothing left")
+                print("unsearched, no caveats. This is a finding, not a failure.")
+            else:
+                # Almost always this branch, deliberately. Proving a negative in
+                # absolute terms is usually impossible; what is provable is the
+                # bounded claim, and a reporter needs the bound stated.
+                print("BOUNDED NEGATIVE -- publishable AS SCOPED, not as an absolute:")
+                print(f"  {outcome.claim()}")
         elif isinstance(outcome, AccessBlocker):
             print(f"mechanism: {outcome.mechanism.value}")
             print(f"url:       {outcome.url}")

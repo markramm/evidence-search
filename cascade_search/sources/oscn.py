@@ -124,6 +124,13 @@ def search(county: str, lname: str = "", fname: str = "", year: int | None = Non
     return run_source(
         q, source=SOURCE, url=_url(county, lname, fname, year),
         searched=f"oscn:{county} district court docket index",
+        corpus=f"Oklahoma State Courts Network, {county} County district court docket index",
+        exact_match_supported=True,
+        not_searched=[f"Oklahoma counties other than {county}",
+                      "federal courts", "sealed, expunged, or juvenile matters",
+                      "cases filed under a different name spelling"],
+        caveats=["OSCN indexes FILINGS. A person with no filing in this county and year "
+                 "is absent from this index, which is not the same as having no record."],
         parse=lambda html: _parse_results(html, county),
         absent_when=_no_records,
         escalate=escalate,

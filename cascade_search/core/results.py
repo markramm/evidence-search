@@ -132,13 +132,77 @@ class Hit(Outcome):
 
 
 @dataclass
-class VerifiedAbsence(Outcome):
-    """Searched the right corpus by the right method; it is not there.
+class Probe:
+    """One endpoint asked one exact question, and got nothing back.
 
-    PUBLISHABLE. Only construct via `verified_absence()`, which enforces that
-    coverage was clean.
+    A negative is only as good as the record of what was actually asked. Prose
+    like "searched OSCN" cannot be audited, re-run, or challenged; this can.
+    """
+    source: str                      # e.g. "courtlistener"
+    endpoint: str = ""               # the URL or API path actually hit
+    query: str = ""                  # the EXACT query string sent
+    params: dict[str, Any] = field(default_factory=dict)   # filters that scoped it
+    corpus: str = ""                 # what that endpoint covers, in one line
+    result_count: int = 0
+    exact_match_supported: bool | None = None   # None = unknown, see below
+    at: float = 0.0                  # unix time of the probe
+
+    def describe(self) -> str:
+        bits = [f"{self.source}: {self.query!r} -> {self.result_count} results"]
+        if self.params:
+            bits.append("(" + ", ".join(f"{k}={v}" for k, v in self.params.items()) + ")")
+        if self.exact_match_supported is False:
+            bits.append("[FUZZY: endpoint does not honour exact-phrase matching]")
+        return " ".join(bits)
+
+
+@dataclass
+class VerifiedAbsence(Outcome):
+    """Searched the right corpora by the right methods; it is not there.
+
+    PUBLISHABLE -- but publishable claims about absence need to state their own
+    limits, because proving a negative in absolute terms is usually impossible.
+    What is actually provable is narrower and worth saying precisely: THESE
+    endpoints, asked THESE exact questions, returned nothing at THIS time.
+
+    So the record is structured rather than prose. `probes` carries one entry
+    per endpoint actually queried, with the exact query and the filters that
+    scoped it, which makes the negative auditable, reproducible, and arguable.
+    A reader can see what was NOT asked as easily as what was.
+
+    `searched` remains as the human-readable summary, derived from the probes.
     """
     searched: str = ""
+    probes: list[Probe] = field(default_factory=list)
+    #: Corpora a reader should know were NOT consulted -- the honest boundary of
+    #: the claim. A state-court silence is not a federal-court silence.
+    not_searched: list[str] = field(default_factory=list)
+    #: Why this negative might still be wrong. Populated by the source when it
+    #: knows its own blind spots (fuzzy matching, page caps, coverage gaps).
+    caveats: list[str] = field(default_factory=list)
+
+    @property
+    def is_absolute(self) -> bool:
+        """True only if every probe was exact-matched and nothing was left unsearched.
+
+        Almost never true, and that is the point: the property exists so callers
+        stop treating a bounded negative as an unbounded one.
+        """
+        return (bool(self.probes)
+                and all(p.exact_match_supported for p in self.probes)
+                and not self.not_searched
+                and not self.caveats)
+
+    def claim(self) -> str:
+        """The sentence a reporter may actually publish."""
+        n = len(self.probes)
+        head = (f"Not found in {n} searched corpus/corpora"
+                if n else "Not found")
+        if self.not_searched:
+            head += f"; NOT searched: {', '.join(self.not_searched)}"
+        if self.caveats:
+            head += f". Caveats: {'; '.join(self.caveats)}"
+        return head
 
 
 @dataclass
@@ -184,12 +248,22 @@ class AwaitingHuman(Outcome):
     capture: list[str] = field(default_factory=list)  # what to bring back
 
 
-def verified_absence(query: str, coverage: Coverage, searched: str):
+def verified_absence(query: str, coverage: Coverage, searched: str,
+                     probes: "list[Probe] | None" = None,
+                     not_searched: list[str] | None = None,
+                     caveats: list[str] | None = None):
     """Construct a VerifiedAbsence, or refuse.
 
     Guard rail: if any engine was rate-limited or errored, this is NOT a
-    verified absence — it is a tooling-limited negative, and the corpus is
+    verified absence -- it is a tooling-limited negative, and the corpus is
     emphatic that the two must never be conflated.
+
+    `probes` records what was ACTUALLY asked, endpoint by endpoint, with the
+    exact query. Proving a negative in absolute terms is usually impossible;
+    what IS provable is "these endpoints, asked these questions, returned
+    nothing at this time." A caller that passes probes gets an auditable
+    negative; one that passes none gets a prose-only claim, which is weaker and
+    now visibly so.
     """
     if not coverage.is_clean:
         return RateLimited(
@@ -197,7 +271,9 @@ def verified_absence(query: str, coverage: Coverage, searched: str):
             detail=("Cannot certify absence: coverage incomplete "
                     f"({coverage.summary()}). Tooling-limited negative, NOT content-exhausted."),
         )
-    return VerifiedAbsence(query=query, coverage=coverage, searched=searched)
+    return VerifiedAbsence(query=query, coverage=coverage, searched=searched,
+                           probes=probes or [], not_searched=not_searched or [],
+                           caveats=caveats or [])
 
 
 def replay_cached(query: str, rows, fetched_at: float, *, source: str,

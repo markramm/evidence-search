@@ -214,8 +214,12 @@ def test_web_absence_is_labelled_as_a_weak_negative(monkeypatch):
     s_, L = _kit()
     out = searxng.search('"<person-h>"', base="http://x", store=s_, limiter=L)
     assert isinstance(out, VerifiedAbsence)
-    assert "DISCOVERY tier" in out.searched
-    assert "quoted phrases" in out.searched
+    # The warning now lives in STRUCTURED fields rather than a prose blob, so a
+    # caller can act on it instead of grepping a sentence.
+    assert out.is_absolute is False, "a fuzzy tier can never yield an absolute negative"
+    assert any("quoted phrases" in c for c in out.caveats)
+    assert out.probes and out.probes[0].exact_match_supported is False
+    assert out.not_searched, "must state what it did not cover"
 
 
 def test_no_local_exact_filtering():
@@ -226,6 +230,9 @@ def test_no_local_exact_filtering():
     """
     from cascade_search.engines import searxng as m
     assert m.EXACT_PHRASE_SUPPORTED is False
+    # Guard the BEHAVIOUR, not the source text: a string check tripped on the
+    # legitimate `exact_match_supported` provenance field once that was added.
     import inspect
     src = inspect.getsource(m.search)
-    assert "exact" not in src.split('"""')[2], "no local exact-filter in the body"
+    for banned in ("_exact_terms(", "exact_filtered", "if exact:"):
+        assert banned not in src, f"local exact-filtering reintroduced via {banned}"

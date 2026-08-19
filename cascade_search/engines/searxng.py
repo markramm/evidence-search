@@ -43,7 +43,7 @@ from urllib.parse import quote
 
 from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
+from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
                             Result, replay_cached, verified_absence)
 from ..core.store import Store, cache_key
 
@@ -281,9 +281,16 @@ def search(query: str, categories: str = "general", pageno: int = 1,
         # A zero from a fuzzy tier is a weak negative. Say so in the artifact
         # rather than letting it read like a corpus-backed absence.
         return verified_absence(
-            query, cov,
-            f"searxng ({categories}) across {len(queried)} engines "
-            "[DISCOVERY tier: engines do not reliably honour quoted phrases, so "
-            "this absence is weaker than one from a corpus with known query "
-            "semantics]")
+            query, cov, f"searxng ({categories}) across {len(queried)} engines",
+            probes=[Probe(source=f"searxng:{categories}", endpoint=url, query=query,
+                          params={"categories": categories, "pageno": pageno},
+                          corpus=f"{len(queried)} upstream web engines, mixed indexes",
+                          result_count=0, exact_match_supported=EXACT_PHRASE_SUPPORTED,
+                          at=time.time())],
+            not_searched=["anything the upstream engines do not index",
+                          "paywalled, login-gated, and robots-excluded pages"],
+            caveats=["DISCOVERY tier: the engines do not reliably honour quoted phrases and "
+                     "SearXNG exposes no per-engine flag saying which do, so this negative is "
+                     "materially weaker than one from a corpus with known query semantics. "
+                     "Do not publish it as an absence without a second, exact-matched source."])
     return Hit(query=query, coverage=cov, results=out)
