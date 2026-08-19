@@ -131,7 +131,8 @@ def main(argv=None) -> int:
     w.add_argument("--base", help="instance URL (default $SEARXNG_URL or 127.0.0.1:8888)")
 
     us = sub.add_parser("usaspending", help="federal awards (no key; real counts)")
-    us.add_argument("query")
+    us.add_argument("query", nargs="?", default=None,
+                    help="recipient name (omit when using --detail)")
     us.add_argument("--detail", metavar="RECORD_ID",
                     help="full FPDS detail for one award (PSC, NAICS, competition) -- "
                          "pass meta.record_id or the bare numeric id")
@@ -262,8 +263,25 @@ def main(argv=None) -> int:
 
     if a.cmd == "usaspending":
         from .sources import usaspending as usa
+        from .core.results import Hit as _Hit_t
+        if not a.query and not a.detail:
+            print("usaspending needs a recipient name (or --detail <award-id>)",
+                  file=sys.stderr)
+            return 2
         if a.detail:
-            return _emit(usa.detail(a.detail, store, limiter), a.json)
+            # The positional query is meaningless here -- detail is keyed on the
+            # award id. Silently ignoring it meant a worker who mistyped a vendor
+            # name got ANOTHER VENDOR'S record with no warning, which on this
+            # beat is attributing one company's contract to another.
+            out = usa.detail(a.detail, store, limiter)
+            if a.query and isinstance(out, _Hit_t):
+                got = (out.results[0].meta.get("recipient") or "")
+                if a.query.strip().lower() not in got.lower():
+                    print(f"cascade-search: NOTE -- you passed query {a.query!r}, but "
+                          f"--detail is keyed on the award id and returned "
+                          f"{got!r}. The query was NOT used to select this record.",
+                          file=sys.stderr)
+            return _emit(out, a.json)
         if a.do_sum:
             return _emit(usa.dollar_sum(a.query, by_recipient=not a.keywords,
                                         award_types=usa.AWARD_GROUPS[a.group],

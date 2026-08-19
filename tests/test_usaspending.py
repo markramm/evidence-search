@@ -201,3 +201,34 @@ def test_detail_accepts_a_prefixed_or_bare_id(monkeypatch):
     s, L = _kit()
     usa.detail("usaspending:12345", store=s, limiter=L)
     assert seen["url"].endswith("/awards/12345/")
+
+
+def test_detail_ignores_the_positional_query_and_says_so(monkeypatch, capsys):
+    """--detail is keyed on the AWARD ID; the positional query is meaningless.
+
+    Silently ignoring it meant a worker who mistyped a vendor name got ANOTHER
+    VENDOR'S record with no warning -- on this beat, attributing one company's
+    contract to another. Found by a worker within an hour of the command
+    shipping.
+    """
+    import httpx
+    from cascade_search.cli import main
+    class R:
+        status_code = 200
+        def json(self):
+            return {"piid": "140P2120C0021",
+                    "recipient": {"recipient_name": "LIFELINE TRAINING, LTD"},
+                    "latest_transaction_contract_data": {"product_or_service_code": "U008"}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    main(["usaspending", "TOTALLY WRONG VENDOR", "--detail", "277838719"])
+    err = capsys.readouterr().err
+    assert "was NOT used to select this record" in err
+    assert "LIFELINE TRAINING" in err
+
+
+def test_detail_works_without_a_query():
+    """The query became optional so the correct usage is also the simple one."""
+    from cascade_search.cli import main
+    import inspect
+    src = inspect.getsource(main)
+    assert 'nargs="?"' in src
