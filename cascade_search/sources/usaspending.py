@@ -14,8 +14,12 @@ license.
 TWO WAYS TO SEARCH, and the difference decides whether your number means
 anything:
 
-  --recipient   `recipient_search_text` -- matches the RECIPIENT NAME. Use this
-                when you want a vendor's awards. Precise.
+  --recipient   `recipient_search_text` -- matches the RECIPIENT NAME. Precise
+                ON CONTRACTS. On grants, loans and direct payments it is much
+                FUZZIER: a worker checking a vendor found 14 "extra" assistance
+                awards that were all unrelated SBA COVID-era small businesses
+                with similar names -- different UEI, different state. Verify the
+                UEI before attributing any assistance award to a vendor.
   --keywords    `keywords` -- full-text across award descriptions and more. Use
                 for discovery. It is FUZZY: searching "Force Science" returns
                 NURAD Technologies, because the words appear somewhere in the
@@ -36,13 +40,36 @@ from ..core.store import Store, cache_key
 SOURCE = "usaspending"
 API = "https://api.usaspending.gov/api/v2"
 
-#: Contracts, IDVs, grants, direct payments, loans, other.
-ALL_AWARD_TYPES = ["A", "B", "C", "D", "IDV_A", "IDV_B", "IDV_C", "IDV_D", "IDV_E",
-                   "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"]
+#: USAspending requires award_type_codes to come from ONE GROUP -- mixing them
+#: returns HTTP 422 ("must only contain types from one group"). The COUNT
+#: endpoint is laxer and accepts a mixed list, which is how a combined
+#: ALL_AWARD_TYPES shipped and then failed only on the LISTING path: --count
+#: worked, --limit 422'd.
+#:
+#: These six groups are read from the API's own 422 response rather than
+#: guessed -- a first correction split them into three and was still wrong,
+#: because loans, grants, direct payments and other-financial-assistance are
+#: four separate groups, not one "assistance" bucket.
 CONTRACT_TYPES = ["A", "B", "C", "D"]
+IDV_TYPES = ["IDV_A", "IDV_B", "IDV_B_A", "IDV_B_B", "IDV_B_C",
+             "IDV_C", "IDV_D", "IDV_E"]
+GRANT_TYPES = ["02", "03", "04", "05", "F001", "F002"]
+LOAN_TYPES = ["07", "08", "F003", "F004"]
+DIRECT_PAYMENT_TYPES = ["09", "F005", "11", "-1", "F008", "F009", "F010"]
+OTHER_ASSISTANCE_TYPES = ["06", "10", "F006", "F007"]
 
-#: `internal_id` is NOT requestable -- asking for it 500s the endpoint -- but the
-#: API returns it anyway, and it is what builds the award's usaspending.gov URL.
+AWARD_GROUPS = {
+    "contracts": CONTRACT_TYPES,
+    "idvs": IDV_TYPES,
+    "grants": GRANT_TYPES,
+    "loans": LOAN_TYPES,
+    "direct_payments": DIRECT_PAYMENT_TYPES,
+    "other_assistance": OTHER_ASSISTANCE_TYPES,
+}
+
+#: Valid ONLY on the count endpoint, which accepts a mixed list.
+ALL_AWARD_TYPES = [c for codes in AWARD_GROUPS.values() for c in codes]
+
 FIELDS = ["Award ID", "Recipient Name", "Awarding Agency", "Awarding Sub Agency",
           "Award Amount", "Total Outlays", "Start Date", "End Date",
           "Description", "Contract Award Type", "recipient_id"]
@@ -135,6 +162,18 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
     store = store or Store()
     limiter = limiter or Limiter(store)
     types = award_types or CONTRACT_TYPES
+    # Refuse a mixed group here rather than letting the API 422 mid-task.
+    groups = {g for g, codes in AWARD_GROUPS.items() if set(types) & set(codes)}
+    if len(groups) > 1:
+        return AccessBlocker(
+            query=query,
+            coverage=Coverage(queried=[SOURCE], errored={SOURCE: "mixed-award-groups"}),
+            mechanism=Blocker.SERVER_ERROR, url=f"{API}/search/spending_by_award/",
+            detail=("USAspending rejects a listing that mixes award-type groups "
+                    f"({', '.join(sorted(groups))}). List one group at a time: "
+                    "--group contracts | idvs | assistance. (`--count` accepts a "
+                    "mixed list, which is why a total can succeed where a listing "
+                    "cannot.)"))
 
     key = cache_key(SOURCE, query, recipient=by_recipient, types=",".join(types),
                     date_from=date_from, date_to=date_to, page=page, limit=limit)
@@ -153,7 +192,12 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
     data, err = _post("/search/spending_by_award/", {
         "filters": _filters(query, by_recipient, types, date_from, date_to),
         "fields": FIELDS, "limit": limit, "page": page,
-        "sort": "Award Amount", "order": "desc"})
+        # Loans have no "Award Amount" field -- sorting on it returns HTTP 400
+        # ("not found in Loan Award mappings"). Sort by the one field every
+        # group shares, and let the caller re-sort if they care.
+        **({"sort": "Award Amount", "order": "desc"}
+           if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
+           else {"sort": "Award ID", "order": "desc"})})
     if err:
         kind, detail = err
         if kind in ("timeout", "rate"):

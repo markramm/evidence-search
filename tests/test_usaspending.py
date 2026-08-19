@@ -81,3 +81,51 @@ def test_timeouts_are_rate_limited_not_blocked(monkeypatch):
     monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (None, ("timeout", "slow")))
     s, L = _kit()
     assert isinstance(usa.counts("x", store=s, limiter=L), RateLimited)
+
+
+def test_award_groups_are_never_mixed_on_a_listing():
+    """USAspending rejects a mixed award_type_codes list with HTTP 422.
+
+    The COUNT endpoint is laxer and accepts one, which is how a combined
+    ALL_AWARD_TYPES shipped and then failed only on the LISTING path: --count
+    worked, --limit 422'd. Groups are read from the API's own error response --
+    a first correction guessed three groups and was still wrong, because loans,
+    grants, direct payments and other-financial-assistance are four.
+    """
+    assert len(usa.AWARD_GROUPS) == 6
+    seen = set()
+    for codes in usa.AWARD_GROUPS.values():
+        assert not (seen & set(codes)), "groups must not overlap"
+        seen |= set(codes)
+    assert set(usa.ALL_AWARD_TYPES) == seen
+
+
+def test_mixed_groups_are_refused_before_the_api_422s(monkeypatch):
+    from cascade_search.core.results import AccessBlocker
+    s, L = _kit()
+    out = usa.search("x", award_types=usa.CONTRACT_TYPES + usa.LOAN_TYPES,
+                     store=s, limiter=L, use_cache=False)
+    assert isinstance(out, AccessBlocker)
+    assert "one group at a time" in out.detail
+
+
+def test_sort_is_group_aware(monkeypatch):
+    """Loans have no 'Award Amount' field; sorting on it returns HTTP 400
+    ('not found in Loan Award mappings')."""
+    seen = {}
+
+    def spy(path, body, timeout=45.0):
+        seen["sort"] = body.get("sort")
+        return {"results": [], "page_metadata": {}}, None
+
+    monkeypatch.setattr(usa, "_post", spy)
+    # A fresh store per call: sharing one means the min-interval refuses the
+    # second reservation, _post never runs, and the assertion reads a stale
+    # value from the first call rather than testing anything.
+    s1, L1 = _kit()
+    usa.search("x", award_types=usa.CONTRACT_TYPES, store=s1, limiter=L1, use_cache=False)
+    assert seen["sort"] == "Award Amount"
+
+    s2, L2 = _kit()
+    usa.search("x", award_types=usa.LOAN_TYPES, store=s2, limiter=L2, use_cache=False)
+    assert seen["sort"] == "Award ID"

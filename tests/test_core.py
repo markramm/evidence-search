@@ -372,3 +372,16 @@ def test_gate_creation_dedupes_on_url(tmp_path):
     assert t1 == t2, "same target must reuse the original token"
     assert t1 != t3
     assert len(s.list_jobs("awaiting_human")) == 2
+
+
+def test_extract_announces_display_truncation(tmp_path, capsys):
+    """Silent truncation corrupted seven files for a worker who only noticed
+    when parsing failed -- data loss that looks like success."""
+    from cascade_search.cli import main
+    f = tmp_path / "big.txt"
+    f.write_text("x" * 9000)
+    main(["extract", str(f), "--text"])
+    out = capsys.readouterr().out
+    assert "TRUNCATED for display" in out
+    assert "9,000 chars total" in out
+    assert "--json" in out, "must name the way to get the full text"

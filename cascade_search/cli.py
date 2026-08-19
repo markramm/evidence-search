@@ -116,7 +116,12 @@ def main(argv=None) -> int:
     us.add_argument("--keywords", action="store_true",
                     help="full-text keyword search (FUZZY) instead of recipient-name match")
     us.add_argument("--all-types", action="store_true",
-                    help="grants/loans/direct payments too, not just contracts")
+                    help="COUNT only: include every award group in the total")
+    us.add_argument("--group",
+                    choices=["contracts", "idvs", "grants", "loans",
+                             "direct_payments", "other_assistance"],
+                    default="contracts",
+                    help="which award group to LIST (the API rejects a mixed list)")
     us.add_argument("--from", dest="date_from", help="award start on/after YYYY-MM-DD")
     us.add_argument("--to", dest="date_to", help="award start on/before YYYY-MM-DD")
     us.add_argument("--page", type=int, default=1)
@@ -219,11 +224,12 @@ def main(argv=None) -> int:
 
     if a.cmd == "usaspending":
         from .sources import usaspending as usa
-        types = usa.ALL_AWARD_TYPES if a.all_types else usa.CONTRACT_TYPES
         if a.count:
+            types = usa.ALL_AWARD_TYPES if a.all_types else usa.CONTRACT_TYPES
             return _emit(usa.counts(a.query, by_recipient=not a.keywords,
                                     award_types=types, date_from=a.date_from,
                                     date_to=a.date_to, store=store, limiter=limiter), a.json)
+        types = usa.AWARD_GROUPS[a.group]
         return _emit(usa.search(a.query, by_recipient=not a.keywords, award_types=types,
                                 date_from=a.date_from, date_to=a.date_to,
                                 limit=a.limit, page=a.page, store=store,
@@ -402,7 +408,18 @@ def main(argv=None) -> int:
             for i, t in enumerate(payload.get("tables", [])[:5], 1):
                 print(f"  table {i}: {len(t)} rows | {' | '.join(t[0][:5])}")
             if "text" in payload:
-                print(payload["text"][:4000])
+                # Truncating without a marker corrupted seven files for a worker
+                # who only noticed when parsing failed -- silent data loss that
+                # looks like success. Say what was cut, and offer the way out.
+                txt = payload["text"]
+                cap = a.max_chars or 4000
+                if len(txt) > cap:
+                    print(txt[:cap])
+                    print(f"\n[TRUNCATED for display: {len(txt):,} chars total, "
+                          f"{len(txt) - cap:,} not shown. Use --json for the full text, "
+                          f"or --max-chars N to raise this cap.]")
+                else:
+                    print(txt)
         return 0
 
     if a.cmd == "record":
