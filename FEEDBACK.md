@@ -1351,3 +1351,57 @@ the tool did for me today and it wasn't in any doc.
 
 **Overall severity:** slowed. Task completed, nothing blocked. Friction 3 is the one worth
 fixing first — it sits on a first-class source and it nearly let a mischaracterised case stand.
+
+## 2026-08-19 · ledger-lead-corroborate-cumberland-county-me · claude-sonnet-5
+
+**Task:** corroborate a single-tier-2-sourced daily-capture ledger drop (Cumberland County ME
+3-1 vote to drop ICE from the jail's USMS contract) with a second, ideally tier-1, source.
+
+**Command:** `$CS web "site:cumberlandcounty.org commissioners meeting April 2026 ICE" --wait`
+**Expected:** either results or a clean `RateLimited`/`AccessBlocker` typed outcome.
+**Got:** `RateLimited`, exit 3, with a well-formed message: "Cannot certify absence: coverage
+incomplete (78/82 responsive | RATE-LIMITED: searxng:brave, searxng:google cse | ERRORED:
+searxng:duckduckgo, searxng:startpage)." This is a genuinely good error — it told me exactly
+what NOT to conclude. No complaint about this one; noting it because it's the mechanism working
+as designed and I want that on record too. Retried the same query shape 5 seconds later
+(un-timed manual retry, not a `sleep`) and it went through clean. **Would have helped:** the
+tool already tells you it's rate-limited; it could optionally suggest a retry-after estimate
+even when the upstream doesn't supply one (e.g. "no retry-after given; other `web` calls in
+this session succeeded within ~5s, try again shortly") so an agent doesn't have to guess whether
+5s or 30s is the right wait. Minor — I guessed right this time. **Severity:** annoyed.
+
+**Friction — Legistar / government meeting-portal JS rendering.** `$CS extract
+"https://cumberlandcounty.legistar.com/MainBody.aspx" --text` and the sibling `Calendar.aspx`
+and `Legislation.aspx` pages all returned only the page chrome (nav, filter-dropdown labels,
+"select" placeholder text) — the actual meeting/legislation rows are loaded via AJAX and never
+appear in the static HTML. This is the exact source type the task asked me to check (county
+commission minutes/vote record — the task description explicitly called county minutes "usually
+published" and tier-1). Legistar/Granicus is an extremely common vendor for county- and
+city-government meeting records across the US, not a one-off site, so this is likely to recur
+on future local-government corroboration tasks. **Had to figure out:** that the empty-looking
+result was a JS-rendering gap and not a real "nothing here" — nothing in the `extract` output
+flagged this as a JS-only page (contrast with the `AccessBlocker` / `http-404` typed outcome I
+got on a different guessed URL on the same site, which WAS clearly labeled). I only caught it
+because the extracted text was suspiciously short and all UI-chrome, no data rows — an agent
+skimming faster could plausibly mistake "no results shown" for "no such meeting," which would be
+a false negative on a primary-source check. **Would have helped:** `extract` detecting a
+JS-shell page (e.g., body text under some token threshold with no matching content, combined
+with known JS-app signatures/frameworks in the HTML) and returning an `AccessBlocker`-style typed
+outcome (`mechanism: js-only` — this mechanism is already listed in the skill docs as a category
+`cascade-search`'s browser tier is supposed to escalate to, but static `extract` didn't flag it
+for escalation here) rather than a silent low-content `Hit`. I worked around it by falling back
+to `web` search to find secondary reporting of the same meeting (a YouTube upload of the meeting
+recording, confirming the date) instead of the primary Legistar record — a workaround I
+documented explicitly in the KB entry rather than silently treating it as verified, but it's
+exactly the kind of routing-around the hallway-testing skill flags as the expensive failure
+mode if it goes unreported. **Severity:** slowed (did not block — task still closed `done` with
+strong tier-1 news corroboration — but the county's own primary record, which is what the ledger
+disposition specifically asked for, remains unretrieved).
+
+**Worked well:** `extract --text` on live news articles was excellent — six separate outlet
+pages (Portland Press Herald x2, Maine Public, WMTW, Bangor Daily News, Maine Wire) each reduced
+95-99% while preserving every fact I needed (commissioner names, vote tallies, dollar figures,
+direct quotes) without a single re-fetch. The `news` RSS command's "redirect only, not citable"
+labeling on every Google News result is a good guardrail — it stopped me from accidentally
+citing an uncitable redirect URL and pushed me to `web` for a citable link, which is exactly the
+right nudge.
