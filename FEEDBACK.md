@@ -555,3 +555,60 @@ This was a "MARK ACTION" ticket: assignee had already been hand-set to `mark-com
 **Worked well — `task list -f json` piped through a small python filter was the fastest way to get a clean cross-child status table.** For a synthesis task specifically (as opposed to a single-task research pass), what I actually needed first was "what state is every sibling task in, right now" — a single `task list -k cascade-research -f json | python3 -c "..."` grep-and-print got me a full status/priority/assignee table for the ~15 sibling tickets in one call, which is what let me tell (before reading a single work log) which threads were live-claimed by other agents this tick (stay off) vs. genuinely stale/open (worth flagging as the next dispatch). This isn't a novel pattern relative to the skill doc, but it's worth confirming it scales fine to a ~15-sibling family with no friction.
 
 **Observation, not a complaint — the org profile file itself is where most of the real synthesis already lived.** By the time I read `organizations/<vendor-a>-profile.md` in full, nearly everything I would have wanted to say in a parent-task synthesis was already stated there, per-section, by the workers who wrote it (each section timestamped and self-correcting against the master memo). The parent task's own "Work Log" ended up being a pointer-and-triage document — what's closed, what's live, what's genuinely untouched — rather than new analysis, because the analysis had already happened in the org profile. Not a tool problem, just worth naming for whoever designs the next parent-task synthesis prompt: if the org profile is well-maintained, the parent task's marginal value is triage (which sibling to dispatch next), not restating findings.
+
+## 2026-08-19 · S1 keystone rewrite — verifying Du Bois 1900 Paris Exposition facts · agent:claude-sonnet-5-parallel-tick3-d
+**Task:** a draft-revision ticket (rewrite THE WITNESSES keystone), so most of the work was reading corpus, not searching. The one place I genuinely needed the open web was verifying new claims about Du Bois's 1900 Paris Exposition data portraits — this material did not exist anywhere in the KB and I was about to make it the piece's cold-open artifact, so it needed independent verification before I'd trust it in a keystone.
+
+**Worked well — `web` gave a clean, high-precision first pass.** `cascade-search web "Du Bois 1900 Paris Exposition data visualization charts Library of Congress" --wait` returned the LOC's own resource guide and item record at #1-3, Public Domain Review and the "Exhibit of American Negroes" Wikipedia page right behind — i.e. tier-1 (LOC) and reasonable tier-2 sources both surfaced on the first query, no query reformulation needed. Coverage line (`79/82 responsive`) made it easy to trust the completeness of that pass without extra work.
+
+**Worked well — `extract --text` on the LOC resource guide and Public Domain Review pages was exactly the right tool.** Two calls, both fast, both returned readable prose with the facts I needed (Calloway/Murray collaborators, chart counts, Grand Prize) without me having to wade through page chrome. No friction.
+
+**Friction — `extract` on `loc.gov/pictures/item/...` hit a Cloudflare `AccessBlocker`, and I didn't retry through the browser-escalation path. Severity: cosmetic/non-blocking.**
+```
+$ cascade-search extract "https://www.loc.gov/pictures/item/2005679642/" --text --wait
+== AccessBlocker ==
+mechanism: cloudflare-managed-challenge
+detail:    HTTP 403
+ESCALATABLE: a real browser session could plausibly pass this gate.
+```
+The typed outcome did its job — I knew immediately this was a tooling block, not evidence the page/collection doesn't exist, and moved on to corroborating the same facts (chart count, item description) via other tier-1/tier-2 sources rather than treating the gap as a finding. I didn't invoke the browser escalation myself since loc.gov is exactly the kind of public-records source the allow-list should cover and a secondary LOC page (the resource guide) had already given me what I needed — but flagging in case that page specifically is a recurring block worth pre-escalating for future workers who need the item record directly rather than just corroboration.
+
+**Net:** clean, fast, no wasted calls. Two `web`/`extract` calls got me from zero corpus coverage to three independently-corroborated facts (collaborators, chart count, reception/Grand Prize) I was comfortable citing in a keystone piece. This is a small, low-drama use case relative to today's other entries, but it's the kind of "does this actually save time on a real verification need" test the tool should keep passing.
+
+## 2026-08-19 · Burke Law Group $150M ORR withdrawal (task orr-withdrew-the-burke-law-group-...) · agent:claude-opus-4-8-parallel-tick3-a
+**Task:** find why a $150M ORR single-source cooperative agreement to a Houston law firm was withdrawn 11 days after it was announced, what replaced it, and who the firm is. `fedreg` + `usaspending` + `courtlistener` + `extract`, plus WebSearch.
+
+**Worked well 1 — `fedreg` answered the central question outright, and its two-result precision was itself the finding.** `cascade-search --wait fedreg "Burke Law Group"` returned exactly the two notices as results #1 and #2 (both `*UNIQUE*`), and — this is the part that mattered — nothing else Burke-related in the whole corpus. "There is no re-announcement of the $150M" is a claim I could only make because the corpus is defined and the result set was clean. Results #3-20 were obvious noise (Medicare OPPS, gas pipelines, marine mammals) matching on "Burke"/"Law"/"Group" separately, which is fine and self-evidently ignorable. This is the tool doing exactly what it's for.
+
+**Worked well 2 — `extract --text` on a paywall-adjacent news page, 95.5% reduction, and it beat WebFetch outright.** WebFetch on houstonchronicle.com returned "unable to fetch" and on texastribune.org returned a hard `HTTP 403 Forbidden`. `$CS --wait extract "https://www.houstonpublicmedia.org/.../559368/..." --text` pulled the full AP wire story at ~31,788 → ~1,419 tokens, and that single extraction carried the ORR press statement, the firm's "small portion" quote, the Shapiro/Shubow roster detail, the USCRI $20M/through-December replacement figure, AND the CLSEPA plaintiff quote. Four of my five open questions came out of one call. `extract` on a syndicated-wire mirror is a better move than WebFetch on the paywalled original, and that's now twice in this log.
+
+**Worked well 3 — `usaspending --count --all-types` gave me the publishable negative the writeup needed.** `VerifiedAbsence` on "Burke Law Group" is load-bearing in the artifact ("no federal money of any type ever reached this firm"), and I would not have written it that confidently off an empty list.
+
+**Friction 1 — I re-committed the documented `head` exit-code mistake, on the same day it's warned about two entries above mine in this file. Severity: annoyed, self-inflicted, but suggests a fix.**
+```
+$ $CS --wait usaspending "Burke Law Group" --count --all-types 2>&1 | head -25
+echo "=== EXIT: $? ==="     # printed 0
+```
+Then, unpiped:
+```
+$ OUT=$($CS --wait usaspending "Burke Law Group" --count --all-types 2>&1); echo "TRUE EXIT: $?"
+TRUE EXIT: 1
+```
+**Observation:** exit was 0 through the pipe, 1 without. **Conclusion:** the tool is correct and I was wrong — same as the two agents cited in SKILL.md. What's interesting is that I had *read that exact warning* in SKILL.md maybe fifteen minutes earlier and still did it, because piping to `head` is muscle memory for "don't blow up my context," and the outcome word `VerifiedAbsence` was printed right there in the body so I wasn't reading for the exit code at all. **Would have helped:** the human-readable output already prints the outcome name — that's what saved me. So the fix may be docs-side and small: SKILL.md teaches `if $CS ...; then` exit-code branching in its very first example, *then* warns about pipelines 150 lines later under "Report the friction." Putting the pipeline caveat immediately adjacent to the exit-code branching example (where the reader forms the habit) would land better than putting it in the feedback section (where the reader is already done). Cheap doc reorder; this is now the third independent report of the same stumble.
+
+**Friction 2 — `web` returned zero results with 78/82 coverage and honestly refused to certify, which is correct behavior, but `retry after: Nones` is a broken string. Severity: cosmetic (the `Nones`), annoyed (the empty result).**
+```
+$ $CS --wait web "\"Burke Law Group\" Houston immigration ORR \$150 million unaccompanied children" 2>&1 | head -40
+== RateLimited ==
+coverage: 78/82 responsive | 1 distinct index(es) | RATE-LIMITED: searxng:brave, searxng:google cse | ERRORED: searxng:duckduckgo, searxng:startpage
+retry after: Nones
+detail:    Cannot certify absence: coverage incomplete ...
+```
+`retry after: Nones` is a `None` interpolated into an f-string with an `s` suffix — should suppress the line entirely when there's no retry-after value, or print `unknown`. Tiny, but it's the kind of thing that makes an agent wonder if it mis-parsed the output.
+The substantive half: this was a *heavily* loaded query (quoted phrase + five extra terms) and the story was on the front page of NPR/ABC/Texas Tribune that week, so zero results with 78/82 engines responding is a surprising miss. I switched straight to WebSearch, which returned ten on-point outlets on the first identical-intent query. **Not filed as a bug** — SKILL.md is explicit that `web` is a discovery tier whose engines don't honour quoted phrases, and that a `web` zero is a weak negative; the tool told me so and downgraded correctly. But the practical lesson for the docs is narrower than "web is fuzzy": **`web` degrades badly on long queries with a quoted phrase, precisely the query shape an agent writes when it wants a specific entity.** One line — "keep `web` queries short; move entity precision to a corpus source" — would have saved me the call.
+
+**Where the results fell short (corpus gap, not a bug) — `courtlistener '"Burke Law Group"' --type r` was the wrong corpus for the question, and its `*UNIQUE*` hits are false friends.** 20 results, `total_matches` present, all fine mechanically. But the firm was founded in 2023 and had no federal award, so the phrase matches mostly as *counsel of record on unrelated dockets* (Smith v. Ideal Towing, Texas v. EPA, an opiate MDL) — a fuzzy-name-collision problem that the recipient-name-vs-keyword caveat in SKILL.md covers for `usaspending` but nothing covers for `courtlistener`. Result #5 *was* CLSEPA v. HHS, which looked like a hit and was really the phrase appearing in a docket I'd already read from another route. **Would have helped:** a caveat parallel to the usaspending one — "a quoted firm name in `courtlistener` matches attorney-of-record appearances, not party status; use `--type d` or read the party field before treating a hit as involvement." I nearly recorded "Burke Law Group appears in the CLSEPA docket" as a finding before checking what the match actually was.
+
+**Note on the task rather than the tool, since it affects dispatch:** the ticket said "the corpus has almost nothing on it," but a prior pass had already archived both FR notices in-repo with SHA-256 and written a source note containing the withdrawal's operative sentence. My first `fedreg` call was therefore redundant with work already on disk. A `~/kb/kb search` before the first cascade-search call is what caught it — worth keeping that ordering in the worker skill (it already is, Step 5 item 1; I'm confirming it earns its place).
+
+**Severity:** slowed at worst. All four research questions were answered, three from tier-1 primary documents, and the one confident-wrong-answer risk in the task (asserting the injunction caused the withdrawal) was avoidable because the *primary document itself* named the actual cause. `fedreg` + `extract` did the real work here.
