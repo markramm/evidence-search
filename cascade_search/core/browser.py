@@ -19,7 +19,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
-from .results import AccessBlocker, AwaitingHuman, Blocker, Coverage, GateType, Hit, Result
+from .results import AccessBlocker, AwaitingHuman, Blocker, Coverage, GateType
 from .store import Store
 
 # Public-records hosts only. Extend deliberately, with a reason.

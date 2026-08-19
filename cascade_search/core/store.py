@@ -50,9 +50,13 @@ def normalize_url(url: str) -> str:
         host = host[4:]
     if p.port:
         host = f"{host}:{p.port}"
+    # Strip ANALYTICS params only. `ref` and `source` were previously stripped
+    # as tracking, but on government sites they are frequently SEMANTIC -- a
+    # docket's source system, a registry's referring dataset -- and dropping
+    # them collapses two distinct records into one in the dedup path.
     q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
          if not (k.lower().startswith(("utm_", "fbclid", "gclid", "mc_"))
-                 or k.lower() in {"ref", "source", "_ga"})]
+                 or k.lower() in {"_ga", "_gl", "igshid", "mkt_tok"})]
     path = p.path.rstrip("/") or "/"
     return urlunsplit((p.scheme.lower() or "https", host, path, urlencode(q), ""))
 

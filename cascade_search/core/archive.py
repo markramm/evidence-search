@@ -7,10 +7,18 @@ only at QC. If the tool fetches it, the tool archives it.
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from pathlib import Path
 
-DEFAULT_ARCHIVE = Path("/Users/markr/tcp-kb-internal/cascade-research/documents/sources/files")
+#: Where retrieved documents land. Override with CASCADE_ARCHIVE.
+#:
+#: This used to be an unconditional absolute path into one operator's KB, which
+#: made the tool unusable by anyone else and -- worse -- silently wrote into a
+#: different KB than the install instructions implied.
+DEFAULT_ARCHIVE = Path(
+    os.environ.get("CASCADE_ARCHIVE")
+    or Path.home() / "tcp-kb-internal/cascade-research/documents/sources/files")
 MANIFEST = "MANIFEST-cascade-search.txt"
 
 

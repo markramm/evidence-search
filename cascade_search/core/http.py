@@ -9,12 +9,20 @@ import re
 
 import httpx
 
-from .results import AccessBlocker, Blocker, RateLimited, Coverage
+from .results import AccessBlocker, Blocker, RateLimited
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
 # Signatures observed in production 2026-08-19.
+# A framework mount point or bundle reference -- evidence the emptiness is a
+# shell awaiting hydration, not simply a short page.
+_SPA_SHELL = re.compile(
+    r'id=["\'](root|app|__next|__nuxt|ember-basic-dropdown-wormhole)["\']'
+    r'|<div[^>]+data-reactroot'
+    r'|src=["\'][^"\']*(bundle|runtime|polyfills|main)[.-][^"\']*\.js',
+    re.I)
+
 _SIGNATURES = [
     (re.compile(r"turnstile", re.I), Blocker.TURNSTILE),
     (re.compile(r"cf-browser-verification|managed challenge|challenge-platform", re.I), Blocker.CLOUDFLARE),
@@ -37,8 +45,17 @@ def detect_blocker(status: int, body: str) -> Blocker | None:
     if status >= 500:
         return Blocker.SERVER_ERROR
     # A near-empty body with script tags and no text is an SPA shell.
+    #
+    # Thresholds are tuned against the shells observed 2026-08-19 (SAM.gov
+    # entity detail, SBA DSBS): both were <2KB with a root div and bundle
+    # tags. A false positive is not free -- JS_ONLY escalates to a browser,
+    # which spends a Playwright launch -- so we additionally require a
+    # mount-point or bundle signature rather than trusting size alone. A
+    # legitimately small page (a 404 stub, a plain redirect notice) has
+    # neither.
     if status == 200 and len(body.strip()) < 2000 and body.count("<script") >= 2 \
-       and len(re.sub(r"<[^>]+>", "", body).strip()) < 200:
+       and len(re.sub(r"<[^>]+>", "", body).strip()) < 200 \
+       and _SPA_SHELL.search(body):
         return Blocker.JS_ONLY
     return None
 

@@ -170,3 +170,34 @@ def test_page_text_strips_chrome():
     html = "<html><nav>MENU</nav><script>var x=1</script><body><p>real content</p></body></html>"
     t = page_text(html)
     assert "real content" in t and "MENU" not in t and "var x" not in t
+
+
+def test_normalize_url_keeps_semantic_gov_params():
+    """`ref` and `source` are frequently SEMANTIC on government sites.
+
+    Stripping them as tracking collapsed two distinct records into one in the
+    dedup path.
+    """
+    a = normalize_url("https://gov.example/case?source=oscn&id=1")
+    b = normalize_url("https://gov.example/case?source=recap&id=1")
+    assert a != b, "distinct source= records must not collapse"
+    assert "ref=" in normalize_url("https://gov.example/x?ref=dataset-a")
+
+
+def test_normalize_url_still_strips_analytics():
+    assert normalize_url("https://WWW.Example.com/A/?utm_source=x&id=3") == "https://example.com/A?id=3"
+    for junk in ("fbclid=1", "gclid=1", "_ga=1", "mc_cid=1", "igshid=1"):
+        assert junk.split("=")[0] not in normalize_url(f"https://a.com/b?{junk}&keep=1")
+        assert "keep=1" in normalize_url(f"https://a.com/b?{junk}&keep=1")
+
+
+def test_js_only_requires_spa_evidence_not_just_smallness():
+    """JS_ONLY escalates to a browser, so a false positive costs a Playwright launch."""
+    shell = '<html><head><script src="/main.a1b2.js"></script>' \
+            '<script src="/runtime.js"></script></head><body><div id="root"></div></body></html>'
+    assert detect_blocker(200, shell) is Blocker.JS_ONLY
+
+    # Small, script-bearing, but NOT a shell: no mount point, no bundle.
+    stub = '<html><head><script>var a=1</script><script>var b=2</script></head>' \
+           '<body><p>Record not available.</p></body></html>'
+    assert detect_blocker(200, stub) is None
