@@ -612,3 +612,86 @@ The substantive half: this was a *heavily* loaded query (quoted phrase + five ex
 **Note on the task rather than the tool, since it affects dispatch:** the ticket said "the corpus has almost nothing on it," but a prior pass had already archived both FR notices in-repo with SHA-256 and written a source note containing the withdrawal's operative sentence. My first `fedreg` call was therefore redundant with work already on disk. A `~/kb/kb search` before the first cascade-search call is what caught it — worth keeping that ordering in the worker skill (it already is, Step 5 item 1; I'm confirming it earns its place).
 
 **Severity:** slowed at worst. All four research questions were answered, three from tier-1 primary documents, and the one confident-wrong-answer risk in the task (asserting the injunction caused the withdrawal) was avoidable because the *primary document itself* named the actual cause. `fedreg` + `extract` did the real work here.
+
+## 2026-08-19 · <county-a> Claims Paid multi-month sample (sample-<county-a>-claims-paid-reports-...) · agent:claude-sonnet-5-parallel-tick3-b
+**Task:** sample 18 <county-a> Board agenda-packet PDFs (Finance and Budget Committee, 2016-2023) for
+Sheriff training-category payee rows, checking for a handful of specific vendor names ("<vendor-a>" etc).
+The task prompt explicitly warned that `extract` had previously grepped raw PDF binary on these large
+county packets and reported a false "100.0% reduction, zero matches" absence, and said this was "fixed
+within the last hour" — verify the `source: PDF text layer (N chars, exact)` line is present before
+trusting a result. So this session both used the tool and specifically re-tested the claimed fix.
+
+**The remote-PDF text-layer fix is real and verified — worked well.** On the actual packet PDF I was
+working with (`AG PKT 23-10 Finance.pdf`, 1.57M chars, ~394K raw tokens):
+```
+$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "Sheriff" --wait
+== Extract == https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
+source:   PDF text layer (1,578,283 chars, exact)
+raw ~394,570 tok -> extracted ~3,943 tok (99.0% reduction)
+  [Sheriff] ...Tree Services T. Resolution: Authorizing a Contract Extension...
+```
+Real, legible, correctly-attributed matches — the `source:` line is present and accurate, char count
+matches the actual document. This is a genuine fix relative to what the task described, confirmed on a
+live remote URL, not just a local file.
+
+**Friction — but `extract --grep` still returns a false absence on this exact same document, for terms
+later in the file, with no error and no signal that anything went wrong. Severity: blocked (would have
+cost the session's one real finding had I trusted it and not fallen back to pdftotext).**
+
+I never actually ran `extract --grep "<vendor-a>"` during the main research pass — the task told me to
+use `pdftotext -layout` locally instead and I did, which is how I found "<vendor-a> interdiction
+workshop hotel" ($531.48 + $905.80, Sheriff p-card section) buried around line 1166 of a 22,430-line
+extracted text file. After finding it by hand, I went back and specifically re-tested `extract --grep`
+against the *exact same remote URL* to see whether the claimed fix would have caught it:
+```
+$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "Desert" --wait
+== Extract == https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
+source:   PDF text layer (1,578,283 chars, exact)
+raw ~394,570 tok -> extracted ~28 tok (100.0% reduction)
+$ echo $?
+0
+```
+No match lines, no "no matches found" message, exit 0 — the *exact same output shape* the task warned
+about, except this time the `source:` line is genuinely accurate (the fix for the binary-grep bug is
+real), so the failure mode has moved rather than disappeared. I confirmed "Desert" (capital D) appears
+twice in the document via `grep -c -i desert` on my own `pdftotext -layout` output of the identical PDF —
+ground truth is a real hit, not a typo on my part. To rule out case-sensitivity or a stopword issue I
+retried with `"<vendor-a>"`, `"interdiction"`, `"LEADSONLINE"`, and `"CelleBrite"` — all four are
+verified-present strings in the same p-card table (LeadsOnline LLC and CelleBrite Inc. are payee names a
+few hundred lines from "<vendor-a>" in my local extraction) — **all four returned the identical
+`~28 tok / 100.0% reduction / zero match lines / exit 0` shape.** Only `--grep "Sheriff"` (which appears
+in the document's very first pages, in resolution titles) returned real matches.
+
+**Working theory, not confirmed:** this looks like a scan-depth/truncation issue rather than a decode
+issue — `extract` appears to search only a prefix of the 1.57M-char text layer (department-agenda-item
+titles near the front all matched; specific payee-table rows ~1,100+ lines into the extracted text did
+not), while still reporting the full document's char count in the `source:` line. That combination — full
+char count reported, but only a prefix actually searched — is what makes the absence look trustworthy
+when it isn't. I did not instrument the tool internals to confirm this, so treat it as a hypothesis a
+maintainer with source access should check, not a diagnosis.
+
+**Would have helped:** either (a) print something explicit when zero grep matches are found —
+`0 matches in N chars scanned` — distinguishing "scanned everything, found nothing" from silence, or
+(b) if there is a scan-depth cap on large PDFs, name it in the output the same way the coverage line names
+engine gaps in `web` (`80/82 responsive`) — e.g. `scanned: 340,000/1,578,283 chars`. Either would have let
+me trust or distrust the result without falling back to a second tool.
+
+**Net for this task:** no harm done, because the task prompt itself told me not to trust `extract` here
+and to use `pdftotext -layout` locally, and that is exactly what surfaced the finding. But the specific
+claim "this is now fixed, if you don't see the source line something is wrong" is only half true on this
+document: the source line is present and correct, and the result is *still* wrong. A worker without the
+task's explicit warning, seeing an accurate-looking `source:` line and a clean `100.0% reduction`, would
+have reported "<vendor-a> does not appear in the September 2023 <county-a> packet" — which is false.
+
+**Worked well, unprompted by the task — discovering the county's own SharePoint list API.** Not a
+cascade-search finding, but worth naming since it's a reusable pattern other county/municipal-government
+tasks in this KB will hit: `kanecountyil.gov` runs on SharePoint, and its committee page
+(`/Pages/CountyBoard/committee.aspx?cID=7`) embeds the exact `_api/web/lists/getbytitle('Events')/items?
+$select=...&$expand=AttachmentFiles&$filter=Status eq 'Scheduled' and Committee eq <id>` query it uses
+client-side to render the meeting list. Calling that endpoint directly with `curl` + `ACCEPT:
+application/json;odata=nometadata` returned all 334 Finance Committee meetings back to 1999 with their
+packet-attachment filenames and URLs in one shot — far better than guessing packet URLs via `web`/
+WebSearch one month at a time, and something `cascade-search` has no dedicated client for (reasonably —
+this is one CMS's private-but-undocumented API, not a general public-records source). Flagging in case a
+"government SharePoint sites often expose their event/document list via `_api/web/lists`" pattern note
+belongs somewhere findable for future county-government tasks, since it isn't specific to <county-a>.
