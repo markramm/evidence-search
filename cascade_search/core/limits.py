@@ -61,6 +61,19 @@ POLICIES: dict[str, Policy] = {
         note="SvelteKit __data.json endpoint; param is q= not search=. "
              "Undocumented internal API -- pace politely, expect shape changes.",
     ),
+    # Crossref asks for a mailto in the UA (the "polite pool"); we send one.
+    # A RESOLVER, not a counting source -- its search totals are meaningless.
+    "crossref": Policy(
+        windows=[(60, 40)], min_interval_s=0.3,
+        note="No key. Polite-pool UA with mailto. DOI lookup is exact and "
+             "authoritative; title search is FUZZY across ~150M records and its "
+             "totals are NOT measurements.",
+    ),
+    "federal_register": Policy(
+        windows=[(60, 30)], min_interval_s=0.4,
+        note="No key, no advertised limit. `count` IS a real total -- the corpus "
+             "is a defined body of government documents. 404 means zero results.",
+    ),
     "docs": Policy(
         windows=[(60, 25)], min_interval_s=0.3,
         note="Documentation llms.txt/sitemap indexes. No key, no search engine.",

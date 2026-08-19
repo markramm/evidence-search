@@ -76,6 +76,8 @@ fi
 | `docs` | none | 25/min | Documentation `llms.txt` indexes. Sites: `claude-code`, `claude-api`. |
 | `searxng` | none | 30/min | General web via a LOCAL container. 251 engines; coverage rebuilt from its metadata. |
 | `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — the countable primitive. |
+| `fedreg` | none | 30/min | Federal Register rules/notices/EOs. `count` is a real total. |
+| `crossref` | none | 40/min | Scholarly records. DOI lookup is exact; title search is FUZZY. |
 | `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
 
@@ -266,6 +268,30 @@ FUZZY: searching "Force Science" returns NURAD Technologies, because the words
 appear somewhere in the record. Keyword counts therefore carry an explicit
 caveat, because a count of records *containing* words is not a count of awards
 *to* anyone.
+
+**Know which sources can count.** This distinction has produced the same bug
+three times, so it is now explicit per source:
+
+| Source | Counts? | Why |
+|---|---|---|
+| `usaspending` | **yes** | defined corpus, real totals by award type |
+| `fedreg` | **yes** | defined corpus of government documents |
+| `courtlistener` | **yes**, quoted | reports `total_matches`; quote the phrase |
+| `crossref` | **no** | matches loosely across ~150M records |
+| `web` | **no** | engines ignore quotes; totals are not countable |
+
+Crossref is a **resolver**, not a search index. A DOI lookup is exact and
+authoritative — it returns the journal, year, and every author, which is usually
+what a citation needs even when the publisher's full text is walled. Its *title*
+search is discovery only: probing "Forced Science" returned "Forced to Pursue
+Science: Entity List Triggers" as the top hit, so every non-exact result carries
+a verify-before-citing warning.
+
+```bash
+cascade-search crossref 10.1177/10986111251357498   # exact, authoritative
+cascade-search crossref "Forced Science"            # fuzzy, verify the match
+cascade-search fedreg "immigration detention" --type rule
+```
 
 **`web` is discovery, not census.** Its engines largely ignore quoted phrases,
 and SearXNG's engine model declares `paging`, `time_range_support`, `safesearch`

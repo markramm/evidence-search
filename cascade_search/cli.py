@@ -118,6 +118,21 @@ def main(argv=None) -> int:
     us.add_argument("--page", type=int, default=1)
     us.add_argument("--limit", type=int, default=25)
 
+    cr = sub.add_parser("crossref", help="scholarly records; DOI lookup is exact")
+    cr.add_argument("query", help="a DOI (exact) or title words (FUZZY discovery)")
+    cr.add_argument("--rows", type=int, default=10)
+
+    fr = sub.add_parser("fedreg", help="Federal Register rules/notices (real counts)")
+    fr.add_argument("query")
+    fr.add_argument("--type", dest="doc_type",
+                    choices=["rule", "proposed", "notice", "presidential"],
+                    help="filter by document type")
+    fr.add_argument("--agency", help="agency slug, e.g. homeland-security-department")
+    fr.add_argument("--from", dest="date_from", help="published on/after YYYY-MM-DD")
+    fr.add_argument("--to", dest="date_to", help="published on/before YYYY-MM-DD")
+    fr.add_argument("--page", type=int, default=1)
+    fr.add_argument("--per-page", type=int, default=20)
+
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
     dc.add_argument("--site", default="claude-code")
@@ -201,6 +216,16 @@ def main(argv=None) -> int:
                                 date_from=a.date_from, date_to=a.date_to,
                                 limit=a.limit, page=a.page, store=store,
                                 limiter=limiter, use_cache=use_cache), a.json)
+
+    if a.cmd == "crossref":
+        from .sources import crossref as cr_src
+        return _emit(cr_src.search(a.query, a.rows, store, limiter, use_cache), a.json)
+
+    if a.cmd == "fedreg":
+        from .sources import federal_register as fr_src
+        return _emit(fr_src.search(a.query, a.doc_type, a.agency, a.date_from,
+                                   a.date_to, a.per_page, a.page, store,
+                                   limiter, use_cache), a.json)
 
     if a.cmd == "docs":
         from .sources import docs as docs_src
