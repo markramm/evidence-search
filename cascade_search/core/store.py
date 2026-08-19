@@ -26,6 +26,26 @@ CREATE TABLE IF NOT EXISTS calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_calls_source_at ON calls(source, at);
+-- Full upstream records, verbatim.
+--
+-- The cache stores what we EMIT; this stores what we RECEIVED. Those diverged
+-- badly on CourtListener, whose parser kept 4 of 30 fields: a worker counting an
+-- industry lost `firm` and `attorney` (who retained the expert -- the money
+-- question), `cause`, and `recap_documents`, and fell back to raw HTTP to get
+-- fields we had already fetched and discarded.
+--
+-- Returning all 30 in every result is the opposite error: it spends the
+-- caller's context on fields nobody asked for, which is what `extract` exists
+-- to prevent. So: persist everything once, return a curated view, and let the
+-- caller fetch the rest by id when a specific record turns out to matter.
+CREATE TABLE IF NOT EXISTS records (
+    record_id TEXT PRIMARY KEY,   -- <source>:<stable upstream id or content hash>
+    source TEXT NOT NULL,
+    query TEXT NOT NULL,
+    payload TEXT NOT NULL,        -- the upstream object, verbatim
+    fetched_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_records_source_q ON records(source, query);
 CREATE TABLE IF NOT EXISTS jobs (
     token TEXT PRIMARY KEY, source TEXT NOT NULL, state TEXT NOT NULL,
     payload TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
@@ -156,6 +176,37 @@ class Store:
         self.conn.execute(
             "INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",
             (key, source, json.dumps(payload), now, now + ttl_s if ttl_s else None))
+
+    # ---- full upstream records ------------------------------------------
+    def put_record(self, record_id: str, source: str, query: str, payload: dict) -> None:
+        """Persist one upstream object verbatim, keyed for later retrieval."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO records VALUES (?,?,?,?,?)",
+            (record_id, source, query, json.dumps(payload), time.time()))
+
+    def get_record(self, record_id: str):
+        row = self.conn.execute(
+            "SELECT payload, source, query, fetched_at FROM records WHERE record_id=?",
+            (record_id,)).fetchone()
+        if not row:
+            return None
+        return {"record_id": record_id, "source": row[1], "query": row[2],
+                "fetched_at": row[3], "payload": json.loads(row[0])}
+
+    def find_records(self, source: str | None = None, query: str | None = None,
+                     limit: int = 50) -> list[dict]:
+        sql = "SELECT record_id, source, query, fetched_at FROM records"
+        where, args = [], []
+        if source:
+            where.append("source=?"); args.append(source)
+        if query:
+            where.append("query LIKE ?"); args.append(f"%{query}%")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY fetched_at DESC LIMIT ?"
+        args.append(limit)
+        return [{"record_id": r[0], "source": r[1], "query": r[2], "fetched_at": r[3]}
+                for r in self.conn.execute(sql, args).fetchall()]
 
     # ---- rate limiting -----------------------------------------------------
     def record_call(self, source: str) -> None:

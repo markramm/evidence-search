@@ -277,3 +277,56 @@ def test_courtlistener_falls_back_to_docket_id_for_the_url():
     body = json.dumps({"count": 1, "results": [
         {"caseName": "X v. Y", "docket_id": 42, "absolute_url": None}]})
     assert _parse(body)[0].url.endswith("/docket/42/")
+
+
+def test_full_records_are_stored_while_results_stay_curated():
+    """Store everything; return what is generally useful; fetch the rest by id.
+
+    Two failure modes bracket this. Returning 4 of 30 fields lost `firm` and
+    `attorney` -- who retained the expert, which was the whole question a worker
+    was answering. Returning all 30 inline spends the caller's context on fields
+    nobody asked for, which is what `extract` exists to prevent.
+    """
+    import json
+    import pathlib
+    import tempfile
+    from cascade_search.core.store import Store
+    from cascade_search.sources.courtlistener import _parse
+
+    s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
+    body = json.dumps({"count": 85, "results": [{
+        "caseName": "Dyer v. City of Mesquite Texas", "docket_id": 5409345,
+        "docketNumber": "3:15-cv-02638", "court": "N.D. Tex.",
+        "cause": "42:1983 Civil Rights Act", "firm": ["Stoy Law Group PLLC"],
+        "attorney": ["Christopher Edward Stoy"],
+        "pacer_case_id": 263338, "assigned_to_id": 352,
+        "recap_documents": [{"description": "Designation of Experts"}],
+    }]})
+    r = _parse(body, query="probe", store=s)[0]
+
+    # curated: the fields that answer questions on this beat
+    assert r.meta["cause"] == "42:1983 Civil Rights Act"
+    assert r.meta["firm"] == ["Stoy Law Group PLLC"]
+    assert r.meta["record_id"] == "courtlistener:5409345"
+    assert "pacer_case_id" not in r.meta, "internal ids should not ride along inline"
+
+    # full: everything the source sent, retrievable by id
+    rec = s.get_record("courtlistener:5409345")
+    assert rec is not None
+    assert rec["payload"]["pacer_case_id"] == 263338
+    assert len(rec["payload"]) > len(r.meta) - 4
+
+
+def test_a_storage_failure_never_loses_the_caller_results():
+    """Persisting records is a convenience; returning results is the job."""
+    import json
+    from cascade_search.sources.courtlistener import _parse
+
+    class Broken:
+        def put_record(self, *a, **k):
+            raise RuntimeError("disk on fire")
+
+    body = json.dumps({"count": 1, "results": [
+        {"caseName": "X v. Y", "docket_id": 1, "cause": "42:1983"}]})
+    out = _parse(body, query="q", store=Broken())
+    assert len(out) == 1 and out[0].meta["cause"] == "42:1983"

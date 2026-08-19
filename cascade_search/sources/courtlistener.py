@@ -32,7 +32,7 @@ def _headers():
     return {"Authorization": f"Token {tok}"} if tok else {}
 
 
-def _parse(body: str) -> list[Result]:
+def _parse(body: str, query: str = "", store=None) -> list[Result]:
     """Parse a search response.
 
     CourtListener reports the TOTAL match count alongside the (paged) rows.
@@ -60,29 +60,41 @@ def _parse(body: str) -> list[Result]:
         if not path and r.get("docket_id"):
             path = f"/docket/{r['docket_id']}/"
 
-        # Pass through whatever the API sent, minus internal id noise. The old
-        # allowlist kept 4 of 30 fields -- and it was written against `type=o`,
-        # so when `type=r` was added nobody rechecked the shape. It dropped
-        # `firm` and `attorney` (who retained the expert -- the money question),
-        # `cause` (e.g. "42:1983 Civil Rights Act"), `suitNature`, `party`, and
-        # `recap_documents` (the document descriptions that say whether a filing
-        # is an expert disclosure). A worker counting an industry had to fall
-        # back to raw HTTP for all of it.
-        meta = {k: v for k, v in r.items()
-                if v not in (None, "", [], {}) and not k.endswith("_id")}
-        meta["docket_id"] = r.get("docket_id")
-        meta.update({"total_matches": total, "returned_this_page": returned,
+        # Curated view in the result; FULL record in the store.
+        #
+        # Returning all 30 fields inline spends the caller's context on data
+        # nobody asked for -- the opposite of what `extract` is for. Returning
+        # 4 loses the ones that answer the question. So: persist the upstream
+        # object verbatim under a stable id, surface the fields that are
+        # generally useful on this beat, and let a caller who needs the rest
+        # fetch it with `cascade-search record <id>`.
+        record_id = f"{SOURCE}:{r.get('docket_id') or r.get('id') or r.get('docketNumber')}"
+        if store is not None:
+            try:
+                store.put_record(record_id, SOURCE, query, r)
+            except Exception:
+                pass   # a storage failure must never lose the caller's results
+
+        meta = {k: r.get(k) for k in (
+            # identity
+            "docketNumber", "court", "court_citation_string", "dateFiled",
+            "dateTerminated", "docket_id",
+            # posture -- who sued whom, over what, before whom
+            "cause", "suitNature", "jurisdictionType", "assignedTo", "status",
+            # WHO RETAINED THE EXPERT: the money question, and the reason this
+            # curation exists at all
+            "firm", "attorney", "party",
+        ) if r.get(k) not in (None, "", [], {})}
+        meta.update({"record_id": record_id, "total_matches": total,
+                     "returned_this_page": returned,
                      "more_available": bool(data.get("next"))})
 
-        # Keep the heaviest field summarised rather than verbatim: full RECAP
-        # document blobs would defeat the point of `extract`.
+        # The heaviest field, summarised: descriptions are what say whether a
+        # filing is an expert disclosure. Full text stays in the record.
         docs = r.get("recap_documents") or []
         if docs:
             meta["recap_documents"] = [
-                {"description": d.get("description"),
-                 "page_count": d.get("page_count"),
-                 "url": d.get("absolute_url"),
-                 "snippet": (d.get("snippet") or "")[:300]}
+                {"description": d.get("description"), "url": d.get("absolute_url")}
                 for d in docs[:10]]
             meta["recap_document_count"] = len(docs)
 
@@ -99,13 +111,17 @@ def search(query: str, kind: str = "r", court: str | None = None,
            store: Store | None = None, limiter: Limiter | None = None,
            use_cache: bool = True):
     """Search. kind: r=RECAP dockets, rd=documents, o=opinions, p=people."""
+    # Resolve the store here rather than letting run_source default it, so the
+    # parser has somewhere to persist full records even when the caller passed
+    # nothing. Otherwise records vanish exactly for the simplest call sites.
+    store = store or Store()
     url = f"{API}/search/?q={quote(query)}&type={kind}"
     if court:
         url += f"&court={court}"
     return run_source(
         query, source=SOURCE, url=url,
         searched=f"courtlistener search (type={kind})",
-        parse=_parse, store=store, limiter=limiter, use_cache=use_cache,
+        parse=lambda b: _parse(b, query, store), store=store, limiter=limiter, use_cache=use_cache,
         cache_params={"kind": kind, "court": court}, headers=_headers(),
     )
 

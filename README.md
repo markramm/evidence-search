@@ -280,6 +280,23 @@ not as a hang.
 **Archive on retrieval.** Anything fetched is written to
 `documents/sources/files/` with SHA-256 and a manifest line. Never an afterthought.
 
+**Curated results, complete records.** Two failure modes bracket this one.
+CourtListener's parser once kept 4 of the 30 fields the API returns, so a worker
+counting an industry lost `firm` and `attorney` -- who retained the expert, which
+was the entire question -- and fell back to raw HTTP for fields the client had
+already fetched and thrown away. But returning all 30 inline is the opposite
+error: it spends the caller's context on data nobody asked for, which is what
+`extract` exists to prevent.
+
+So every upstream object is persisted verbatim in the `records` table, results
+carry a curated view plus a `record_id`, and the rest is one call away:
+
+```bash
+cascade-search record --list --source courtlistener
+cascade-search record courtlistener:5409345
+cascade-search record courtlistener:5409345 --fields party,recap_documents
+```
+
 **Silent-wrong-answer guards.** ProPublica's endpoint returns the *unfiltered*
 1,607-row index if you use the wrong parameter name — looking like a broad
 success. The client verifies the server echoed the query back and refuses the

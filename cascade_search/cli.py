@@ -126,6 +126,14 @@ def main(argv=None) -> int:
     ex.add_argument("--ocr-pages", type=int, default=50,
                     help="page cap when OCR is used (default 50)")
 
+    rec = sub.add_parser("record", help="fetch the FULL upstream record behind a result")
+    rec.add_argument("record_id", nargs="?",
+                     help="record_id from a result's meta (e.g. courtlistener:5409345)")
+    rec.add_argument("--list", action="store_true", help="list stored records")
+    rec.add_argument("--source", help="filter --list by source")
+    rec.add_argument("--query", help="filter --list by the query that produced it")
+    rec.add_argument("--fields", help="comma-separated fields to return")
+
     sub.add_parser("limits", help="show per-source rate policy and current usage")
 
     a = p.parse_args(argv)
@@ -321,6 +329,42 @@ def main(argv=None) -> int:
                 print(f"  table {i}: {len(t)} rows | {' | '.join(t[0][:5])}")
             if "text" in payload:
                 print(payload["text"][:4000])
+        return 0
+
+    if a.cmd == "record":
+        # Results carry a curated view; this is the escape hatch to everything
+        # the source actually sent. Storing all of it but returning only what
+        # is generally useful keeps the common call cheap without losing the
+        # field that turns out to matter on one particular case.
+        if a.list or not a.record_id:
+            rows = store.find_records(source=a.source, query=a.query)
+            if a.json:
+                print(json.dumps(rows, indent=2, default=str)); return 0
+            if not rows:
+                print("No stored records. They are written as searches run."); return 1
+            print(f"{len(rows)} record(s):\n")
+            for r in rows:
+                print(f"  {r['record_id']:44} {r['source']:16} {r['query'][:40]}")
+            return 0
+
+        rec = store.get_record(a.record_id)
+        if not rec:
+            print(f"No record {a.record_id!r}. List with: cascade-search record --list",
+                  file=sys.stderr)
+            return 1
+        payload = rec["payload"]
+        if a.fields:
+            want = [f.strip() for f in a.fields.split(",") if f.strip()]
+            payload = {k: v for k, v in payload.items() if k in want}
+        if a.json:
+            print(json.dumps({**rec, "payload": payload}, indent=2, default=str))
+        else:
+            print(f"== Record == {rec['record_id']}")
+            print(f"source: {rec['source']}   query: {rec['query']}\n")
+            for k, v in sorted(payload.items()):
+                if v in (None, "", [], {}):
+                    continue
+                print(f"  {k:26} {str(v)[:150]}")
         return 0
 
     if a.cmd == "limits":
