@@ -67,17 +67,6 @@ POLICIES: dict[str, Policy] = {
     ),
     "news_rss": Policy(windows=[(60, 20)], min_interval_s=0.5, index_origin="google"),
     "wayback": Policy(windows=[(60, 15)], min_interval_s=1.0, index_origin="own-crawl"),
-    # Terms: standard plans do NOT grant storage rights (brave.com/search/api).
-    "brave": Policy(
-        windows=[(1, 20)], cacheable=False, index_origin="own-crawl",
-        note="STORAGE RIGHTS REQUIRED to cache results. cacheable=False unless "
-             "operator asserts a storage-rights plan in config.",
-    ),
-    "marginalia": Policy(
-        windows=[(60, 10)], min_interval_s=2.0, index_origin="own-crawl",
-        note="Public key shares one global rate limit; HTTP 503 when hit. "
-             "Free non-commercial key is CC-BY-NC-SA 4.0 -- attribution required.",
-    ),
 }
 
 DEFAULT_POLICY = Policy(windows=[(60, 20)], min_interval_s=0.5)

@@ -69,11 +69,17 @@ def test_oscn_session_cap():
     assert not ok and "session cap" in why
 
 
-def test_metered_engines_not_cacheable():
-    """Brave's standard plans forbid storing results; policy must reflect that."""
+def test_cacheability_is_a_policy_field():
+    """Where an engine's terms forbid storing results, policy must say so.
+
+    The brave/marginalia policies this once asserted were removed: no code path
+    ever reserved them, so they were dead config that a live worker mistook for
+    a real budget. `cacheable` remains a policy field for any future metered
+    source whose terms forbid storage.
+    """
     L = Limiter(tmpstore())
-    assert L.policy("brave").cacheable is False
     assert L.policy("oscn").cacheable is True
+    assert L.policy("searxng").cacheable is True
 
 
 def test_unique_to_engine():

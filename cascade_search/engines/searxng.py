@@ -103,7 +103,11 @@ def _enabled_engines(base: str, store: Store) -> list[str]:
     Without this the results array alone cannot distinguish "nobody found it"
     from "nobody was asked".
     """
-    key = cache_key(f"{SOURCE}:config", base)
+    # v2: the namespacing change altered the SHAPE of this cached value, and a
+    # stale v1 entry (bare engine names) silently broke the responsive-count
+    # arithmetic -- 82/82 responsive while two engines were failing. Version the
+    # key so a format change can never be served a stale entry.
+    key = cache_key(f"{SOURCE}:config:v2", base)
     hit = store.get(key)
     if hit is not None:
         return hit
@@ -114,7 +118,7 @@ def _enabled_engines(base: str, store: Store) -> list[str]:
         cfg = json.loads(body)
     except json.JSONDecodeError:
         return []
-    names = sorted(e["name"] for e in cfg.get("engines", []) if e.get("enabled", True))
+    names = sorted(f"searxng:{e['name']}" for e in cfg.get("engines", []) if e.get("enabled", True))
     store.put(key, SOURCE, names, ttl_s=_CONFIG_TTL)
     return names
 
@@ -126,6 +130,12 @@ def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
     as such rather than being quietly filed under a category we guessed at.
     Either way it dirties coverage: an unreadable failure is still a failure.
     """
+    # Namespaced `searxng:<engine>`, because these are UPSTREAM engines the
+    # instance proxies -- NOT sources in our own ledger. A live worker read
+    # "RATE-LIMITED: brave", checked `cascade-search limits`, saw brave at
+    # 0/20, and reasonably concluded the tool was contradicting itself. Our
+    # limiter governs calls WE make; this governs what Brave did to SearXNG.
+    # Same word, two namespaces, no way to tell them apart without the prefix.
     rate_limited: list[str] = []
     errored: dict[str, str] = {}
     unknown: list[str] = []
@@ -140,13 +150,14 @@ def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
         # Check blocks FIRST: "Suspended: CAPTCHA" is a wall the instance has
         # additionally backed off from, and the wall is the more actionable
         # fact -- a CAPTCHA will not clear itself by waiting.
+        tag = f"searxng:{name}"
         if any(sig in low for sig in _BLOCK_SIGNALS):
-            errored[name] = msg
+            errored[tag] = msg
         elif any(sig in low for sig in _RATE_LIMIT_SIGNALS):
-            rate_limited.append(name)
+            rate_limited.append(tag)
         else:
-            unknown.append(name)
-            errored[name] = f"unclassified: {msg}" if msg else "unclassified"
+            unknown.append(tag)
+            errored[tag] = f"unclassified: {msg}" if msg else "unclassified"
 
     return rate_limited, errored, unknown
 
@@ -205,7 +216,7 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     failed = set(rate_limited) | set(errored)
     # Fall back to the engines that actually returned rows if /config is
     # unavailable -- degraded, but never silently optimistic.
-    queried = enabled or sorted({e for r in data.get("results", [])
+    queried = enabled or sorted({f"searxng:{e}" for r in data.get("results", [])
                                  for e in (r.get("engines") or [])} | failed)
     responsive = [e for e in queried if e not in failed]
 

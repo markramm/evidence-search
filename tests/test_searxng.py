@@ -24,14 +24,27 @@ from cascade_search.engines import searxng
 def _kit():
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     # Pre-seed /config so tests do not depend on a live instance.
-    s.put(cache_key("searxng:config", "http://x"), "searxng",
-          ["google", "bing", "duckduckgo", "marginalia"], ttl_s=3600)
+    s.put(cache_key("searxng:config:v2", "http://x"), "searxng",
+          ["searxng:google", "searxng:bing", "searxng:duckduckgo", "searxng:marginalia"], ttl_s=3600)
     return s, Limiter(s)
 
 
 def _reply(monkeypatch, payload):
     # searxng.py binds `fetch` at import time, so patch its own reference.
     monkeypatch.setattr(searxng, "fetch", lambda *a, **k: (json.dumps(payload), None))
+
+
+def test_engine_names_are_namespaced():
+    """SearXNG's upstream engines share names with nothing in our ledger -- but a
+    live worker could not tell them apart.
+
+    It saw `RATE-LIMITED: brave`, ran `cascade-search limits`, saw brave at 0/20,
+    and reasonably concluded the tool was contradicting itself. Our limiter
+    governs calls WE make; this reports what Brave did to SearXNG. The prefix is
+    the only thing that distinguishes the two namespaces.
+    """
+    rl, er, _ = searxng._classify([["brave", "too many requests"]])
+    assert rl == ["searxng:brave"], "upstream engines must be namespaced"
 
 
 def test_classification_survives_a_translated_locale():
@@ -44,10 +57,10 @@ def test_classification_survives_a_translated_locale():
     forms in case an instance ignores it.
     """
     rl, er, unknown = searxng._classify([["brave", "zu viele Anfragen"]])
-    assert rl == ["brave"] and not unknown
+    assert rl == ["searxng:brave"] and not unknown
 
     rl, er, unknown = searxng._classify([["x", "trop de requêtes"]])
-    assert rl == ["x"] and not unknown
+    assert rl == ["searxng:x"] and not unknown
 
 
 def test_a_wall_outranks_a_backoff():
@@ -57,10 +70,10 @@ def test_a_wall_outranks_a_backoff():
     rate-limited would invite a pointless retry.
     """
     rl, er, _ = searxng._classify([["startpage", "Suspended: CAPTCHA"]])
-    assert "startpage" in er and rl == []
+    assert "searxng:startpage" in er and rl == []
 
     rl, er, _ = searxng._classify([["bing", "Suspended: timeout"]])
-    assert rl == ["bing"] and not er
+    assert rl == ["searxng:bing"] and not er
 
 
 def test_an_unreadable_failure_is_flagged_not_guessed():
@@ -70,8 +83,8 @@ def test_an_unreadable_failure_is_flagged_not_guessed():
     is labelled unclassified so the signal map can be fixed.
     """
     rl, er, unknown = searxng._classify([["y", "リクエストが多すぎます"]])
-    assert unknown == ["y"]
-    assert "unclassified" in er["y"]
+    assert unknown == ["searxng:y"]
+    assert "unclassified" in er["searxng:y"]
     assert rl == []
 
 
@@ -112,7 +125,7 @@ def test_partial_sweep_cannot_certify_absence(monkeypatch):
     out = searxng.search("q", base="http://x", store=s, limiter=L)
     assert isinstance(out, RateLimited)
     assert not isinstance(out, VerifiedAbsence)
-    assert set(out.coverage.rate_limited) == {"google", "bing"}
+    assert set(out.coverage.rate_limited) == {"searxng:google", "searxng:bing"}
 
 
 def test_clean_sweep_yields_a_publishable_absence(monkeypatch):
@@ -131,7 +144,7 @@ def test_a_blocked_engine_is_errored_not_merely_absent(monkeypatch):
     s, L = _kit()
     out = searxng.search("q", base="http://x", store=s, limiter=L)
     assert isinstance(out, RateLimited)      # downgraded, never certified
-    assert set(out.coverage.errored) == {"google", "bing"}
+    assert set(out.coverage.errored) == {"searxng:google", "searxng:bing"}
 
 
 def test_coverage_counts_engines_that_were_never_asked(monkeypatch):
@@ -146,9 +159,9 @@ def test_coverage_counts_engines_that_were_never_asked(monkeypatch):
     s, L = _kit()
     out = searxng.search("q", base="http://x", store=s, limiter=L)
     assert isinstance(out, Hit)
-    assert set(out.coverage.queried) == {"google", "bing", "duckduckgo", "marginalia"}
-    assert "google" not in out.coverage.responsive
-    assert set(out.coverage.responsive) == {"bing", "duckduckgo", "marginalia"}
+    assert set(out.coverage.queried) == {"searxng:google", "searxng:bing", "searxng:duckduckgo", "searxng:marginalia"}
+    assert "searxng:google" not in out.coverage.responsive
+    assert set(out.coverage.responsive) == {"searxng:bing", "searxng:duckduckgo", "searxng:marginalia"}
 
 
 def test_single_engine_finds_are_marked_not_buried(monkeypatch):
