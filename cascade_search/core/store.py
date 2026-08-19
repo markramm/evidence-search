@@ -62,6 +62,45 @@ def cache_key(source: str, query: str, **params) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:32]
 
 
+class CachePoisoned(Exception):
+    """Refused to store a payload that looks like a parse failure.
+
+    A transient parser bug becomes a 24-hour silent wrong answer once it is
+    cached. On 2026-08-19 a ProPublica parse regression wrote 35 rows all
+    titled "(unnamed appointee)" pointing at one fallback URL; every later
+    call served them, looking like a healthy broad hit.
+    """
+
+
+# Placeholder titles a parser emits when it failed to find the real field.
+_PLACEHOLDERS = ("(unnamed", "(untitled", "(unknown", "(none)", "n/a", "")
+
+
+def looks_degenerate(rows) -> bool:
+    """True if a multi-row result set collapses to one placeholder identity.
+
+    Deliberately conservative: it fires only when EVERY row shares a single
+    title AND that title reads as a parser fallback, or when every row shares
+    one URL. Genuine result sets vary in at least one of those.
+    """
+    if not isinstance(rows, list) or len(rows) < 3:
+        return False
+    dicts = [r for r in rows if isinstance(r, dict)]
+    if len(dicts) != len(rows):
+        return False
+
+    titles = {(r.get("title") or "").strip().lower() for r in dicts}
+    if len(titles) == 1:
+        only = next(iter(titles))
+        if any(only.startswith(p) for p in _PLACEHOLDERS if p) or only == "":
+            return True
+
+    urls = {(r.get("url") or "").strip() for r in dicts}
+    if len(urls) == 1 and len(titles) == 1:
+        return True
+    return False
+
+
 class Store:
     def __init__(self, db_path: Path | None = None):
         self.path = Path(db_path or DEFAULT_DB)
@@ -82,6 +121,22 @@ class Store:
             return None
         return json.loads(payload)
 
+    def get_entry(self, key: str):
+        """Return (payload, fetched_at) or None.
+
+        A cached VerifiedAbsence is a claim about the world at a point in time.
+        Replaying it without that timestamp presents a stale negative as fresh.
+        """
+        row = self.conn.execute(
+            "SELECT payload, expires_at, fetched_at FROM cache WHERE key=?", (key,)).fetchone()
+        if not row:
+            return None
+        payload, expires, fetched_at = row
+        if expires and time.time() > expires:
+            self.conn.execute("DELETE FROM cache WHERE key=?", (key,))
+            return None
+        return json.loads(payload), fetched_at
+
     def put(self, key: str, source: str, payload, ttl_s: int | None = 86400) -> None:
         """Store a response.
 
@@ -89,6 +144,10 @@ class Store:
         forbid storage -- Brave's standard plans explicitly do. Those engines set
         cacheable=False and we record only the call, never the results.
         """
+        if looks_degenerate(payload):
+            raise CachePoisoned(
+                f"refusing to cache {len(payload)} {source} rows that collapse to a "
+                "single placeholder identity -- this is a parse failure, not a result set")
         now = time.time()
         self.conn.execute(
             "INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",

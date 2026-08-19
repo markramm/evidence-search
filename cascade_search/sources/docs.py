@@ -20,7 +20,7 @@ import time
 
 from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import Coverage, Hit, RateLimited, Result, verified_absence
+from ..core.results import Coverage, Hit, RateLimited, Result, replay_cached, verified_absence
 from ..core.store import Store, cache_key
 
 SOURCE = "docs"
@@ -57,11 +57,10 @@ def search(query: str, site: str = "claude-code", fetch_top: int = 0,
 
     key = cache_key(SOURCE, query, site=site)
     if use_cache:
-        cached = store.get(key)
-        if cached is not None:
-            cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"], cache_hits=1)
-            return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
-                if cached else verified_absence(query, cov, f"docs:{site}")
+        entry = store.get_entry(key)
+        if entry is not None:
+            return replay_cached(query, entry[0], entry[1], source=SOURCE,
+                                 searched=f"{site} documentation index")
 
     allowed, retry, why = limiter.reserve(SOURCE)
     if not allowed:

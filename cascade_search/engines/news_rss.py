@@ -12,7 +12,7 @@ from xml.etree import ElementTree as ET
 
 from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import Coverage, Hit, RateLimited, Result, verified_absence
+from ..core.results import Coverage, Hit, RateLimited, Result, replay_cached, verified_absence
 from ..core.store import Store, cache_key
 
 ENDPOINT = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
@@ -26,12 +26,10 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
 
     key = cache_key("news_rss", query)
     if use_cache:
-        cached = store.get(key)
-        if cached is not None:
-            cov = Coverage(queried=["news_rss"], responsive=["news_rss"],
-                           indexes=[INDEX_ORIGIN], cache_hits=1)
-            return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
-                if cached else verified_absence(query, cov, "google-news-rss")
+        entry = store.get_entry(key)
+        if entry is not None:
+            return replay_cached(query, entry[0], entry[1], source="news_rss",
+                                 searched="google-news-rss", index_origin=INDEX_ORIGIN)
 
     allowed, retry, why = limiter.reserve("news_rss")
     if not allowed:

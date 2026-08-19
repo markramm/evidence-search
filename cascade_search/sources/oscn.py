@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from ..core.archive import archive
 from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import Coverage, Hit, RateLimited, Result, verified_absence
+from ..core.results import Coverage, Hit, RateLimited, Result, replay_cached, verified_absence
 from ..core.store import Store, cache_key
 
 BASE = "https://www.oscn.net/dockets"
@@ -70,12 +70,10 @@ def search(county: str, lname: str = "", fname: str = "", year: int | None = Non
 
     key = cache_key("oscn", q, county=county, lname=lname, fname=fname, year=year)
     if use_cache:
-        cached = store.get(key)
-        if cached is not None:
-            cov = Coverage(queried=["oscn"], responsive=["oscn"], indexes=["n/a"], cache_hits=1)
-            return Hit(query=q, coverage=cov,
-                       results=[Result(**r) for r in cached]) if cached else \
-                   verified_absence(q, cov, f"oscn:{county}")
+        entry = store.get_entry(key)
+        if entry is not None:
+            return replay_cached(q, entry[0], entry[1], source="oscn",
+                                 searched=f"oscn:{county} district court docket index")
 
     allowed, retry, why = limiter.reserve("oscn")
     if not allowed:

@@ -53,6 +53,7 @@ class Coverage:
     errored: dict[str, str] = field(default_factory=dict)
     indexes: list[str] = field(default_factory=list)  # distinct index_origin values
     cache_hits: int = 0
+    cache_age_s: float | None = None   # age of a REPLAYED result, seconds
     elapsed_ms: int = 0
 
     @property
@@ -73,7 +74,12 @@ class Coverage:
         if self.errored:
             parts.append(f"ERRORED: {', '.join(self.errored)}")
         if self.cache_hits:
-            parts.append(f"{self.cache_hits} cached")
+            age = ""
+            if self.cache_age_s is not None:
+                age = (f", {int(self.cache_age_s // 3600)}h old" if self.cache_age_s >= 3600
+                       else f", {int(self.cache_age_s // 60)}m old" if self.cache_age_s >= 60
+                       else ", fresh")
+            parts.append(f"{self.cache_hits} cached{age}")
         return " | ".join(parts)
 
 
@@ -189,3 +195,23 @@ def verified_absence(query: str, coverage: Coverage, searched: str):
                     f"({coverage.summary()}). Tooling-limited negative, NOT content-exhausted."),
         )
     return VerifiedAbsence(query=query, coverage=coverage, searched=searched)
+
+
+def replay_cached(query: str, rows, fetched_at: float, *, source: str,
+                  searched: str, index_origin: str = "n/a"):
+    """Rebuild an outcome from cache, disclosing that it IS from cache.
+
+    Every source previously synthesised a clean Coverage at read time, which
+    asserted responsiveness that was never re-tested and dated the finding
+    'now'. A replayed VerifiedAbsence is a claim about the world when the
+    search ran -- so it carries that age, and says so in `searched`.
+    """
+    import time as _t
+    age = max(0.0, _t.time() - fetched_at)
+    cov = Coverage(queried=[source], responsive=[source], indexes=[index_origin],
+                   cache_hits=1, cache_age_s=age)
+    if rows:
+        return Hit(query=query, coverage=cov, results=[Result(**r) for r in rows])
+    mins = int(age // 60)
+    when = f"{mins}m ago" if mins < 60 else f"{mins // 60}h ago"
+    return verified_absence(query, cov, f"{searched} [cached, established {when}]")
