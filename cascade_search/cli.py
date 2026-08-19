@@ -285,6 +285,7 @@ def main(argv=None) -> int:
         if a.do_sum:
             return _emit(usa.dollar_sum(a.query, by_recipient=not a.keywords,
                                         award_types=usa.AWARD_GROUPS[a.group],
+                                        date_from=a.date_from, date_to=a.date_to,
                                         max_pages=a.max_pages, store=store,
                                         limiter=limiter), a.json)
         if a.count:

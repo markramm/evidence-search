@@ -232,3 +232,41 @@ def test_detail_works_without_a_query():
     import inspect
     src = inspect.getsource(main)
     assert 'nargs="?"' in src
+
+
+def test_dollar_sum_honours_date_bounds(monkeypatch):
+    """--sum took NO date parameters while the CLI accepted --from/--to.
+
+    A bounded query silently returned the ALL-TIME total and labelled it
+    "complete" -- verified live as a 26x overstatement ($3,298,091.75 all-time
+    vs $127,494.00 from 2026-01-01). A worker caught it by cross-checking
+    against --count, which respected the same bounds. A wrong total that says
+    complete is worse than no total.
+    """
+    seen = {}
+
+    def spy(path, body, timeout=45.0):
+        seen["filters"] = body.get("filters", {})
+        return {"results": [], "page_metadata": {"hasNext": False}}, None
+
+    monkeypatch.setattr(usa, "_post", spy)
+    s, L = _kit()
+    usa.dollar_sum("x", date_from="2026-01-01", date_to="2026-06-30",
+                   store=s, limiter=L)
+    tp = seen["filters"].get("time_period")
+    assert tp, "date bounds must reach the API"
+    assert tp[0]["start_date"] == "2026-01-01"
+    assert tp[0]["end_date"] == "2026-06-30"
+
+
+def test_dollar_sum_reports_the_scope_it_summed(monkeypatch):
+    """A total is uninterpretable without knowing what window it covers."""
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (
+        {"results": [{"Award Amount": 10.0}], "page_metadata": {"hasNext": False}}, None))
+    s, L = _kit()
+    out = usa.dollar_sum("x", store=s, limiter=L)
+    assert out.results[0].meta["scope"] == "all time"
+
+    s2, L2 = _kit()
+    out2 = usa.dollar_sum("x", date_from="2026-01-01", store=s2, limiter=L2)
+    assert "2026-01-01" in out2.results[0].meta["scope"]

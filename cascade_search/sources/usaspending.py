@@ -234,6 +234,7 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
 
 
 def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
+               date_from: str | None = None, date_to: str | None = None,
                max_pages: int = 10, store: Store | None = None,
                limiter: Limiter | None = None):
     """Sum Award Amount across pages. Workers hand-scraped every total before this.
@@ -241,6 +242,12 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     Reports whether it is COMPLETE or a floor: the API pages, and a vendor with
     more awards than max_pages*100 yields an understatement. A floor reported as
     a total is the confident-wrong-number failure this package keeps hitting.
+
+    DATE BOUNDS ARE HONOURED. They were not, originally: this function took no
+    date parameters while the CLI accepted --from/--to, so a bounded query
+    silently returned the ALL-TIME total and labelled it "complete". A worker
+    caught it by cross-checking against --count, which respected the same bounds.
+    A wrong total that says complete is worse than no total.
     """
     store = store or Store()
     limiter = limiter or Limiter(store)
@@ -267,7 +274,7 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                     detail=(f"{why} -- summed {n} awards across {page-1} page(s) before "
                             "stopping. This is a PARTIAL sum; do not report it as a total."))
         data, err = _post("/search/spending_by_award/", {
-            "filters": _filters(query, by_recipient, types, None, None),
+            "filters": _filters(query, by_recipient, types, date_from, date_to),
             "fields": ["Award ID", "Recipient Name", "Award Amount"],
             "limit": 100, "page": page,
             **({"sort": "Award Amount", "order": "desc"}
@@ -303,6 +310,9 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
         source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
         meta={"dollar_total": round(total, 2), "awards_summed": n,
               "complete": complete, "pages_read": page,
+              "date_from": date_from, "date_to": date_to,
+              "scope": ("all time" if not (date_from or date_to)
+                        else f"{date_from or 'earliest'} to {date_to or 'latest'}"),
               "caveat": (None if complete else
                          "This is a FLOOR, not a total -- raise --max-pages to close it.")},
     )])
