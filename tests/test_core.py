@@ -57,9 +57,14 @@ def test_courtlistener_concurrent_windows():
 
 
 def test_oscn_session_cap():
-    """OSCN Turnstile engages ~10 fetches; we cap at 8."""
+    """OSCN Turnstile engages ~10 fetches; we cap at 8.
+
+    The cap must live in the SHARED ledger -- see test_concurrency.py for the
+    cross-process guarantee. Here we assert it fires at all.
+    """
     s = tmpstore(); L = Limiter(s)
-    L._session_counts["oscn"] = 8
+    for _ in range(8):
+        s.record_call("oscn")
     ok, _, why = L.check("oscn")
     assert not ok and "session cap" in why
 

@@ -98,6 +98,75 @@ class Store:
     def record_call(self, source: str) -> None:
         self.conn.execute("INSERT INTO calls (source, at) VALUES (?,?)", (source, time.time()))
 
+    def reserve_call(self, source: str, windows, min_interval_s: float = 0.0,
+                     session_max: int | None = None, session_window_s: float = 3600.0):
+        """Atomically claim one call against every window, or refuse.
+
+        check-then-record is a TOCTOU race: N workers all read the same
+        under-limit count before any of them writes, and all N proceed. That is
+        precisely how the 2026-08-19 session burned 200 calls with ~12 workers.
+
+        Here the claim is INSERTed first and validated inside a single
+        BEGIN IMMEDIATE transaction, so SQLite serialises concurrent claimants.
+        A claim that would breach a limit is rolled back, leaving no phantom
+        call in the ledger.
+
+        Returns (allowed, retry_after_s, reason).
+        """
+        now = time.time()
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            return False, 1.0, f"{source}: ledger busy ({e})"
+        try:
+            # Spacing and the session cap are read BEFORE claiming: they are
+            # properties of prior traffic, not of this claim.
+            if min_interval_s:
+                row = self.conn.execute(
+                    "SELECT MAX(at) FROM calls WHERE source=?", (source,)).fetchone()
+                last = row[0] if row and row[0] else None
+                if last is not None and (gap := now - last) < min_interval_s:
+                    self.conn.execute("ROLLBACK")
+                    return False, round(min_interval_s - gap, 3), (
+                        f"{source}: min interval {min_interval_s}s "
+                        f"({round(min_interval_s - gap, 2)}s remaining)")
+
+            if session_max is not None:
+                used = self.conn.execute(
+                    "SELECT COUNT(*) FROM calls WHERE source=? AND at > ?",
+                    (source, now - session_window_s)).fetchone()[0]
+                if used >= session_max:
+                    self.conn.execute("ROLLBACK")
+                    return False, None, (
+                        f"session cap {session_max} reached for {source} "
+                        f"in the last {int(session_window_s)}s")
+
+            self.conn.execute("INSERT INTO calls (source, at) VALUES (?,?)", (source, now))
+
+            # Validate AFTER claiming: the count now includes our own row, so
+            # concurrent claimants cannot all see themselves as under the line.
+            for window_s, max_calls in windows:
+                n = self.conn.execute(
+                    "SELECT COUNT(*) FROM calls WHERE source=? AND at > ?",
+                    (source, now - window_s)).fetchone()[0]
+                if n > max_calls:
+                    oldest = self.conn.execute(
+                        "SELECT MIN(at) FROM calls WHERE source=? AND at > ?",
+                        (source, now - window_s)).fetchone()[0]
+                    self.conn.execute("ROLLBACK")
+                    retry = max(1.0, (oldest + window_s) - now) if oldest else window_s
+                    return False, retry, (
+                        f"{source}: {n - 1}/{max_calls} calls in {int(window_s)}s window")
+
+            self.conn.execute("COMMIT")
+            return True, None, ""
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass
+            raise
+
     def count_calls(self, source: str, window_s: float) -> int:
         row = self.conn.execute(
             "SELECT COUNT(*) FROM calls WHERE source=? AND at > ?",

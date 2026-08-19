@@ -47,7 +47,7 @@ def search(query: str, kind: str = "r", court: str | None = None,
             return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
                 if cached else verified_absence(query, cov, "courtlistener")
 
-    allowed, retry, why = limiter.check("courtlistener")
+    allowed, retry, why = limiter.reserve("courtlistener")
     if not allowed:
         return RateLimited(query=query,
                            coverage=Coverage(queried=["courtlistener"], rate_limited=["courtlistener"]),
@@ -61,7 +61,6 @@ def search(query: str, kind: str = "r", court: str | None = None,
 
     t0 = time.time()
     body, blocked = fetch(url, source="courtlistener", query=query, headers=_headers())
-    limiter.record("courtlistener")
     if blocked:
         blocked.coverage = Coverage(queried=["courtlistener"], errored={"courtlistener": "blocked"})
         return blocked
@@ -104,14 +103,13 @@ def document(storage_url: str, filename: str, store: Store | None = None,
     """
     store = store or Store()
     limiter = limiter or Limiter(store)
-    allowed, retry, why = limiter.check("courtlistener")
+    allowed, retry, why = limiter.reserve("courtlistener")
     if not allowed:
         return RateLimited(query=filename,
                            coverage=Coverage(queried=["courtlistener"], rate_limited=["courtlistener"]),
                            source="courtlistener", retry_after_s=int(retry) if retry else None, detail=why)
 
     data, blocked = fetch(storage_url, source="courtlistener", query=filename, binary=True)
-    limiter.record("courtlistener")
     if blocked:
         return blocked
     info = archive(data, filename, storage_url, "cascade-search:courtlistener")

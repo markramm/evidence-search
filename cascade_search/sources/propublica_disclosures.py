@@ -61,7 +61,7 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
             return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
                 if cached else verified_absence(query, cov, "propublica-trump-disclosures")
 
-    allowed, retry, why = limiter.check(SOURCE)
+    allowed, retry, why = limiter.reserve(SOURCE)
     if not allowed:
         return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
                            source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
@@ -69,7 +69,6 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
     url = f"{BASE}/search/__data.json?q={quote(query)}"
     t0 = time.time()
     body, blocked = fetch(url, source=SOURCE, query=query)
-    limiter.record(SOURCE)
     if blocked:
         blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
         return blocked

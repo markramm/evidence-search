@@ -1,0 +1,74 @@
+"""Regression tests for the guarantee the tool exists to provide.
+
+The 2026-08-19 session exhausted a 200-call budget because ~12 parallel workers
+each assumed they owned it. These tests fail against the pre-fix limiter.
+"""
+import pathlib
+import tempfile
+import threading
+
+from cascade_search.core.limits import Limiter
+from cascade_search.core.store import Store
+
+
+def _db():
+    return pathlib.Path(tempfile.mkdtemp()) / "t.db"
+
+
+def test_reservation_is_atomic_under_parallel_workers():
+    """THE original bug: N workers must not collectively exceed the window.
+
+    Brave is the probe because it has no min_interval_s -- other sources are
+    accidentally serialised by their spacing, which MASKS the race rather than
+    preventing it.
+    """
+    db = _db()
+    Store(db)
+    n_workers, limit = 40, 20          # brave: 20 per 1s
+    barrier = threading.Barrier(n_workers)
+    granted, lock = [], threading.Lock()
+
+    def worker(i):
+        L = Limiter(Store(db))
+        barrier.wait()                 # force genuine simultaneity
+        if L.reserve("brave")[0]:
+            with lock:
+                granted.append(i)
+
+    ts = [threading.Thread(target=worker, args=(i,)) for i in range(n_workers)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+
+    assert len(granted) <= limit, (
+        f"{len(granted)} workers granted against a {limit}/s limit -- "
+        "check() and record() are not atomic")
+    assert granted, "reservation deadlocked: nobody got through"
+
+
+def test_session_cap_is_shared_across_processes():
+    """OSCN's cap exists to stay under the ~10-fetch Turnstile threshold.
+
+    An in-memory per-Limiter counter cannot do that under fan-out: the cap must
+    live in the shared ledger or it protects nothing.
+    """
+    db = _db()
+    first = Limiter(Store(db))
+    for _ in range(8):                 # session_max for oscn
+        first.record("oscn")
+
+    second = Limiter(Store(db))        # a different worker process
+    allowed, _, why = second.check("oscn")
+    assert not allowed, "session cap not enforced across processes"
+    assert "session cap" in why
+
+
+def test_reserve_rolls_back_when_over_limit():
+    """A refused reservation must not leave a phantom call in the ledger."""
+    db = _db()
+    s = Store(db)
+    L = Limiter(s)
+    for _ in range(20):
+        L.reserve("brave")
+    before = s.count_calls("brave", 1.0)
+    assert not L.reserve("brave")[0]
+    assert s.count_calls("brave", 1.0) == before, "refused reservation still recorded a call"

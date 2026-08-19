@@ -63,14 +63,13 @@ def search(query: str, site: str = "claude-code", fetch_top: int = 0,
             return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
                 if cached else verified_absence(query, cov, f"docs:{site}")
 
-    allowed, retry, why = limiter.check(SOURCE)
+    allowed, retry, why = limiter.reserve(SOURCE)
     if not allowed:
         return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
                            source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
 
     t0 = time.time()
     body, blocked = fetch(SITES[site]["index"], source=SOURCE, query=query)
-    limiter.record(SOURCE)
     if blocked:
         blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
         return blocked
@@ -95,13 +94,17 @@ def search(query: str, site: str = "claude-code", fetch_top: int = 0,
                    engines=[SOURCE], index_origin=["n/a"], score=float(s),
                    meta={"site": site, "rank": rank})
         # Optionally pull the page body so the caller can grep it.
+        # Each body fetch is a real call and must claim its own slot; the prior
+        # version computed a check and discarded it, then fetched regardless.
         if rank <= fetch_top:
-            ok, _ = limiter.check(SOURCE), None
-            page, pblocked = fetch(url, source=SOURCE, query=query)
-            limiter.record(SOURCE)
-            if page and not pblocked:
-                text = re.sub(r"\n{3,}", "\n\n", page)
-                r.meta["text"] = text[:20000]
+            page_allowed, _, page_why = limiter.reserve(SOURCE)
+            if not page_allowed:
+                r.meta["text_skipped"] = f"rate limit: {page_why}"
+            else:
+                page, pblocked = fetch(url, source=SOURCE, query=query)
+                if page and not pblocked:
+                    text = re.sub(r"\n{3,}", "\n\n", page)
+                    r.meta["text"] = text[:20000]
         out.append(r)
 
     if use_cache:

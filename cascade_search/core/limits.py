@@ -21,6 +21,10 @@ class Policy:
     windows: list[tuple[float, int]] = field(default_factory=list)
     min_interval_s: float = 0.0     # hard spacing between calls
     session_max: int | None = None  # e.g. OSCN Turnstile after ~10
+    # A "session" is a rolling window in the SHARED ledger, not the lifetime of
+    # one process. An in-memory counter cannot cap fan-out: 12 workers each get
+    # their own, and the cap protects nothing.
+    session_window_s: float = 3600.0
     cacheable: bool = True          # False where terms forbid storing results
     index_origin: str = "n/a"       # own-crawl | bing | google | mixed | n/a
     note: str = ""
@@ -36,8 +40,9 @@ POLICIES: dict[str, Policy] = {
     ),
     # Observed 2026-08-19: Cloudflare Turnstile engaged after ~10 fetches.
     "oscn": Policy(
-        windows=[(3600, 30)], min_interval_s=2.0, session_max=8,
-        note="Turnstile after ~10 fetches/session. Session cap set to 8 for headroom.",
+        windows=[(3600, 30)], min_interval_s=2.0, session_max=8, session_window_s=1800,
+        note="Turnstile after ~10 fetches/session. Session cap 8 (headroom) over a "
+             "30min rolling window in the SHARED ledger, so fan-out cannot bypass it.",
     ),
     "usaspending": Policy(
         windows=[(60, 30)], min_interval_s=0.5,
@@ -71,21 +76,44 @@ DEFAULT_POLICY = Policy(windows=[(60, 20)], min_interval_s=0.5)
 
 
 class Limiter:
+    """Rate discipline over the SHARED ledger.
+
+    Prefer `reserve()`: it claims a call atomically. `check()` remains for
+    read-only inspection (the `limits` command, pre-flight reporting), but a
+    check() that is later followed by record() is a TOCTOU race and must not be
+    used to gate a fetch.
+    """
+
     def __init__(self, store: Store):
         self.store = store
-        self._session_counts: dict[str, int] = {}
 
     def policy(self, source: str) -> Policy:
         return POLICIES.get(source, DEFAULT_POLICY)
 
+    def reserve(self, source: str) -> tuple[bool, float | None, str]:
+        """Atomically claim one call. (allowed, retry_after_s, reason).
+
+        This is the gate every fetch must pass. Never sleeps; the caller decides.
+        """
+        p = self.policy(source)
+        return self.store.reserve_call(
+            source, p.windows, min_interval_s=p.min_interval_s,
+            session_max=p.session_max, session_window_s=p.session_window_s)
+
     def check(self, source: str) -> tuple[bool, float | None, str]:
-        """(allowed, retry_after_s, reason). Never sleeps; the caller decides."""
+        """Read-only view of whether a call WOULD be allowed.
+
+        Advisory only -- by the time you act on it another worker may have taken
+        the slot. Gate real fetches with `reserve()`.
+        """
         p = self.policy(source)
 
-        if p.session_max is not None and self._session_counts.get(source, 0) >= p.session_max:
-            return False, None, (
-                f"session cap {p.session_max} reached for {source} "
-                f"({p.note or 'per-session limit'})")
+        if p.session_max is not None:
+            used = self.store.count_calls(source, p.session_window_s)
+            if used >= p.session_max:
+                return False, None, (
+                    f"session cap {p.session_max} reached for {source} "
+                    f"in the last {int(p.session_window_s)}s")
 
         for window_s, max_calls in p.windows:
             n = self.store.count_calls(source, window_s)
@@ -103,5 +131,9 @@ class Limiter:
         return True, None, ""
 
     def record(self, source: str) -> None:
+        """Record a call that was NOT claimed via reserve().
+
+        Only for calls made outside the reservation path; reserve() already
+        writes the ledger row.
+        """
         self.store.record_call(source)
-        self._session_counts[source] = self._session_counts.get(source, 0) + 1

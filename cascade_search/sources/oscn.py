@@ -77,7 +77,7 @@ def search(county: str, lname: str = "", fname: str = "", year: int | None = Non
                        results=[Result(**r) for r in cached]) if cached else \
                    verified_absence(q, cov, f"oscn:{county}")
 
-    allowed, retry, why = limiter.check("oscn")
+    allowed, retry, why = limiter.reserve("oscn")
     if not allowed:
         return RateLimited(query=q, coverage=Coverage(queried=["oscn"], rate_limited=["oscn"]),
                            source="oscn", retry_after_s=int(retry) if retry else None, detail=why)
@@ -93,7 +93,6 @@ def search(county: str, lname: str = "", fname: str = "", year: int | None = Non
 
     t0 = time.time()
     html, blocked = fetch(url, source="oscn", query=q)
-    limiter.record("oscn")
 
     # Auto-escalate: OSCN's Turnstile is exactly what the browser tier exists
     # for (spec 3a). If the browser also cannot clear it, that call returns an
@@ -136,14 +135,13 @@ def case(county: str, number: str, store: Store | None = None,
     limiter = limiter or Limiter(store)
     q = f"{county} {number}"
 
-    allowed, retry, why = limiter.check("oscn")
+    allowed, retry, why = limiter.reserve("oscn")
     if not allowed:
         return RateLimited(query=q, coverage=Coverage(queried=["oscn"], rate_limited=["oscn"]),
                            source="oscn", retry_after_s=int(retry) if retry else None, detail=why)
 
     url = f"{BASE}/GetCaseInformation.aspx?db={county}&number={number}"
     html, blocked = fetch(url, source="oscn", query=q)
-    limiter.record("oscn")
     if blocked:
         blocked.coverage = Coverage(queried=["oscn"], errored={"oscn": "blocked"})
         return blocked

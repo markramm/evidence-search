@@ -33,14 +33,13 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
             return Hit(query=query, coverage=cov, results=[Result(**r) for r in cached]) \
                 if cached else verified_absence(query, cov, "google-news-rss")
 
-    allowed, retry, why = limiter.check("news_rss")
+    allowed, retry, why = limiter.reserve("news_rss")
     if not allowed:
         return RateLimited(query=query, coverage=Coverage(queried=["news_rss"], rate_limited=["news_rss"]),
                            source="news_rss", retry_after_s=int(retry) if retry else None, detail=why)
 
     t0 = time.time()
     body, blocked = fetch(ENDPOINT.format(q=quote(query)), source="news_rss", query=query)
-    limiter.record("news_rss")
     if blocked:
         blocked.coverage = Coverage(queried=["news_rss"], errored={"news_rss": "blocked"})
         return blocked
