@@ -72,3 +72,26 @@ def test_reserve_rolls_back_when_over_limit():
     before = s.count_calls("brave", 1.0)
     assert not L.reserve("brave")[0]
     assert s.count_calls("brave", 1.0) == before, "refused reservation still recorded a call"
+
+
+def test_wait_covers_spacing_but_never_a_budget_window():
+    """--wait may absorb sub-second spacing; it must NOT hide a real limit.
+
+    Sleeping out a 50/hr cap would turn an informative RateLimited into a hang,
+    which is exactly the ambiguity this tool exists to remove.
+    """
+    db = _db()
+    L = Limiter(Store(db))
+    L.wait_for_spacing = True
+
+    assert L.reserve("news_rss")[0]
+    assert L.reserve("news_rss")[0], "0.5s spacing should be absorbed by --wait"
+
+    # Exhaust courtlistener's 5/min budget window; --wait must still refuse.
+    L2 = Limiter(Store(_db()))
+    L2.wait_for_spacing = True
+    for _ in range(5):
+        L2.store.record_call("courtlistener")
+    allowed, retry, why = L2.reserve("courtlistener")
+    assert not allowed, "--wait must never wait out a budget window"
+    assert "window" in why

@@ -84,6 +84,12 @@ class Limiter:
     used to gate a fetch.
     """
 
+    #: Opt-in: block for short spacing waits (set by `--wait`). Never applies
+    #: to budget windows -- sleeping out a 50/hr cap would hide a real limit
+    #: behind a hang, which is exactly the confusion this tool exists to end.
+    wait_for_spacing: bool = False
+    MAX_SPACING_WAIT_S: float = 5.0
+
     def __init__(self, store: Store):
         self.store = store
 
@@ -96,9 +102,19 @@ class Limiter:
         This is the gate every fetch must pass. Never sleeps; the caller decides.
         """
         p = self.policy(source)
-        return self.store.reserve_call(
+        allowed, retry, why = self.store.reserve_call(
             source, p.windows, min_interval_s=p.min_interval_s,
             session_max=p.session_max, session_window_s=p.session_window_s)
+
+        # Retry once after a SHORT spacing wait, when the caller asked for it.
+        if (not allowed and self.wait_for_spacing and "min interval" in why
+                and retry is not None and retry <= self.MAX_SPACING_WAIT_S):
+            import time as _t
+            _t.sleep(retry)
+            allowed, retry, why = self.store.reserve_call(
+                source, p.windows, min_interval_s=p.min_interval_s,
+                session_max=p.session_max, session_window_s=p.session_window_s)
+        return allowed, retry, why
 
     def check(self, source: str) -> tuple[bool, float | None, str]:
         """Read-only view of whether a call WOULD be allowed.

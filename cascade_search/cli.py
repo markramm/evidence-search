@@ -65,6 +65,9 @@ def main(argv=None) -> int:
                                 description="Federated research client with typed outcomes.")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--wait", action="store_true",
+                   help="block for short spacing waits instead of returning RateLimited "
+                        "(sub-minute only; never waits out a real budget window)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     n = sub.add_parser("news", help="Google News RSS (free, keyless)")
@@ -112,6 +115,8 @@ def main(argv=None) -> int:
 
     a = p.parse_args(argv)
     store = Store(); limiter = Limiter(store); use_cache = not a.no_cache
+    if getattr(a, "wait", False):
+        limiter.wait_for_spacing = True
 
     if a.cmd == "news":
         from .engines.news_rss import search

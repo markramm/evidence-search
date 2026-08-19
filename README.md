@@ -157,10 +157,21 @@ why `docs` exists, and why Phase 3 (federated general engines) is still needed.
 
 ## Design notes
 
-**Rate limits are shared state.** Cache, limiter, and job queue live in one
-SQLite DB (`~/.cascade-search/store.db`, WAL mode) because limits belong to the
-*source*, not the worker. Twelve workers each assuming they owned the budget is
-how 200 calls vanished.
+**Rate limits are shared state, and reservation is atomic.** Cache, limiter,
+and job queue live in one SQLite DB (`~/.cascade-search/store.db`, WAL mode)
+because limits belong to the *source*, not the worker. Twelve workers each
+assuming they owned the budget is how 200 calls vanished.
+
+Sharing the ledger is necessary but not sufficient: check-then-record is a
+TOCTOU race, and N workers reading the same under-limit count all proceed.
+`Limiter.reserve()` claims a slot inside one `BEGIN IMMEDIATE` transaction --
+insert first, validate after, roll back if over. 200 simultaneous workers
+against a 20/s limit are granted exactly 20. Session caps live in the ledger
+too, so fan-out cannot bypass them.
+
+`--wait` absorbs sub-second *spacing* waits for sequential shell callers. It
+never waits out a budget window: a 50/hr cap must surface as `RateLimited`,
+not as a hang.
 
 **Archive on retrieval.** Anything fetched is written to
 `documents/sources/files/` with SHA-256 and a manifest line. Never an afterthought.
@@ -184,8 +195,11 @@ do not grant storage rights; that is a policy field, not a footnote.
 
 ## Status
 
-Phase 1. 12 tests passing. Not yet built: browser escalation (Playwright +
-FlareSolverr), async job queue consumption, humanomation gate resume,
-federated multi-engine merge, local semantic layer.
+Phase 1. **27 tests passing.** Browser escalation, the humanomation gate
+(open/list/resume), and local extraction are built and working.
+
+Not yet built: async job-queue consumption, federated multi-engine merge
+(Phase 3 -- the general-web gap under "What this does NOT do"), local semantic
+layer.
 
 Spec: `cascade-research/notes/spec-cascade-search-federated-research-tool.md`
