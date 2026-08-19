@@ -55,6 +55,9 @@ class Coverage:
     cache_hits: int = 0
     cache_age_s: float | None = None   # age of a REPLAYED result, seconds
     elapsed_ms: int = 0
+    #: Set when a payload was served but refused local caching. Deliberately
+    #: NOT part of is_clean: a storage problem is not a retrieval problem.
+    cache_write_refused: str | None = None
 
     @property
     def is_clean(self) -> bool:

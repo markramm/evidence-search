@@ -21,14 +21,12 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from urllib.parse import quote
 
-from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
-                            Result, replay_cached, verified_absence)
-from ..core.store import Store, cache_key
+from ..core.results import Result
+from ..core.source import run_source
+from ..core.store import Store
 
 BASE = "https://projects.propublica.org/trump-team-financial-disclosures"
 SOURCE = "propublica_disclosures"
@@ -47,102 +45,99 @@ def _deref(arr: list, value, depth: int = 0):
     return value
 
 
-def search(query: str, store: Store | None = None, limiter: Limiter | None = None,
-           use_cache: bool = True):
-    """Search disclosures by asset, entity, or appointee name."""
-    store = store or Store()
-    limiter = limiter or Limiter(store)
-
-    key = cache_key(SOURCE, query)
-    if use_cache:
-        entry = store.get_entry(key)
-        if entry is not None:
-            return replay_cached(query, entry[0], entry[1], source=SOURCE,
-                                 searched="propublica trump-team financial disclosures")
-
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    url = f"{BASE}/search/__data.json?q={quote(query)}"
-    t0 = time.time()
-    body, blocked = fetch(url, source=SOURCE, query=query)
-    if blocked:
-        blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
-        return blocked
-
+def _rows_and_echo(body: str):
+    """Resolve the SvelteKit payload into (rows, echoed_query)."""
     try:
         data = json.loads(body)
         arr = [n for n in data["nodes"] if isinstance(n, dict) and n.get("type") == "data"][0]["data"]
         top = arr[0]
-        echoed = _deref(arr, top.get("q"))
-        rows = _deref(arr, top.get("result")) or []
+        return _deref(arr, top.get("result")) or [], _deref(arr, top.get("q"))
     except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-        return AccessBlocker(query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
-                             mechanism=Blocker.SERVER_ERROR, url=url,
-                             detail=f"payload shape changed ({e}) -- ProPublica may have altered the app")
+        raise ValueError(f"ProPublica payload shape changed: {e}") from e
 
-    # Guard: a wrong param name returns the UNFILTERED index with q=''. Never
-    # let that masquerade as a broad hit.
-    if (echoed or "").strip().lower() != query.strip().lower():
-        return AccessBlocker(
-            query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "query-not-applied"}),
-            mechanism=Blocker.SERVER_ERROR, url=url,
-            detail=(f"server echoed q={echoed!r} for query {query!r}: the filter was NOT applied. "
-                    "Results would be the unfiltered index. Refusing to return them."))
 
-    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"],
-                   elapsed_ms=int((time.time() - t0) * 1000))
-    if not rows:
-        if use_cache:
-            store.put(key, SOURCE, [], ttl_s=86400)
-        return verified_absence(query, cov,
-                                "propublica trump-team financial disclosures (~1,600 appointees)")
+def _verify(query: str):
+    """A wrong param name returns the UNFILTERED 1,607-row index with q=''.
 
-    out = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        # Field names verified against a live payload 2026-08-19.
-        name = r.get("a_txt") or ""
-        slug = r.get("a_slug") or ""
-        agency = r.get("agency_name") or ""
-        title = r.get("title") or ""
-        nw = r.get("net_worth_low")
+    That looks like a broad success. Refuse it: confirm the server echoed our
+    query back before trusting anything it sent.
+    """
+    def check(body: str):
+        try:
+            _, echoed = _rows_and_echo(body)
+        except ValueError:
+            return None  # let parse() report the shape change
+        if (echoed or "").strip().lower() != query.strip().lower():
+            return (f"server echoed q={echoed!r} for query {query!r}: the filter was "
+                    "NOT applied. Results would be the unfiltered index. "
+                    "Refusing to return them.")
+        return None
+    return check
 
-        # `highlights` carries the matched asset text with <mark> tags -- this is
-        # WHY the appointee matched, and it is the most useful field for a
-        # reporter. Strip the markup, keep the matched strings.
-        matched: list[str] = []
-        raw_hl = r.get("highlights")
-        if raw_hl:
-            try:
-                hl = json.loads(raw_hl) if isinstance(raw_hl, str) else raw_hl
-                for v in (hl or {}).values():
-                    if v:
-                        matched.append(re.sub(r"</?mark>", "", str(v)))
-            except (json.JSONDecodeError, AttributeError):
-                pass
 
-        bits = [b for b in (agency, title) if b]
-        if nw:
-            try:
-                bits.append(f"net worth from ${int(nw):,}")
-            except (TypeError, ValueError):
-                bits.append(f"net worth from {nw}")
-        if matched:
-            bits.append(f"matched: {matched[0][:120]}")
+def _parser(query: str):
+    """Build a parser bound to this query (for the no-slug fallback URL).
 
-        out.append(Result(
-            url=f"{BASE}/appointee/{slug}" if slug else f"{BASE}/?search={quote(query)}",
-            title=name or slug or "(unnamed appointee)",
-            snippet=" | ".join(bits),
-            source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
-            meta={"appointee": name, "slug": slug, "agency": agency, "title": title,
-                  "net_worth_low": nw, "matched_assets": matched,
-                  "earliest_document": r.get("document_received_date_earliest")},
-        ))
-    if use_cache:
-        store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=86400)
-    return Hit(query=query, coverage=cov, results=out)
+    Deliberately a closure, not a module global: concurrent searches in one
+    process would race on shared mutable state.
+    """
+    fallback_url = f"{BASE}/?search={quote(query)}"
+
+    def _parse(body: str) -> list[Result]:
+        rows, _ = _rows_and_echo(body)
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            name = r.get("a_txt") or ""
+            slug = r.get("a_slug") or ""
+            agency = r.get("agency_name") or ""
+            title = r.get("title") or ""
+            nw = r.get("net_worth_low")
+
+            # `highlights` carries the matched asset text with <mark> tags -- this is
+            # WHY the appointee matched, and the most useful field for a reporter.
+            matched: list[str] = []
+            raw_hl = r.get("highlights")
+            if raw_hl:
+                try:
+                    hl = json.loads(raw_hl) if isinstance(raw_hl, str) else raw_hl
+                    for v in (hl or {}).values():
+                        if v:
+                            matched.append(re.sub(r"</?mark>", "", str(v)))
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
+            bits = [b for b in (agency, title) if b]
+            if nw:
+                try:
+                    bits.append(f"net worth from ${int(nw):,}")
+                except (TypeError, ValueError):
+                    bits.append(f"net worth from {nw}")
+            if matched:
+                bits.append(f"matched: {matched[0][:120]}")
+
+            out.append(Result(
+                url=f"{BASE}/appointee/{slug}" if slug else fallback_url,
+                title=name or slug or "(unnamed appointee)",
+                snippet=" | ".join(bits),
+                source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
+                meta={"appointee": name, "slug": slug, "agency": agency, "title": title,
+                      "net_worth_low": nw, "matched_assets": matched,
+                      "earliest_document": r.get("document_received_date_earliest")},
+            ))
+        return out
+
+    return _parse
+
+
+def search(query: str, store: Store | None = None, limiter: Limiter | None = None,
+           use_cache: bool = True):
+    """Search disclosures by asset, entity, or appointee name."""
+    return run_source(
+        query, source=SOURCE,
+        url=f"{BASE}/search/__data.json?q={quote(query)}",
+        searched="propublica trump-team financial disclosures (~1,600 appointees)",
+        parse=_parser(query), verify=_verify(query),
+        store=store, limiter=limiter, use_cache=use_cache,
+    )
