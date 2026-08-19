@@ -299,3 +299,126 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Would have helped:** (1) a sanity check in the tool itself — if extracted text ratio vs. raw is negative or the output is mostly non-printable/PDF-syntax tokens, warn rather than silently return it as if it were prose; (2) grep mode specifically matching within already-extracted text rather than raw bytes, so PDF-structure false-positives on common words like "Plaintiff" (which legitimately appears in bookmark titles) don't leak through as if they were body-text hits.
 **Where it saved real work elsewhere in this task:** `extract --grep` on live news articles (AZ Mirror, LA Times, NPR) worked exactly as advertised — 96-98% token reduction, clean quote-bearing passages, correctly attributed to speakers. The problem was specific to this locally-archived PDF, not the tool generally. `web` search coverage lines and the Hit/RateLimited typed-outcome distinction were both clear and useful — caught one genuine rate-limit (WaPo, on `extract`) that I correctly did NOT write up as a verified absence.
 **Severity:** slowed (a few minutes; had a working fallback immediately available in `pdftotext`)
+
+## 2026-08-19 · separate-the-two-vehicles-training-vs-expert-witness · claude-opus-4-8-parallel-tick1-e
+
+Synthesis-heavy task (argue a structural claim from committed artifacts, not lookup). Reporting
+specifically on whether the tool supports SYNTHESIS, since that was asked.
+
+**Verdict up front:** `web` and `extract` were excellent and did real analytical work for me.
+`courtlistener` was the weakest link and I ended up bypassing it with raw `curl` for the thing
+that mattered most. The single most load-bearing evidence in this task — federal procurement
+codes — has no cascade-search client at all, and I had to hand-roll USAspending API calls.
+
+### Where it saved me real work (positive signal, be specific)
+
+- **The browser tier is the standout feature and it is undersold in the skill doc.**
+  `extract https://www.seakexperts.com/... --grep "<vendor-b>|<vendor-c>|..."` sailed straight
+  through a Cloudflare wall that had just returned me a bare "Just a moment..." interstitial
+  on `curl`. I did not ask for escalation, did not know it had happened, and got clean text.
+  That silently turned a dead end into the census evidence for half my argument. **Suggestion:
+  say in the output when the browser tier was used.** I only inferred it because I'd watched
+  plain curl fail on the same URL 60 seconds earlier.
+- `web` coverage lines let me trust a thin result set. `"Critical Appraisal of the Scientific
+  Rigor" "<vendor-b>" Police Quarterly 2025` returned 18 results on
+  `79/82 responsive | RATE-LIMITED: brave | ERRORED: duckduckgo, startpage` — I could tell that
+  was a real hit on a near-complete sweep, not luck. That query closed a gap ("Seth Stoughton
+  could not be located") that two prior passes had logged as unresolved.
+- `*UNIQUE*` earned its keep. The Justia hit on the Tovar Daubert order was UNIQUE, and it was
+  the thread that led to the single most important document in the whole task. Consensus
+  ranking would have buried a district-court docket page.
+- `extract --grep` on the Stoughton CV: 164K tokens of PDF down to a 60-line list of retention
+  lines. That is genuinely a synthesis tool, not just a token-saver — the *shape* of the
+  grep output (57 "Retained by plaintiff" vs 11 "Retained by defendant") WAS the finding.
+  I did not have to read the CV to see the asymmetry; the extraction surfaced it.
+
+### Where it fell short
+
+**1. `extract --grep` works on PDFs; `extract --text` and bare `extract` do not. BLOCKED me briefly.**
+Same URL, three behaviours:
+```
+$CS extract .../stoughton_seth.pdf --grep "<vendor-b>|expert|..."
+  -> raw ~164,707 tok -> extracted ~3 tok (100.0% reduction)     # THREE TOKENS. Silent no-op.
+$CS extract .../stoughton_seth.pdf --text
+  -> raw ~164,707 tok -> extracted ~452,468 tok (-174.7% reduction)  # dumped raw PDF binary
+     %PDF-1.7 / stream / x���n�F�]���O�0����"֒��(V,el��...
+```
+A **negative reduction percentage** and a screenful of mojibake is the tool telling me it has
+no PDF text layer and is passing bytes through. It should say "this is a PDF, no text
+extractor available" and exit non-zero, not print `-174.7% reduction` as if that were a
+result. And the `--grep` variant returning "3 tokens" with exit 0 is worse — that is
+indistinguishable from "searched properly, found nothing," which is exactly the failure mode
+this tool exists to prevent. **A typed outcome is the whole value proposition here and PDFs
+silently break it.** I worked around it with `curl -o file.pdf && pdftotext`, which took two
+minutes and worked perfectly, so the fix is presumably just shelling out to pdftotext.
+
+**2. `courtlistener` OR-tokenizes unquoted phrases and gives no hint that it did.**
+`$CS courtlistener "<vendor-b-full>" --type o` returned 20 results, every one
+`*UNIQUE*`, topped by **Planetary Science Institute**, **Rey-Cruz v. Forensic Science
+Institute**, and **Weizmann Institute of Science**. Zero relevant. The shell quotes are
+consumed by the shell, so the API sees bare tokens. I had to figure out that
+`'"<vendor-b>"'` (nested quotes) was the correct form. **A three-word query returning
+Weizmann Institute should trip a "did you mean an exact phrase?" hint**, or the client should
+phrase-quote multi-word queries by default.
+
+**3. I abandoned the `courtlistener` client entirely for the task's key document.**
+Once I had the docket, I wanted the actual order text. The client gives me search results,
+not documents. I went to `curl https://www.courtlistener.com/api/rest/v4/search/?q=...&type=r`
+directly, read `recap_documents[].filepath_local`, and pulled
+`storage.courtlistener.com/recap/gov.uscourts.cand.376399/gov.uscourts.cand.376399.89.0.pdf`.
+That 37-page order is the best evidence in my writeup. **Feature request: `$CS courtlistener
+--docket <id> --fetch-documents`, or at minimum surface `filepath_local` / `is_available`
+in the result rows.** The RECAP PDF endpoint is ungated and free — the client is one hop
+away from being a primary-document retriever instead of a search box, and that hop is the
+difference between "I found a case" and "I read the holding."
+
+Also: the top-level `count` field is discarded (another worker logged this same tick). I hit
+it too — `results: 20` on a capped page tells me nothing about volume.
+
+**4. No procurement source. This is the biggest gap for this beat.**
+The core of my answer is that <vendor-b>'s 21 federal awards split 19-to-2 across
+`PSC U005/U008/U009/U010/U013/U099 (Education/Training)` vs `PSC R424 (EXPERT WITNESS) /
+NAICS 541199 (Legal Services)`. **cascade-search has no USAspending or FPDS client**, so I
+wrote raw `curl` POSTs against `api.usaspending.gov/api/v2/search/spending_by_award/`,
+`/awards/{generated_internal_id}/`, and `/search/spending_over_time/`, plus a Python loop to
+fan out per-award detail calls for PSC/NAICS. That is ~40 lines of glue I had to get right,
+including guessing the `generated_internal_id` format (`CONT_AWD_<piid>_<subtier>_-NONE-_-NONE-`)
+— my first attempt used the wrong subtier code and 404'd. The skill doc lists `propublica`
+for disclosures and `oscn`/`courtlistener` for courts; on a follow-the-money beat, **USAspending
+is at least as load-bearing as either**, it is keyless and generous, and it would benefit
+enormously from the typed-outcome treatment. Strongest single feature request in this entry.
+
+**5. Crossref is the workaround for the entire academic-publisher wall, and it should be a source.**
+SAGE (`journals.sagepub.com`) is Cloudflare-managed-challenge on both the DOI landing page and
+the `/doi/full/` variant. The browser tier did NOT pass it (unlike SEAK). Justia was also
+`cloudflare-managed-challenge`. But `curl api.crossref.org/works/<doi>` returned the full
+verbatim abstract, author list with affiliations (including `von.kliem@forcescience.com`,
+which was itself a finding), journal, volume, issue, and pagination — for free, no key, no
+wall. I verified two tier-1 citations that way, one of which closed a two-pass-old gap.
+**`$CS crossref <doi-or-title>` would be maybe 30 lines and would defuse most paywalled-journal
+blockers on this beat.** Right now the tool reports AccessBlocker on SAGE and stops; the
+metadata was sitting in the open the whole time.
+
+### On whether it supports SYNTHESIS specifically
+
+Partly, and the part that works is `extract --grep` with multiple alternation patterns over a
+long document. Being able to ask "show me every line matching `Retained by plaintiff|Retained
+by defendant`" and read the *ratio* off the output is analysis, not lookup, and it cost me
+almost no context.
+
+What it does NOT support is **comparing structured records across a set**. My central claim
+required knowing the PSC and NAICS code of each of 21 awards and noticing they cluster in two
+groups. There is no cascade-search idiom for that; `--tables` is close in spirit but only works
+on a single page. I hand-rolled it. **A "fan out this lookup over these N ids and tabulate
+these fields" primitive is what synthesis work actually needs**, and it is a different shape
+from anything currently offered.
+
+Minor: I twice wanted to know what a *previous* worker had already searched this tick so I
+wouldn't burn shared CourtListener budget re-running it. `$CS limits` shows usage numbers but
+not what was queried. A recent-query log against the shared ledger would have saved me two
+calls and, more usefully, told me a sibling had already covered the USMS award stream — I only
+found that out by reading a KB file afterwards.
+
+**Severity:** slowed (PDF extract, courtlistener quoting/documents), annoyed (no query log),
+and one genuine capability gap (no procurement client, no crossref) that I fully worked around
+but which cost the most time.

@@ -215,7 +215,29 @@ def main(argv=None) -> int:
             if out:
                 return _emit(out, a.json)
         else:
-            raw = _P(a.target).expanduser().read_text(errors="replace")
+            _path = _P(a.target).expanduser()
+            _head = b""
+            try:
+                with open(_path, "rb") as _fh:
+                    _head = _fh.read(5)
+            except OSError:
+                pass
+            # A PDF read as text is binary noise. Worse than useless: `--text`
+            # on a 2.4MB PDF reported "-242.3% reduction" and would have pushed
+            # ~2M tokens of garbage into the caller's context -- the token lever
+            # running backwards. Refuse, and name the tool that does the job.
+            if _head.startswith(b"%PDF"):
+                from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
+                return _emit(_AB(
+                    query=a.target,
+                    coverage=_Cv(queried=["extract"], errored={"extract": "binary-format"}),
+                    mechanism=_B.SERVER_ERROR, url=a.target,
+                    detail=("This is a PDF. `extract` reads text and HTML; reading a PDF "
+                            "as text yields binary noise, not content.\n"
+                            "Convert first, then extract:\n"
+                            "    pdftotext -layout FILE.pdf - > FILE.txt   # poppler\n"
+                            "    cascade-search extract FILE.txt --grep PATTERN")), a.json)
+            raw = _path.read_text(errors="replace")
         is_html = is_url or a.target.endswith((".html", ".htm"))
 
         payload = {}

@@ -207,3 +207,20 @@ def test_js_only_requires_spa_evidence_not_just_smallness():
     stub = '<html><head><script>var a=1</script><script>var b=2</script></head>' \
            '<body><p>Record not available.</p></body></html>'
     assert detect_blocker(200, stub) is None
+
+
+def test_extract_refuses_a_pdf_instead_of_emitting_binary(tmp_path, capsys):
+    """The token lever must not run backwards.
+
+    `extract --text` on a 2.4MB PDF reported "-242.3% reduction" and would have
+    pushed ~2M tokens of binary noise into the caller's context -- the exact
+    opposite of what the command exists to do. Found by a worker on a real task.
+    """
+    from cascade_search.cli import main
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n" + b"\x00\x01\x02binary noise" * 500)
+    code = main(["extract", str(pdf), "--text"])
+    out = capsys.readouterr().out
+    assert code == 2, "a PDF must be refused as a blocker, not silently mangled"
+    assert "pdftotext" in out, "refusal must name the conversion path"
+    assert "reduction" not in out, "must not report a savings figure for a refusal"
