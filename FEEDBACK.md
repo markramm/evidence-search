@@ -1257,3 +1257,97 @@ shot with no ambiguity.
 **Severity:** annoyed (the AccessBlocker-on-404 register issue), otherwise clean — no blockers,
 no rate-limit surprises beyond the normal shared-ledger `web` RateLimited-then-retry cycle
 documented elsewhere in this log, which behaved exactly as described.
+
+## 2026-08-19 · <vendor-d>-owns-<outlet-a> (SECOND pass on an already-worked ticket) · claude-opus-5[1m] · agent:claude-opus-4-8-parallel-tick8-a
+
+**Context:** dispatched on the same ticket tick7-a worked earlier today, under a brief that
+said it was unworked. It wasn't. So I used cascade-search for something the log doesn't have
+an entry for yet: **independently reproducing another agent's tier-1 claims.** That turns out
+to be a distinct use case, and the tool is unusually good at it. Reporting from that angle.
+
+**Reproduction is where this tool shines, and I don't think that's been named yet.**
+
+Three claims, three commands, three exact reproductions:
+
+```
+$CS extract "https://www.<vendor-d>.com/about-us/" --grep "Praetorian|<outlet-a>|Riverside|GTCR|2019|acquir"
+$CS usaspending "<vendor-d>" --sum
+$CS extract "https://www.<outlet-a-domain>/about-us" --grep "<vendor-d>|parent|owned|ownership|subsidiary|Praetorian"
+```
+
+The `--sum` came back `$1,564,745.51 across 15 awards ... complete` — **identical to the cent**
+against a figure produced hours earlier in a different session. The `--grep` on <outlet-a-domain>
+returned `NO MATCHES ... in 37,547 tokens` with the same token count as the prior pass. That
+byte-identical reproducibility is the property that makes a verification pass cheap, and it's
+a direct consequence of extraction being deterministic regex/DOM rather than model
+summarisation. **Worked well, and it's the headline:** most research tooling can't be used to
+check itself, because a second call gives you a differently-worded summary and you can't tell
+a real discrepancy from paraphrase drift. Here I could.
+
+**Friction 1 — `--detail` output is so terse I couldn't tell a missing field from an absent one.**
+```
+$CS usaspending x --detail 307695512 2>&1 | grep -iE "psc|naics|descr|amount|recipient|agency"
+```
+returned exactly one line: `NAICS 561920: CONVENTION AND TRADE SHOW ORGANIZERS`. The sibling
+award returned two lines, including a PSC. **Observation:** award 307695512 printed no PSC line.
+**Conclusion I could not safely draw:** whether that award *has* no PSC code in USAspending, or
+whether `--detail` omitted it. Those mean different things and I had to hedge my writeup
+accordingly. (Noting I piped to `grep`, so I did not see the unfiltered output or the real exit
+code — I'm reporting the filtered observation, not claiming a bug.) **Would have helped:** print
+absent fields explicitly as `PSC: (none in record)` rather than omitting the line. Silence is
+ambiguous in exactly the place where the codes are the load-bearing evidence.
+**Severity:** slowed (and carries a correctness hazard — I nearly wrote "no PSC assigned").
+
+**Friction 2 — the same `web` rate-limit wall defeated the same question twice, and the tool
+can't tell me that.** My site-scoped query returned:
+```
+== RateLimited ==
+coverage: 78/82 responsive | RATE-LIMITED: searxng:brave, searxng:google cse
+| ERRORED: searxng:duckduckgo, searxng:startpage
+retry after: unspecified by the source
+```
+tick7-a hit **the same 78/82, the same four engines** on the same question this morning. The
+typing is correct and I did not write it up as an absence — the guarantee worked exactly as
+designed. But two passes burned budget discovering the same wall independently. **Would have
+helped:** `retry after: unspecified by the source` is the least useful field in the output; if
+the shared ledger knows a source was limited N minutes ago, say so (`brave: limited 4h ago,
+still cooling`). Better still, a note when a *query shape* has recently failed this way.
+**Severity:** annoyed, but it's a real budget cost multiplied across parallel workers.
+
+**Friction 3 — CourtListener docket pages are ~95% chrome, and `--text` gives you the chrome.**
+```
+$CS extract "https://www.courtlistener.com/docket/71299595/hosea-small-v-<vendor-d>-llc/" --text
+```
+94.5% reduction, and the surviving 1,510 tokens were almost entirely CourtListener's
+sign-in modal, RECAP install nag, and the "🙏 daily prayers" explainer. **Zero** case metadata.
+The thing I needed — `Cause: 17:501 Copyright Infringement / Nature of Suit: 820 Copyright` —
+only appeared once I guessed a `--grep` for `Nature of suit|Cause of Action|...`. **Had to
+figure out:** that `--text` is the wrong mode for a docket page, and which field names to grep
+for. This mattered a lot: that one line **corrected a finding** the prior pass had carried
+forward as "a vendor sued over the policy it drafted." It's a copyright case. **Would have
+helped:** a `--docket` mode (or courtlistener-aware extraction) that pulls the metadata block —
+cause, NOS, judge, filed date, party roles — since that block is the whole reason to fetch a
+docket page. Given `courtlistener` is already a first-class source, `extract` not knowing its
+own sibling's page shape is a gap. **Severity:** slowed; near-miss on correctness.
+
+**Where the results fell short (not an error, a corpus point).** The ownership question —
+"who owns this trade outlet" — has no good source here. I got there via `web` (which found
+policemag.com's own announcement) plus `bobit.com/about`, then *validated* the answer with
+`usaspending --limit/--detail` on the publisher. **That last move is the generalizable trick and
+I'd like it written down somewhere:** to test whether a publisher is a market participant, pull
+its federal award PSC/NAICS. Bobit came back `PSC U005 TUITION/REG/MEMB FEES, NAICS 561920
+CONVENTION AND TRADE SHOW ORGANIZERS`; <vendor-d> came back technical writing, training aids, and
+misc-schools. The contracting officer's classification separated a press outlet from a vendor
+that owns one, on a question procurement data isn't nominally *for*. That's the strongest thing
+the tool did for me today and it wasn't in any doc.
+
+**Worked well, specifically:**
+- `--sum` reporting `complete` vs. floor. I could state a figure as exact instead of hedging.
+- The in-document absence message (`This is an absence IN THIS DOCUMENT ONLY -- the document
+  was read, the terms are not in it`) is the single best-worded output in this tool. It states
+  the scope of the negative so precisely that I could put it in a KB entry verbatim as evidence.
+- `RateLimited` refusing to masquerade as absence, twice, on a question where a false negative
+  would have been an actual published error.
+
+**Overall severity:** slowed. Task completed, nothing blocked. Friction 3 is the one worth
+fixing first — it sits on a first-class source and it nearly let a mischaracterised case stand.
