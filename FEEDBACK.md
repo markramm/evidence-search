@@ -614,6 +614,8 @@ The substantive half: this was a *heavily* loaded query (quoted phrase + five ex
 **Severity:** slowed at worst. All four research questions were answered, three from tier-1 primary documents, and the one confident-wrong-answer risk in the task (asserting the injunction caused the withdrawal) was avoidable because the *primary document itself* named the actual cause. `fedreg` + `extract` did the real work here.
 
 ## 2026-08-19 · <county-a> Claims Paid multi-month sample (sample-<county-a>-claims-paid-reports-...) · agent:claude-sonnet-5-parallel-tick3-b
+
+**[fixed — see 2026-08-19 · foia-follow-through-vendor-attribution-for-<vendor-a>-training-dollars-esac-isp-appropriation-half-is-documented entry below, re-verified against the same file/command shape the same day]**
 **Task:** sample 18 <county-a> Board agenda-packet PDFs (Finance and Budget Committee, 2016-2023) for
 Sheriff training-category payee rows, checking for a handful of specific vendor names ("<vendor-a>" etc).
 The task prompt explicitly warned that `extract` had previously grepped raw PDF binary on these large
@@ -695,3 +697,42 @@ WebSearch one month at a time, and something `cascade-search` has no dedicated c
 this is one CMS's private-but-undocumented API, not a general public-records source). Flagging in case a
 "government SharePoint sites often expose their event/document list via `_api/web/lists`" pattern note
 belongs somewhere findable for future county-government tasks, since it isn't specific to <county-a>.
+
+## 2026-08-19 · foia-follow-through-vendor-attribution-for-<vendor-a>-training-dollars-esac-isp-appropriation-half-is-documented · claude-sonnet-5
+
+**Context:** re-checked the same large <county-a> PDF (`<county-a>-board-agenda-packet-2023-10-claims-paid-september-2023.pdf`,
+1,578,283 chars) that an earlier pass on this investigation flagged for the now-supposedly-fixed
+`extract --grep` global-match-cap bug (see prior entry above, same file). The task prompt told me the fix
+had landed within the hour and asked me to re-verify if I hit that behavior again.
+
+**Command:**
+```
+$CS extract "$F" --grep "Fifth Third" --grep "Procurement Card" --grep "Purchase Card"
+```
+**Got:** `'Fifth Third' matched 223 times, showing first 40; 'Procurement Card' matched 98 times, showing
+first 40` — each pattern reports its own true count and its own cap notice. Ran `--grep "Purchase Card"`
+alone for comparison: 2 real matches, no "showing first N" line at all (nothing to truncate). This is
+exactly the per-pattern behavior the fix was supposed to produce, and it held under a real multi-pattern
+call against the same large document that broke the old behavior.
+
+**Verdict: fix confirmed working, on the exact file and command shape that exposed the original bug.**
+No silent starvation observed this session across several multi-`--grep` calls against this and two other
+large county PDFs (1.19M and 1.52M chars).
+
+**Separately, a genuine result-quality finding (not a cascade-search bug, a document-structure trap):**
+the two dollar amounts I needed to trace ($531.48, $905.80) live in a "Procurement Card Activity Report"
+table that has NO Fund column — merchant, department, amount, date, business-purpose text, nothing else.
+The payee-level "Claims Paid Report" in the *same PDF* does carry a Fund column but aggregates procurement-
+card charges under the card issuer ("Fifth Third Bank") with no per-transaction line, and there is no
+shared invoice/transaction ID between the two tables. `extract --grep` retrieved both tables correctly and
+completely (verified this session) — the gap is structural to the source document, not a tool limitation.
+Noting it here only because it's the kind of "the tool worked, the source still can't answer the question"
+case the skill doc asks for; no action item for cascade-search itself.
+
+**Worked well:** `--grep` with multiple patterns in one call, run against a 1.5M-char PDF, returned in
+seconds with correct per-pattern counts and exact quoted context windows — this is what let me rule out
+(not just fail to find) a fund-path match for two specific dollar amounts across the full document, twice,
+with different pattern sets, and trust a negative result without re-reading the PDF by hand.
+
+**Severity:** n/a — this is a fix-verification entry, not a new complaint. Recommend marking the prior
+entry `[fixed]` with a pointer to this one.
