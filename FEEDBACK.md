@@ -736,3 +736,19 @@ with different pattern sets, and trust a negative result without re-reading the 
 
 **Severity:** n/a — this is a fix-verification entry, not a new complaint. Recommend marking the prior
 entry `[fixed]` with a pointer to this one.
+
+## 2026-08-19 · brief-write-detention-executive-branch-artifact task · claude-sonnet-5
+
+**Command:** `$CS fedreg "detention bed mandate" --from 2003-01-01 --to 2005-12-31 --wait`
+**Expected:** Either a Hit pointing at something plausible, or a clear signal that the Federal Register isn't where this document type lives.
+**Got:** `Hit`, exit 0, 11 results — all completely unrelated (endangered-species critical-habitat rules, hours-of-service trucking rules, ADA accessibility guidelines). None mentioned detention or immigration. The tool returned a confident-looking `Hit` for a query that had zero real matches in the corpus it searched.
+
+**Friction:** The task called for dating a "congressional detention bed mandate." That mandate is an *appropriations-bill line item* (a rider in a DHS Appropriations Act), not a Federal Register rule/notice — Federal Register covers agency rulemaking, not appropriations riders passed by Congress. `fedreg` doesn't know this and doesn't say so; it just relevance-ranks whatever's in its index against the query terms and returns the top N with a `Hit` verdict, even when every result is noise. Per the skill doc's own warning ("relevance-ranked though, so a row count is not a measurement") I didn't take the row count as a finding — but a first-time user without that warning fresh in mind could easily skim 11 titles, see nothing obviously wrong, and half-trust it.
+
+**Worked around it:** switched to `$CS web "..."` (general web/SearXNG tier) which correctly surfaced congress.gov, govinfo.gov, and multiple advocacy-org citations pointing to the actual two statutes involved (P.L. 108-458 IRTPA §5204, and P.L. 111-83 DHS Approps Act 2010) — then went directly to govinfo.gov via `$CS extract` and pulled the codified statutory text to confirm both dates and language. That combination (web search to find the right primary-source URL, then extract to pull the exact clause) is what actually answered the question; `fedreg` contributed nothing to the finding despite returning a `Hit`.
+
+**Would have helped:** `fedreg` distinguishing "no relevant hit above some relevance floor" from "here are the top N regardless of relevance" — even a low-confidence flag on the result set (e.g., "top result score below typical-hit threshold") would have saved the detour of reading through 11 titles to confirm none were on-topic. Not asking for corpus expansion — appropriations riders genuinely aren't Federal Register documents, so this is a "wrong tool for this document type" case, not a coverage gap. A one-line hint in the tool's own output ("no Federal Register document is expected to contain congressional appropriations language — try `web` or a congress.gov lookup for statutes/riders") would turn a silent near-miss into a fast redirect.
+
+**Worked well:** `$CS extract <govinfo.gov URL> --grep "5204" --grep "detention" --grep "8,000"` on the full codified IRTPA text (raw ~205,789 tok) returned exactly the clause needed at ~1,432 tok — a 99.3% reduction — and it was the *exact* statutory language ("shall increase by not less than 8,000... subject to the availability of appropriated funds") that let me catch and correct an imprecise date claim in the task ticket itself (ticket said "2004 congressional bed mandate"; the real enforceable floor is P.L. 111-83, enacted 2009-10-28). `web`'s coverage-honesty line (`80/82 responsive | RATE-LIMITED: brave | ERRORED: startpage`) also did exactly what the skill doc promises — I could see it wasn't silently missing engines.
+
+**Severity:** annoyed (fedreg) / worked-well (web + extract combo)
