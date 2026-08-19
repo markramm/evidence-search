@@ -963,3 +963,65 @@ right call rather than a guess.
 
 **Severity:** slowed (on the task-hygiene issue, not on any search tool). No
 cascade-search friction to report this pass — clean non-use.
+
+## 2026-08-19 · pull-psc-naics-course-titles-on-all-27-lifeline-training-awards · claude-sonnet-5
+
+**Context:** ticket asked for PSC + NAICS + course-title/description on all 27 of Lifeline
+Training Ltd's federal prime contracts, testing whether any repeats the <vendor-b> ICE
+pattern (protective-purpose title against combat-coded PSC U013). Needed the actual
+`product_or_service_code` field on every award, not just titles.
+
+**Command 1:** `$CS --wait usaspending "Lifeline Training" --group contracts --limit 27 --json`
+
+**Expected:** either the PSC/NAICS fields directly, or a documented way to pull them for a
+whole result set.
+
+**Got:** a clean 27-row `meta` block per award — `award_id`, `recipient`, `amount`, `agency`,
+`sub_agency`, `award_type`, dates, `description` — genuinely useful, but **no PSC, no NAICS**.
+The task this ticket exists to do (compare title against PSC) is structurally impossible from
+this command's output alone.
+
+**Command 2:** `$CS --wait record usaspending:307787319 --json` (one of the award `record_id`s
+from Command 1's output)
+
+**Expected:** the full FPDS `latest_transaction_contract_data` block, since the skill doc frames
+`record` as "the record holds everything the API sent."
+
+**Got:** a much thinner object than expected — `internal_id`, `Award ID`, `Recipient Name`,
+`Awarding Agency`, `Awarding Sub Agency`, `Award Amount`, dates, `Description`,
+`Contract Award Type`, `recipient_id`, `awarding_agency_id`, `agency_slug`,
+`generated_internal_id`. Still no PSC/NAICS. This is the SEARCH-INDEX summary record, not the
+FPDS transaction-contract-data object — a different, narrower thing than what the skill doc's
+"the record holds everything the API sent" line led me to expect for this source.
+
+**Friction:** the only way I found to get PSC/NAICS was to go outside cascade-search entirely:
+take the *numeric* `record_id` cascade-search's `--group` output carries in `meta.record_id`
+(e.g. `usaspending:307787319` → `307787319`), then hit
+`https://api.usaspending.gov/api/v2/awards/307787319/` directly with `curl`, which returns the
+full `latest_transaction_contract_data` block including `product_or_service_code`,
+`product_or_service_description`, `naics`, `naics_description`. That endpoint takes the same
+numeric id `--group` already gives you, which makes this feel like a client gap rather than a
+missing capability of the underlying API — the data is one hop away and cascade-search doesn't
+make that hop. Did this for all 27 awards (a `while read` loop over the 27 ids with `sleep 0.6`
+between calls), successfully, but entirely outside the tool.
+
+**Would have helped:** a `--full` or `--detail` flag on `usaspending`, or on `record` when
+`--source usaspending`, that follows through to the awards-detail endpoint and returns PSC/NAICS/
+full transaction-contract-data — the exact fields a procurement-classification comparison needs
+and the exact fields a prior ticket on this same beat (the ICE <vendor-b> award,
+`70CDCR21P00000057`) had to get the same way, by a worker hand-querying the raw API. Two workers
+now have independently reimplemented "hit the awards-detail endpoint by numeric id" outside the
+tool for the identical class of question. This is a good candidate for a first-class command:
+`cascade-search usaspending-detail <award_id>` or similar.
+
+**Worked well:** the `--group contracts --limit 27` call was fast, complete (all 27 in one
+`Hit`, no pagination fighting), and the `description` field it does carry was accurate and
+useful for the "is there a protective-purpose title" half of the question — I just had to pair
+it with data pulled elsewhere for the PSC half. `usaspending --count` also gave a clean, trusted
+`27` up front before I did anything else, which is exactly the confirm-the-total step the skill
+doc recommends.
+
+**Severity:** slowed — not blocked, since the direct-API workaround is reliable and fast (27
+awards in well under a minute including sleep spacing), but it is a silent gap: nothing in
+`--help` or the skill doc flags that PSC/NAICS require leaving the tool, so the first attempt
+(via `record`) cost a full round-trip before I found the actual path.
