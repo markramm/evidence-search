@@ -129,3 +129,31 @@ def test_sort_is_group_aware(monkeypatch):
     s2, L2 = _kit()
     usa.search("x", award_types=usa.LOAN_TYPES, store=s2, limiter=L2, use_cache=False)
     assert seen["sort"] == "Award ID"
+
+
+def test_dollar_sum_says_whether_it_is_complete_or_a_floor(monkeypatch):
+    """Workers hand-scraped every dollar total before --sum existed, and a
+    page-capped scrape is a FLOOR. Reporting a floor as a total is the
+    confident-wrong-number failure this package keeps hitting."""
+    pages = [
+        ({"results": [{"Award Amount": 100.0}, {"Award Amount": 50.0}],
+          "page_metadata": {"hasNext": True}}, None),
+        ({"results": [{"Award Amount": 25.0}], "page_metadata": {"hasNext": False}}, None),
+    ]
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: pages.pop(0))
+    s, L = _kit()
+    out = usa.dollar_sum("x", store=s, limiter=L, max_pages=5)
+    assert out.results[0].meta["dollar_total"] == 175.0
+    assert out.results[0].meta["complete"] is True
+    assert out.results[0].meta["caveat"] is None
+
+
+def test_dollar_sum_flags_a_page_cap_as_a_floor(monkeypatch):
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (
+        {"results": [{"Award Amount": 10.0}], "page_metadata": {"hasNext": True}}, None))
+    s, L = _kit()
+    out = usa.dollar_sum("x", store=s, limiter=L, max_pages=2)
+    m = out.results[0].meta
+    assert m["complete"] is False
+    assert "FLOOR" in out.results[0].title or "AT LEAST" in out.results[0].title
+    assert m["caveat"]

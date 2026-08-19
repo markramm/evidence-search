@@ -147,10 +147,89 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
         snippet=" | ".join(f"{k}: {v}" for k, v in res.items() if v),
         source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
         meta={"total_awards": total, "by_type": res, "search_mode": mode,
+              "dollar_total_note": ("This endpoint counts AWARDS, not dollars. For a "
+                                    "dollar total use --sum, which pages the award list "
+                                    "and adds Award Amount -- and report it as a floor if "
+                                    "more_pages is true."),
               "count_caveat": (None if by_recipient else
                                "KEYWORD search is full-text across descriptions: this "
                                "counts records CONTAINING the words, not awards TO a "
                                "vendor. Use --recipient for a vendor total.")},
+    )])
+
+
+def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
+               max_pages: int = 10, store: Store | None = None,
+               limiter: Limiter | None = None):
+    """Sum Award Amount across pages. Workers hand-scraped every total before this.
+
+    Reports whether it is COMPLETE or a floor: the API pages, and a vendor with
+    more awards than max_pages*100 yields an understatement. A floor reported as
+    a total is the confident-wrong-number failure this package keeps hitting.
+    """
+    store = store or Store()
+    limiter = limiter or Limiter(store)
+    types = award_types or CONTRACT_TYPES
+    total = 0.0
+    n = 0
+    page = 1
+    more = False
+    while page <= max_pages:
+        allowed, retry, why = limiter.reserve(SOURCE)
+        if not allowed:
+            # Paging is one logical operation, so a spacing wait between pages
+            # should be absorbed rather than abandoning a half-summed total --
+            # a partial sum returned as a result is exactly the floor-as-total
+            # error. Wait out SHORT spacing; a real budget window still stops us.
+            if retry and retry <= 5 and "min interval" in why:
+                time.sleep(retry)
+                allowed, retry, why = limiter.reserve(SOURCE)
+            if not allowed:
+                return RateLimited(
+                    query=query,
+                    coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
+                    source=SOURCE, retry_after_s=int(retry) if retry else None,
+                    detail=(f"{why} -- summed {n} awards across {page-1} page(s) before "
+                            "stopping. This is a PARTIAL sum; do not report it as a total."))
+        data, err = _post("/search/spending_by_award/", {
+            "filters": _filters(query, by_recipient, types, None, None),
+            "fields": ["Award ID", "Recipient Name", "Award Amount"],
+            "limit": 100, "page": page,
+            **({"sort": "Award Amount", "order": "desc"}
+               if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
+               else {"sort": "Award ID", "order": "desc"})})
+        if err:
+            kind, detail = err
+            return AccessBlocker(query=query,
+                                 coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
+                                 mechanism=Blocker.SERVER_ERROR,
+                                 url=f"{API}/search/spending_by_award/", detail=detail)
+        rows = data.get("results") or []
+        for r in rows:
+            v = r.get("Award Amount")
+            if isinstance(v, (int, float)):
+                total += v
+                n += 1
+        more = bool((data.get("page_metadata") or {}).get("hasNext"))
+        if not more:
+            break
+        page += 1
+
+    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"])
+    if not n:
+        return verified_absence(query, cov, f"usaspending dollar sum ({query})")
+    complete = not more
+    return Hit(query=query, coverage=cov, results=[Result(
+        url=f"https://www.usaspending.gov/search?keywords={query}",
+        title=(f"${total:,.2f} across {n} awards" if complete
+               else f"AT LEAST ${total:,.2f} across {n}+ awards (page cap hit)"),
+        snippet=("complete" if complete else
+                 f"FLOOR ONLY: stopped at the {max_pages}-page cap with more available"),
+        source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
+        meta={"dollar_total": round(total, 2), "awards_summed": n,
+              "complete": complete, "pages_read": page,
+              "caveat": (None if complete else
+                         "This is a FLOOR, not a total -- raise --max-pages to close it.")},
     )])
 
 

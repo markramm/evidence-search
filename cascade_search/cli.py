@@ -114,6 +114,8 @@ def main(argv=None) -> int:
                                  'Institute" -> 155 matches, unquoted -> 51,622')
     c.add_argument("--type", default="r", choices=["r", "rd", "o", "p"])
     c.add_argument("--court")
+    c.add_argument("--format", choices=["rich", "json"], default="rich",
+                   help="json is equivalent to the global --json")
     c.add_argument("--cursor",
                    help="next page: pass meta.next_cursor from a prior result "
                         "(v4 pages by cursor, not page number)")
@@ -130,6 +132,11 @@ def main(argv=None) -> int:
 
     us = sub.add_parser("usaspending", help="federal awards (no key; real counts)")
     us.add_argument("query")
+    us.add_argument("--sum", action="store_true", dest="do_sum",
+                    help="total Award Amount across pages; says whether it is complete "
+                         "or a floor")
+    us.add_argument("--max-pages", type=int, default=10,
+                    help="page cap for --sum (100 awards per page)")
     us.add_argument("--count", action="store_true",
                     help="return the REAL total by award type instead of a page of awards")
     us.add_argument("--keywords", action="store_true",
@@ -238,7 +245,8 @@ def main(argv=None) -> int:
     if a.cmd == "courtlistener":
         from .sources import courtlistener
         return _emit(courtlistener.search(a.query, a.type, a.court, store, limiter,
-                                          use_cache, cursor=a.cursor), a.json)
+                                          use_cache, cursor=a.cursor),
+                     a.json or a.format == "json")
 
     if a.cmd == "propublica":
         from .sources import propublica_disclosures
@@ -251,6 +259,11 @@ def main(argv=None) -> int:
 
     if a.cmd == "usaspending":
         from .sources import usaspending as usa
+        if a.do_sum:
+            return _emit(usa.dollar_sum(a.query, by_recipient=not a.keywords,
+                                        award_types=usa.AWARD_GROUPS[a.group],
+                                        max_pages=a.max_pages, store=store,
+                                        limiter=limiter), a.json)
         if a.count:
             types = usa.ALL_AWARD_TYPES if a.all_types else usa.CONTRACT_TYPES
             return _emit(usa.counts(a.query, by_recipient=not a.keywords,
@@ -450,6 +463,15 @@ def main(argv=None) -> int:
                            f"-- the source was already small")
             print(f"raw ~{stats['raw_tokens_est']:,} tok -> extracted ~{stats['extracted_tokens_est']:,} tok "
                   f"({_delta})\n")
+            if "matches" in payload and not [m for m in payload["matches"]
+                                             if m["pattern"] != "__truncated__"]:
+                # "100.0% reduction" over zero matches reads as success and means
+                # the opposite. Reported twice by workers; it nearly produced a
+                # wrong conclusion on an attorney-of-record question.
+                pats = ", ".join(repr(x) for x in (a.grep or []))
+                print(f"  NO MATCHES for {pats} in {stats['raw_tokens_est']:,} tokens "
+                      "of text.\n  This is an absence IN THIS DOCUMENT ONLY -- the "
+                      "document was read, the terms are not in it.")
             for m in payload.get("matches", []):
                 if m["pattern"] == "__truncated__":
                     print(f"  !! {m['context']}")

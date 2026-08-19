@@ -440,3 +440,16 @@ def test_a_blocked_host_with_a_known_json_route_says_so():
     hint = http._JSON_ESCAPE_HATCH["www.loc.gov"]
     assert "fo=json" in hint
     assert "collections" in hint, "must state the limit of the workaround"
+
+
+def test_grep_with_zero_matches_does_not_read_as_success(tmp_path, capsys):
+    """"100.0% reduction" over zero matches reads as success and means the
+    opposite. Reported twice by workers; it nearly produced a wrong conclusion
+    on an attorney-of-record question."""
+    from cascade_search.cli import main
+    f = tmp_path / "doc.txt"
+    f.write_text("some text without the term")
+    main(["extract", str(f), "--grep", "ZZZNOTPRESENT"])
+    out = capsys.readouterr().out
+    assert "NO MATCHES" in out
+    assert "IN THIS DOCUMENT ONLY" in out, "must bound the absence to the document"
