@@ -33,11 +33,23 @@ def _headers():
 
 
 def _parse(body: str) -> list[Result]:
+    """Parse a search response.
+
+    CourtListener reports the TOTAL match count alongside the (paged) rows.
+    Discarding it silently turned every "count the X" question into a floor:
+    a live worker counting an industry could only write ">=20 dockets" when the
+    API had plainly said 155. A floor reported as a finding understates by
+    whatever the page cap happens to be, which is not a small error on a beat
+    where scale IS the claim. Carry it on every Result so the caller can say
+    what is actually true.
+    """
     try:
         data = json.loads(body)
     except json.JSONDecodeError as e:
         raise ValueError(f"non-JSON response (auth wall or throttle): {e}") from e
 
+    total = data.get("count")
+    returned = len(data.get("results", []))
     out = []
     for r in data.get("results", []):
         path = r.get("absolute_url") or ""
@@ -45,8 +57,10 @@ def _parse(body: str) -> list[Result]:
             url=f"https://www.courtlistener.com{path}" if path.startswith("/") else path,
             title=r.get("caseName", ""), source=SOURCE, engines=[SOURCE],
             snippet=f"{r.get('court','')} | {r.get('docketNumber','')} | {r.get('dateFiled','')}",
-            meta={k: r.get(k) for k in
-                  ("docketNumber", "court", "dateFiled", "judge", "status", "docket_id")},
+            meta={**{k: r.get(k) for k in
+                     ("docketNumber", "court", "dateFiled", "judge", "status", "docket_id")},
+                  "total_matches": total, "returned_this_page": returned,
+                  "more_available": bool(data.get("next"))},
         ))
     return out
 

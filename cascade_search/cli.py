@@ -79,7 +79,8 @@ def main(argv=None) -> int:
     o.add_argument("--year", type=int); o.add_argument("--case")
 
     c = sub.add_parser("courtlistener", help="CourtListener (5/min, 50/hr, 125/day)")
-    c.add_argument("query")
+    c.add_argument("query", help='QUOTE phrases when counting: "Force Science '
+                                 'Institute" -> 155 matches, unquoted -> 51,622')
     c.add_argument("--type", default="r", choices=["r", "rd", "o", "p"])
     c.add_argument("--court")
 
