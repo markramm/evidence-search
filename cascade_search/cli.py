@@ -132,6 +132,9 @@ def main(argv=None) -> int:
 
     us = sub.add_parser("usaspending", help="federal awards (no key; real counts)")
     us.add_argument("query")
+    us.add_argument("--detail", metavar="RECORD_ID",
+                    help="full FPDS detail for one award (PSC, NAICS, competition) -- "
+                         "pass meta.record_id or the bare numeric id")
     us.add_argument("--sum", action="store_true", dest="do_sum",
                     help="total Award Amount across pages; says whether it is complete "
                          "or a floor")
@@ -259,6 +262,8 @@ def main(argv=None) -> int:
 
     if a.cmd == "usaspending":
         from .sources import usaspending as usa
+        if a.detail:
+            return _emit(usa.detail(a.detail, store, limiter), a.json)
         if a.do_sum:
             return _emit(usa.dollar_sum(a.query, by_recipient=not a.keywords,
                                         award_types=usa.AWARD_GROUPS[a.group],

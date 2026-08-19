@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import time
+from urllib.parse import quote
 from typing import Any
 
 from ..core.limits import Limiter
@@ -156,6 +157,80 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
                                "counts records CONTAINING the words, not awards TO a "
                                "vendor. Use --recipient for a vendor total.")},
     )])
+
+
+def detail(record_id: str, store: Store | None = None, limiter: Limiter | None = None):
+    """Full FPDS detail for one award: PSC, NAICS, the contracting officer's own words.
+
+    THREE separate workers independently reimplemented this against the raw API
+    before it existed, because neither `--group` nor `record` surfaces PSC or
+    NAICS -- both return the search summary, and the codes live only on the
+    award-detail endpoint.
+
+    Those codes are the good evidence on this beat precisely because they are the
+    BUYER's classification, not the vendor's marketing: an ICE award buying a
+    "REALISTIC DE-ESCALATION INSTRUCTOR COURSE" coded U013
+    "EDUCATION/TRAINING-COMBAT" states the purpose/effect gap inside one record.
+
+    Accepts a bare numeric id or the `usaspending:<id>` record_id from a result.
+    """
+    store = store or Store()
+    limiter = limiter or Limiter(store)
+    num = str(record_id).split(":")[-1].strip()
+
+    allowed, retry, why = limiter.reserve(SOURCE)
+    if not allowed:
+        return RateLimited(query=num, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
+                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
+
+    import httpx
+    url = f"{API}/awards/{quote(num, safe='')}/"
+    try:
+        r = httpx.get(url, timeout=45, headers={"User-Agent": "cascade-search"})
+    except httpx.HTTPError as e:
+        return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "http"}),
+                             mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
+    if r.status_code == 404:
+        return verified_absence(num, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
+                                f"usaspending award detail for id {num}")
+    if r.status_code >= 400:
+        return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "status"}),
+                             mechanism=Blocker.SERVER_ERROR, url=url,
+                             detail=(f"HTTP {r.status_code}. Pass the NUMERIC id from a "
+                                     "result's meta.record_id -- a constructed "
+                                     "CONT_AWD_... string 404s here."))
+    d = r.json()
+    try:
+        store.put_record(f"{SOURCE}:detail:{num}", SOURCE, num, d)
+    except Exception:
+        pass
+
+    c = d.get("latest_transaction_contract_data") or {}
+    rec = d.get("recipient") or {}
+    return Hit(query=num, coverage=Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
+               results=[Result(
+                   url=f"https://www.usaspending.gov/award/{num}",
+                   title=f"{(rec.get('recipient_name') or '?')} — {d.get('piid') or num}",
+                   snippet=" | ".join(x for x in (
+                       f"PSC {c.get('product_or_service_code')}: "
+                       f"{c.get('product_or_service_description')}"
+                       if c.get("product_or_service_code") else None,
+                       f"NAICS {c.get('naics')}: {c.get('naics_description')}"
+                       if c.get("naics") else None) if x),
+                   source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
+                   meta={"record_id": f"{SOURCE}:detail:{num}", "piid": d.get("piid"),
+                         "psc": c.get("product_or_service_code"),
+                         "psc_description": c.get("product_or_service_description"),
+                         "naics": c.get("naics"), "naics_description": c.get("naics_description"),
+                         "description": d.get("description"),
+                         "extent_competed": c.get("extent_competed_description"),
+                         "solicitation_procedures": c.get("solicitation_procedures_description"),
+                         "recipient": rec.get("recipient_name"),
+                         "recipient_uei": rec.get("recipient_uei"),
+                         "awarding_agency": ((d.get("awarding_agency") or {}).get("toptier_agency") or {}).get("name"),
+                         "funding_subtier": ((d.get("funding_agency") or {}).get("subtier_agency") or {}).get("name"),
+                         "total_obligation": d.get("total_obligation")},
+               )])
 
 
 def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | None = None,

@@ -157,3 +157,47 @@ def test_dollar_sum_flags_a_page_cap_as_a_floor(monkeypatch):
     assert m["complete"] is False
     assert "FLOOR" in out.results[0].title or "AT LEAST" in out.results[0].title
     assert m["caveat"]
+
+
+def test_detail_surfaces_psc_and_naics(monkeypatch):
+    """THREE workers independently reimplemented this against the raw API.
+
+    Neither --group nor `record` surfaces PSC/NAICS -- both return the search
+    summary, and the codes live only on the award-detail endpoint. Those codes
+    are the good evidence on this beat because they are the BUYER's
+    classification, not the vendor's marketing.
+    """
+    import httpx
+    class R:
+        status_code = 200
+        def json(self):
+            return {"piid": "140P2120C0021",
+                    "description": "LAW ENFORCEMENT DE-ESCALATION TRAINING DEVELOPMENT",
+                    "recipient": {"recipient_name": "LIFELINE TRAINING, LTD"},
+                    "latest_transaction_contract_data": {
+                        "product_or_service_code": "U008",
+                        "product_or_service_description": "EDUCATION/TRAINING-CURRICULUM",
+                        "naics": "611430"}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    s, L = _kit()
+    out = usa.detail("usaspending:277838719", store=s, limiter=L)
+    m = out.results[0].meta
+    assert m["psc"] == "U008"
+    assert m["naics"] == "611430"
+    assert "DE-ESCALATION" in m["description"]
+
+
+def test_detail_accepts_a_prefixed_or_bare_id(monkeypatch):
+    """A constructed CONT_AWD_... string 404s; the numeric id is what works."""
+    import httpx
+    seen = {}
+    class R:
+        status_code = 200
+        def json(self): return {"recipient": {}, "latest_transaction_contract_data": {}}
+    def spy(url, **kw):
+        seen["url"] = url
+        return R()
+    monkeypatch.setattr(httpx, "get", spy)
+    s, L = _kit()
+    usa.detail("usaspending:12345", store=s, limiter=L)
+    assert seen["url"].endswith("/awards/12345/")
