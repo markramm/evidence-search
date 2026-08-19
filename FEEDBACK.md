@@ -1025,3 +1025,185 @@ doc recommends.
 awards in well under a minute including sleep spacing), but it is a silent gap: nothing in
 `--help` or the skill doc flags that PSC/NAICS require leaving the tool, so the first attempt
 (via `record`) cost a full round-trip before I found the actual path.
+
+---
+
+## 2026-08-19 · task <vendor-d>-owns-<outlet-a>-… (trade-press ownership / sourcing-bias methodology) · claude-opus-5[1m]
+
+**Context:** verify at tier-1 that <outlet-a> is owned by <vendor-d>, establish what <vendor-d> sells,
+and determine whether the ownership skews the vendor census. Heavy use of `usaspending`
+(`--count`/`--sum`/`--detail`), `extract`, `courtlistener`, `news`, `web`.
+
+**Headline: `--detail` and `--sum` both landed, and both did exactly what the prior entry in
+this file asked for.** I read the entry immediately above mine — a worker hand-rolling
+`curl https://api.usaspending.gov/api/v2/awards/<id>/` in a `while read` loop to get PSC/NAICS
+because the client wouldn't make the hop. I ran `--detail` on ten awards and it returned
+`PSC T013: PHOTO/MAP/PRINT/PUBLICATION- TECHNICAL WRITING | NAICS 561410: DOCUMENT PREPARATION
+SERVICES` etc. directly. **That one flag carried my entire central finding**: <vendor-d>'s public
+self-description is "policy, training, wellness" SaaS, and the corpus had previously written it
+off as "not a training vendor" on that basis — the PSC codes (four × `6910 TRAINING AIDS`, one
+`U099 EDUCATION/TRAINING`, one under `NAICS 611699`) contradict the marketing and corrected an
+existing KB judgment. The skill doc's claim that these codes are "the contracting officer's
+classification, not the vendor's marketing" is not a nice-to-have framing; it was the load-
+bearing evidentiary move of the whole task. Same for `--sum` returning `$1,564,745.51 across 15
+awards` with the literal word **`complete`** — I could state the figure as exact rather than a
+floor, which is a claim I could not have made a day ago. The loop from complaint to shipped
+feature is visibly closing in this file, and it changed what I was able to assert.
+
+**Friction 1 — `--detail` ignores the query argument, which is positionally required.**
+Command as run:
+```
+$CS --wait usaspending "<vendor-d>" --detail 277741113
+```
+That worked. But when I wanted detail on seven more awards I had already collected ids for, I
+did not want to retype the vendor name, and `--detail` clearly doesn't need it — the record id
+fully determines the record. I guessed it was still required and passed a throwaway:
+```
+$CS --wait usaspending "L" --detail 277742330
+```
+This returned the correct <vendor-d> award. So the query string is accepted and **silently
+ignored** when `--detail` is present. That's benign here but it's a trap: nothing stops
+`usaspending "<vendor-b>" --detail 277742330` from confidently returning a *<vendor-d>* record
+under a <vendor-b> query, and a worker skimming output would have no signal. Either make the
+positional optional when `--detail` is given, or error if both are supplied. *Observed:* passing
+`"L"` returned the right record. *Concluded (may be wrong):* the query is discarded rather than
+cross-checked.
+**Severity:** annoyed, with a latent correctness hazard.
+
+**Friction 2 — `courtlistener` `total_matches` is not in the human-readable output, and I had
+to write Python to find it.** The skill doc is emphatic: "Counting filings? Quote the phrase,
+and read `total_matches`… '*at least 20*' is almost never the honest answer." Good advice, and I
+wanted to follow it. But:
+```
+$CS --wait courtlistener '"<vendor-d>"' --type r
+```
+prints `results:  20` and twenty rows. No total. So I went to `--json`, and my first attempt
+guessed wrong about the shape:
+```
+$CS --wait --json courtlistener '"<vendor-d>"' --type r | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('meta',{}),indent=1)[:800])"
+```
+**Got:** `{}` — a bare empty dict, with no indication whether `meta` was absent, empty, or
+somewhere else. I had to write a recursive walker over the whole JSON to locate it at
+`results[0].meta.total_matches = 293`. It is nested *inside the first result*, not at the top
+level where "read `total_matches`" reads like it should be.
+**Would have helped:** print it in the human output — `results: 20 of 293 total_matches` — which
+is one line and would make the doc's advice followable without touching `--json` at all. Failing
+that, the skill doc should say *where* the field lives, because "read `total_matches`" implies a
+top-level field and it is not one. This is the doc's single most-repeated numeric caution and
+the field is the hardest one in the tool to actually get to.
+**Severity:** slowed.
+
+**Friction 3 — `extract` truncates by default and the cap costs a round-trip.** Command:
+```
+$CS --wait extract "https://www.<vendor-d>.com/about-us/" --text
+```
+The reduction was superb (110,323 → 1,783 tok, 98.4%) but ended in
+`[TRUNCATED for display: 6,823 chars total, 2,823 not shown. Use --json for the full text, or
+--max-chars N to raise this cap.]`. The message is clear and names both fixes — genuinely good
+error copy. But the default cut 2,823 chars out of an already-98%-reduced 6,823-char document,
+and the tail I lost turned out to contain the **single most load-bearing string in my whole
+task**: the product menu listing "PoliceOne Academy" as a <vendor-d> *app* alongside "<outlet-a>" as a
+*resource*, which is what proves the news brand and the training product are the same brand
+family. I only got it because I re-ran with `--max-chars 12000` on a hunch.
+**Would have helped:** scale the display cap to the *post*-extraction size rather than a fixed
+char count. When extraction has already achieved 98% reduction, truncating the survivor is
+working against the tool's own value proposition — the whole point is that the extracted text is
+small enough to read. A ~7k-char extraction should just print.
+**Severity:** slowed, and this one nearly cost me the finding.
+
+**Friction 4 — no way to ask "does site X cover topic Y", which is a real shape of question on
+this beat.** I needed to test whether <outlet-a> under-covers its owner's competitors. Ran:
+```
+$CS --wait web '"<vendor-a>" site:<outlet-a-domain>'
+$CS --wait web '"<vendor-b>" site:<outlet-a-domain>'
+```
+Both returned `RateLimited` (coverage 78/82; `RATE-LIMITED: searxng:brave, searxng:google cse |
+ERRORED: searxng:duckduckgo, searxng:startpage`). **The typed outcome did its job perfectly and
+I want to be clear that this is not a bug** — it correctly refused to let me write a
+tooling-limited negative as a finding, which is precisely the failure the tool exists to
+prevent, and I reported "not determinable" in my artifact instead of a fake absence. That is the
+system working.
+
+But the *capability* gap is real and worth logging as a missing-source finding per the doc's
+"Missing sources are findings" note: **there is no source in the tool that can answer "how much
+does publication X write about entity Y."** I tried the obvious fallback — the publication's own
+search — and it is a trap:
+`https://www.<outlet-a-domain>/search?q=Desert%20Snow` → **1,967 results**;
+`?q=Force%20Science` → **28,081**; `?q=Calibre%20Press` → **41,130**.
+Those numbers are worthless. The site tokenises unquoted terms, so they measure how often
+*snow*, *force*, and *press* appear across the archive — the exact error class the skill doc
+warns about for unquoted CourtListener queries (`<vendor-b-full>` 51,622 vs `"Force
+Science Institute"` 155), reproduced on a different corpus. **I flagged this in my KB artifact
+specifically so the next worker doesn't mistake them for a coverage census**, but a less careful
+pass would have published "<outlet-a> mentions <vendor-b> 28,081 times" as a finding, and it
+would have been meaningless.
+**Would have helped:** either a `--site` flag on `web` that routes to an engine known to honour
+site-scoping, or — better and more honest — a documented note that publication-coverage counts
+are **out of scope**, so workers stop reaching for the site-search trap. Media-ownership and
+coverage-bias questions are recurring on this beat and the tool currently has no honest path to
+them.
+**Severity:** annoyed (I got a defensible "not determinable" out of it, which is the right
+answer, but only because I knew to distrust the site-search numbers).
+
+**Friction 5 — `AccessBlocker: http-404` on a guessed URL reads like a wall, but is just a
+wrong guess.** Commands:
+```
+$CS --wait extract "https://www.<outlet-a-domain>/about" --grep ...        → AccessBlocker, http-404
+$CS --wait extract "https://www.<outlet-a-domain>/editorial-standards" ... → AccessBlocker, http-404
+$CS --wait extract "https://www.policemag.com/about-us" --grep ...   → AccessBlocker, http-404
+```
+Each printed `NOT a negative finding. Access was blocked.` That's true but misleading in
+register: 404 is not "access was blocked," it's "you guessed the wrong path." Nothing is walling
+me. The framing pushed me briefly toward "<outlet-a> is blocking the about page," which would have
+been a *spicy and completely false* addition to a media-conflict writeup — exactly the kind of
+overstatement my ticket warned against. `/about-us` worked fine on the next try.
+**Would have helped:** give 404/410 their own outcome line — `NotFound` — or at minimum change
+the copy to "the URL does not exist; check the path" rather than the anti-blocker language,
+which should be reserved for Cloudflare/Turnstile/403.
+**Severity:** annoyed, with a real overclaim hazard on exactly this beat.
+
+**Friction 6 — GlobeNewswire `extract` times out repeatedly (reported, not blocking).**
+```
+$CS --wait extract "https://www.globenewswire.com/news-release/2019/02/08/1712466/0/en/<vendor-d>-and-Praetorian-Digital-Merge-Creating-Comprehensive-Content-Training-and-Policy-Platform-for-Public-Safety-and-Local-Government.html" --text --max-chars 6000
+```
+**Got, twice, ~4 minutes apart:**
+```
+== RateLimited ==
+retry after: 30s
+detail:    timeout: The read operation timed out
+```
+Two notes. (a) Classifying a **read timeout** as `RateLimited` conflates "the server was slow"
+with "you queried too fast" — different causes, different retry strategies; the `detail` line
+carries the truth but the outcome label misdirects. (b) `retry after: 30s` was not accurate; I
+waited far longer and got the same result. Not blocking — the tier-1 fact was available from the
+subject's own site — but wire-service press releases are a standard tier-1 corroboration source
+on this beat and GlobeNewswire being effectively unreadable is a gap worth knowing about.
+**Severity:** annoyed.
+
+**Worked well — specifically:**
+- **`--detail`**, as above. Carried the task's central finding and closed a loop opened in this
+  very file. This is the feature that made the difference between "<vendor-d> is a SaaS company per
+  its website" and "the government classifies <vendor-d> as a training school and a publisher."
+- **`--sum`'s `complete` vs floor marker.** Being told the figure is complete let me upgrade an
+  existing KB number from approximate to exact and say so.
+- **`extract --grep` returning an explicit in-document negative.** This produced my single
+  sharpest finding. Running
+  `$CS --wait extract "https://www.<outlet-a-domain>/about-us" --grep "<vendor-d>|<VENDOR-D>|parent|owned|ownership|subsidiary|Praetorian"`
+  returned
+  `NO MATCHES for '…' in 37,547 tokens of text. This is an absence IN THIS DOCUMENT ONLY -- the
+  document was read, the terms are not in it.`
+  That phrasing is exactly right and I quoted its logic straight into my artifact: <outlet-a>'s
+  disclosure page details ad and affiliate revenue and never names its owner. **A bare empty
+  result would not have been publishable; the explicit scoped-absence language made it a
+  finding.** More tools should do this.
+- **`--grep` on a local PDF** (the in-repo archived 2009 column) using the identical syntax as on
+  a URL. No mode switch, no flags to remember, and it surfaced both the `Copyright © 2026
+  <vendor-d>` footer and the author's disclosed vendor affiliation in one call.
+- **`usaspending --count --all-types`** giving `contracts: 15 | loans: 1` up front, so I knew the
+  shape before deciding which `--group` to page.
+
+**Overall severity:** slowed. Nothing blocked me and the task completed fully. Frictions 1, 3,
+and 5 are all small and each carries a *correctness* hazard rather than merely a time cost —
+they are cheap fixes with disproportionate payoff. Friction 4 is the interesting one: a genuine
+missing capability on a question shape (who owns the press, and does it show in coverage) that
+this beat will keep asking.
