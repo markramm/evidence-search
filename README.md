@@ -185,8 +185,22 @@ disclosures, news, docs, and (via a local SearXNG container) the general web.
 ## General web, on our terms
 
 ```bash
-deploy/searxng.sh up          # start a local instance
+deploy/searxng-native.sh up   # no container runtime needed
 cascade-search web "query"
+```
+
+SearXNG is a Flask app whose dependencies are pure-Python or ship arm64
+wheels, so on a Mac with Python 3.10+ it just runs — no VM, no daemon, no
+Docker Desktop. `searxng-native.sh` clones it into `deploy/.searxng`, builds a
+venv, generates a secret, and starts it on 127.0.0.1. First install takes a few
+minutes; after that a cold start is about a second.
+
+Containerised is still there if you want isolation, and prefers the lightest
+runtime present — Apple's native `container` (macOS 26+), else podman or
+colima, with Docker Desktop last:
+
+```bash
+deploy/searxng.sh up
 ```
 
 SearXNG is 251 maintained engine scrapers behind one JSON API. That catalogue
@@ -223,9 +237,9 @@ problem one layer up, which the atomic ledger cannot govern across machines.
 Datacenter IPs also fare *worse* here: Google and Bing throttle cloud ranges
 hardest, so hosting degrades the very engines it exists to reach.
 
-`deploy/searxng.sh` picks the lightest runtime present — Apple's native
-`container` (macOS 26+), else podman or colima, with Docker Desktop last
-because it runs a Linux VM plus an Electron app to proxy search queries.
+Running it natively sidesteps the runtime question entirely, which is why
+that is the default path. Docker Desktop in particular runs a Linux VM plus an
+Electron app to proxy search queries — a lot of machine for the job.
 
 ## Design notes
 

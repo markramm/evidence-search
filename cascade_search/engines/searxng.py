@@ -135,10 +135,9 @@ def search(query: str, categories: str = "general", pageno: int = 1,
         if "refused" in detail.lower() or getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
             blocked.detail = (
                 f"No SearXNG instance at {base} ({detail}). Start one with:\n"
-                "    deploy/searxng.sh up\n"
-                "It picks the lightest container runtime present (Apple `container` "
-                "on macOS 26+, else podman/colima, and Docker Desktop only as a last "
-                "resort). Point elsewhere with SEARXNG_URL.")
+                "    deploy/searxng-native.sh up    # no container runtime needed\n"
+                "    deploy/searxng.sh up           # containerised, if you prefer\n"
+                "Point elsewhere with SEARXNG_URL.")
         return blocked
 
     try:

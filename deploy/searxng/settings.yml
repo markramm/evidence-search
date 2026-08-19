@@ -6,9 +6,10 @@
 use_default_settings: true
 
 server:
-  # Replace with `openssl rand -hex 32`. Only reachable on localhost, but a
-  # default secret is still a default secret.
-  secret_key: "CHANGE-ME-openssl-rand-hex-32"
+  # searxng-native.sh writes the real key into settings.local.yml (gitignored)
+  # and runs from that. This file is a template: a generated secret committed
+  # to the repo is shared by every clone, which is no secret at all.
+  secret_key: "PLACEHOLDER-generated-into-settings.local.yml"
   limiter: false
   image_proxy: false
 
