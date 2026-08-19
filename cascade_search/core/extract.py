@@ -132,8 +132,16 @@ def tables(html: str, min_rows: int = 2) -> list[list[list[str]]]:
 
 
 def savings(raw: str, extracted: str) -> dict:
-    """Report honestly what the filtering saved."""
+    """Report honestly what the filtering saved -- including when it saved nothing.
+
+    A negative "reduction" is not a saving and should never be printed as one.
+    It happens legitimately: OCR output plus its provenance block can exceed a
+    short scanned page's decoded text. Report that as expansion, plainly, rather
+    than as a percentage with a minus sign that reads like a malfunction.
+    """
     r, e = est_tokens(raw), est_tokens(extracted)
+    pct = round(100 * (1 - e / r), 1) if r else 0.0
     return {"raw_tokens_est": r, "extracted_tokens_est": e,
             "saved_est": r - e,
-            "reduction_pct": round(100 * (1 - e / r), 1) if r else 0.0}
+            "reduction_pct": pct,
+            "expanded": e > r}

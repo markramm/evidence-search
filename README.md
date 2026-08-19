@@ -163,7 +163,25 @@ cascade-search extract page.html --tables                  # registry rows, no m
 cascade-search extract page.html --text                    # chrome stripped
 ```
 
-Every reduction is reported honestly on each run (`raw -> extracted, N%`).
+Every reduction is reported honestly on each run (`raw -> extracted, N%`) —
+including when there was none. A short source that grows once its provenance is
+attached is reported as `EXPANDED by N tok`, not as a negative percentage.
+
+**PDFs**: the embedded text layer is read first — exact, fast, and what court
+filings and procurement records actually carry. A *scanned* PDF with no text
+layer falls back to OCR, and every such read is labelled:
+
+```
+source: OCR (12 pages) -- NOT verbatim, NOT human-verified
+```
+
+OCR is lossy in the one way that matters on this beat: it confuses `0`/`O`,
+`1`/`l`, `5`/`S` and drops digits in tables, which is exactly the shape of a
+docket number or an award ID. Identifiers pulled from OCR'd text carry a
+verify-before-citing warning, and the JSON output carries
+`provenance.human_verified: false` so nothing downstream mistakes it for
+verbatim text. `--no-ocr` refuses instead, if you would rather have a named
+blocker than unchecked text.
 
 **Identifier extraction is deterministic**, which is why it loses nothing that
 matters. Patterns cover federal award IDs, dockets (federal and state), UEI,

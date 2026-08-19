@@ -121,6 +121,10 @@ def main(argv=None) -> int:
     ex.add_argument("--text", action="store_true", help="readable text, chrome stripped")
     ex.add_argument("--max-chars", type=int, default=0)
     ex.add_argument("--browser", action="store_true", help="fetch via browser tier")
+    ex.add_argument("--no-ocr", action="store_true",
+                    help="do not OCR a scanned PDF; report it as unreadable instead")
+    ex.add_argument("--ocr-pages", type=int, default=50,
+                    help="page cap when OCR is used (default 50)")
 
     sub.add_parser("limits", help="show per-source rate policy and current usage")
 
@@ -205,6 +209,7 @@ def main(argv=None) -> int:
         from .core.http import fetch as _fetch
         from .core.results import Hit as _Hit, Result as _R, Coverage as _C
 
+        _pdf_provenance = None
         is_url = a.target.startswith(("http://", "https://"))
         if is_url:
             if a.browser:
@@ -222,22 +227,51 @@ def main(argv=None) -> int:
                     _head = _fh.read(5)
             except OSError:
                 pass
-            # A PDF read as text is binary noise. Worse than useless: `--text`
-            # on a 2.4MB PDF reported "-242.3% reduction" and would have pushed
-            # ~2M tokens of garbage into the caller's context -- the token lever
-            # running backwards. Refuse, and name the tool that does the job.
+            # A PDF read as text is binary noise -- `--text` on a 2.4MB PDF
+            # once reported "-242.3% reduction", i.e. the token lever running
+            # backwards. Decode it properly instead.
+            #
+            # Text layer first: exact, fast, lossless. OCR ONLY when there is
+            # no text layer to lose, because OCR is lossy in the one way that
+            # matters on this beat -- it confuses 0/O, 1/l, 5/S and drops
+            # digits in tables, and a wrong docket number archived with a
+            # SHA-256 looks authoritative.
             if _head.startswith(b"%PDF"):
-                from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
-                return _emit(_AB(
-                    query=a.target,
-                    coverage=_Cv(queried=["extract"], errored={"extract": "binary-format"}),
-                    mechanism=_B.SERVER_ERROR, url=a.target,
-                    detail=("This is a PDF. `extract` reads text and HTML; reading a PDF "
-                            "as text yields binary noise, not content.\n"
-                            "Convert first, then extract:\n"
-                            "    pdftotext -layout FILE.pdf - > FILE.txt   # poppler\n"
-                            "    cascade-search extract FILE.txt --grep PATTERN")), a.json)
-            raw = _path.read_text(errors="replace")
+                from .core import pdf as _pdf
+                try:
+                    raw, _prov = _pdf.read(_path, allow_ocr=not a.no_ocr,
+                                           max_pages=a.ocr_pages)
+                except _pdf.PdfToolMissing as e:
+                    from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
+                    return _emit(_AB(
+                        query=a.target,
+                        coverage=_Cv(queried=["extract"], errored={"extract": "missing-tool"}),
+                        mechanism=_B.SERVER_ERROR, url=a.target, detail=str(e)), a.json)
+
+                if _prov["source"] == "none":
+                    from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
+                    return _emit(_AB(
+                        query=a.target,
+                        coverage=_Cv(queried=["extract"], errored={"extract": "no-text-layer"}),
+                        mechanism=_B.SERVER_ERROR, url=a.target,
+                        detail=(f"Scanned PDF: only {_prov['text_layer_chars']} characters of "
+                                "text layer. OCR was disabled (--no-ocr). Re-run without it "
+                                "to read this, and treat the result as unverified.")), a.json)
+
+                if _prov["source"] == "ocr":
+                    # Loud, on stderr, every time. An OCR read that a worker
+                    # mistakes for verbatim text is the failure this guards.
+                    print(f"cascade-search: NO TEXT LAYER "
+                          f"({_prov['text_layer_chars']} chars) -- fell back to OCR. "
+                          f"{_prov['pages_ocred']} page(s) at {_prov['dpi']}dpi"
+                          + (f", TRUNCATED at the {_prov['page_cap']}-page cap"
+                             if _prov.get("truncated") else "")
+                          + ".\n  This text is NOT verbatim and has NOT been human-verified. "
+                            "Confirm every identifier, docket number and dollar figure against "
+                            "the page image before citing.", file=sys.stderr)
+                _pdf_provenance = _prov
+            else:
+                raw = _path.read_text(errors="replace")
         is_html = is_url or a.target.endswith((".html", ".htm"))
 
         payload = {}
@@ -250,15 +284,37 @@ def main(argv=None) -> int:
         if a.text or not payload:
             payload["text"] = _x.page_text(raw, a.max_chars) if is_html else raw[:a.max_chars or None]
 
+        if _pdf_provenance:
+            payload["provenance"] = _pdf_provenance
+        # For a PDF the honest baseline is the DECODED text, not the file's
+        # bytes. Comparing against the binary produced nonsense like
+        # "-285.3% reduction" on an OCR read that had in fact done its job.
         stats = _x.savings(raw, json.dumps(payload, default=str))
         if a.json:
             print(json.dumps({"target": a.target, **payload, "savings": stats}, indent=2, default=str))
         else:
             print(f"== Extract == {a.target}")
+            if _pdf_provenance:
+                src = _pdf_provenance["source"]
+                if src == "ocr":
+                    print(f"source:   OCR ({_pdf_provenance['pages_ocred']} pages) "
+                          f"-- NOT verbatim, NOT human-verified")
+                else:
+                    print(f"source:   PDF text layer ({_pdf_provenance.get('chars', 0):,} chars, exact)")
+            _delta = (f"{stats['reduction_pct']}% reduction" if not stats.get("expanded")
+                      else f"EXPANDED by {stats['extracted_tokens_est'] - stats['raw_tokens_est']:,} tok "
+                           f"-- the source was already small")
             print(f"raw ~{stats['raw_tokens_est']:,} tok -> extracted ~{stats['extracted_tokens_est']:,} tok "
-                  f"({stats['reduction_pct']}% reduction)\n")
+                  f"({_delta})\n")
             for m in payload.get("matches", []):
                 print(f"  [{m['pattern']}] ...{m['context']}...")
+            if payload.get("identifiers") and (_pdf_provenance or {}).get("ocr"):
+                # Identifiers are precisely what OCR corrupts -- 0/O, 1/l, 5/S,
+                # and dropped digits in tables. Extracting them from OCR'd text
+                # without saying so hands a worker a citable-looking string that
+                # may be one character wrong.
+                print("  !! identifiers below came from OCR -- verify each against "
+                      "the page image before citing")
             for k, v in (payload.get("identifiers") or {}).items():
                 print(f"  {k:14} {', '.join(v[:10])}")
             for i, t in enumerate(payload.get("tables", [])[:5], 1):
