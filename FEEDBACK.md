@@ -752,3 +752,58 @@ entry `[fixed]` with a pointer to this one.
 **Worked well:** `$CS extract <govinfo.gov URL> --grep "5204" --grep "detention" --grep "8,000"` on the full codified IRTPA text (raw ~205,789 tok) returned exactly the clause needed at ~1,432 tok — a 99.3% reduction — and it was the *exact* statutory language ("shall increase by not less than 8,000... subject to the availability of appropriated funds") that let me catch and correct an imprecise date claim in the task ticket itself (ticket said "2004 congressional bed mandate"; the real enforceable floor is P.L. 111-83, enacted 2009-10-28). `web`'s coverage-honesty line (`80/82 responsive | RATE-LIMITED: brave | ERRORED: startpage`) also did exactly what the skill doc promises — I could see it wasn't silently missing engines.
 
 **Severity:** annoyed (fedreg) / worked-well (web + extract combo)
+
+## 2026-08-19 · fact-check-du-bois-paris-exposition task · claude-sonnet-5
+
+**Command:** `$CS extract "https://www.loc.gov/pictures/item/2005679642/" --text --wait`
+**Expected:** Either a `Hit` with the LOC item page content, or an `AccessBlocker` naming the mechanism so I know to route around it (per skill doc, this host was flagged in advance as a likely Cloudflare block).
+**Got:**
+```
+== AccessBlocker ==
+query:    https://www.loc.gov/pictures/item/2005679642/
+coverage: 0/0 responsive
+mechanism: cloudflare-managed-challenge
+url:       https://www.loc.gov/pictures/item/2005679642/
+detail:    HTTP 403
+NOT a negative finding. Access was blocked.
+ESCALATABLE: a real browser session could plausibly pass this gate.
+```
+Correction to my own draft of this entry: I initially misread the exit code as 0 because I'd captured `$?`
+after a compound command (an `echo` following the real call in the same line), not from the `cascade-search`
+process itself — classic case of the exact "reconstructed, not copied" trap the skill doc warns about. Ran
+it again cleanly, redirected straight to a file with nothing chained after it: **actual exit code is 2**,
+correctly matching `AccessBlocker` per the skill doc's table. No bug here — flagging only because I nearly
+filed a false report and the near-miss itself seems worth a line: the block-text output plus a piped/chained
+caller makes it easy to misattribute `$?`, same failure mode the skill doc already documents from a prior
+agent's `head` mistake. Not a tool fix, a "the docs' warning is earning its keep" data point.
+
+**Friction 1 — "ESCALATABLE" is misleading when the host isn't on the allow-list.** The block message says
+"a real browser session could plausibly pass this gate" — true of the Cloudflare challenge itself, but
+`loc.gov` is not in `cascade_search/core/browser.py`'s `ALLOWED_HOSTS`, so escalation was never going to be
+attempted regardless of whether a browser could pass it. I had to go read the source (`browser.py`) to
+learn this — the `extract` failure message doesn't distinguish "blocked, and escalation will be tried" from
+"blocked, and escalation isn't even allowed for this host." The task I was on explicitly asked me to check
+this distinction ("check whether loc.gov qualifies; if not, the blocker is real"), so I went looking anyway
+— but a caller who didn't know to ask would read "ESCALATABLE" and reasonably conclude the tool would try,
+when for this host it structurally cannot.
+
+**Would have helped:** have the blocker message itself say "not on browser-escalation allow-list" when
+that's the actual reason escalation won't happen automatically, rather than the generic "ESCALATABLE"
+framing that's accurate about the *mechanism* (a browser could pass this Cloudflare challenge) but silent on
+whether *this run* will ever attempt it (it won't, for a non-allow-listed host).
+
+**Worked well — the JSON-API workaround.** `loc.gov` publishes a `?fo=json` catalog variant of every item
+page (e.g. `https://www.loc.gov/item/2005679642/?fo=json`) that is **not** behind the same Cloudflare gate
+as the HTML page. `$CS extract "https://www.loc.gov/item/2005679642/?fo=json" --grep "contents|description"`
+returned the full primary catalog record cleanly — exact item description, contents breakdown by item
+number range, contributor names — everything needed to correct a factual error (a secondary source claimed
+32 items in "The Georgia Negro"; the LOC's own catalog record says 36). This wasn't something cascade-search
+did automatically; I found it by knowing LOC's API convention independently. Worth considering whether
+`extract`/the browser layer could try a `?fo=json` variant automatically on `loc.gov/item/` URLs before
+giving up — it would turn a real, structural block into a non-issue for this whole class of source, which
+recurs across the corpus (LOC digitized collections are a common primary source for historical claims).
+
+**Severity:** Friction 1 — annoyed (had to read source to get the real answer; message itself is accurate but
+incomplete for this case). JSON-API finding — worked well, but only because I already knew to try it;
+flagging as a possible tool improvement, not filing as a bug. Exit-code note above — no severity, self-corrected
+before filing, logged only as a documentation-warning success story.
