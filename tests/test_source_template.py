@@ -76,3 +76,66 @@ def test_poisoned_payload_is_served_but_not_cached(monkeypatch):
     assert isinstance(out, Hit) and len(out.results) == 35
     assert out.coverage.is_clean
     assert out.coverage.cache_write_refused
+
+
+def test_escalation_coverage_names_both_attempts(monkeypatch):
+    """A gate must show the plain fetch AND the browser both failed.
+
+    Naming only one attempt lets a reader assume the other path was never
+    tried -- the ambiguity typed outcomes exist to remove.
+    """
+    import cascade_search.core.http as http
+    import cascade_search.core.browser as browser
+    from cascade_search.core.results import AccessBlocker, AwaitingHuman, Blocker
+
+    monkeypatch.setattr(http, "fetch", lambda *a, **k: (
+        None, AccessBlocker(query="q", mechanism=Blocker.TURNSTILE, url="u")))
+    monkeypatch.setattr(browser, "fetch", lambda *a, **k: (
+        None, AwaitingHuman(query="q", url="u", resume_token="tok")))
+
+    s, L = _kit()
+    out = run_source("q", source="oscn", url="https://www.oscn.net/x", searched="probe",
+                     parse=lambda b: [], store=s, limiter=L, escalate=True)
+    assert isinstance(out, AwaitingHuman)
+    assert out.coverage.queried == ["oscn", "oscn:browser"]
+    assert set(out.coverage.errored) == {"oscn", "oscn:browser"}
+
+
+def test_escalation_recovers_when_the_browser_passes(monkeypatch):
+    import cascade_search.core.http as http
+    import cascade_search.core.browser as browser
+    from cascade_search.core.results import AccessBlocker, Blocker
+
+    monkeypatch.setattr(http, "fetch", lambda *a, **k: (
+        None, AccessBlocker(query="q", mechanism=Blocker.TURNSTILE, url="u")))
+    monkeypatch.setattr(browser, "fetch", lambda *a, **k: ("<html>ok</html>", None))
+
+    s, L = _kit()
+    out = run_source("q", source="oscn", url="https://www.oscn.net/x", searched="probe",
+                     parse=lambda b: [Result(url="u", title="t")],
+                     store=s, limiter=L, escalate=True)
+    assert isinstance(out, Hit)
+
+
+def test_sentinel_absence_is_distinct_from_an_empty_parse(monkeypatch):
+    """OSCN says 'Found No Records' in an otherwise normal page.
+
+    That is a publishable negative. A parser that merely found no rows might
+    instead mean the page shape changed, so the two must not be conflated.
+    """
+    out = _run(monkeypatch, "<html>Found No Records</html>",
+               lambda b: [Result(url="u", title="never reached")],
+               absent_when=lambda b: "Found No Records" in b)
+    assert isinstance(out, VerifiedAbsence)
+    assert out.coverage.is_clean
+
+
+def test_archive_on_retrieval_writes_hash_and_manifest(monkeypatch, tmp_path):
+    from cascade_search.core import archive as arch
+    monkeypatch.setattr(arch, "DEFAULT_ARCHIVE", tmp_path)
+    out = _run(monkeypatch, "<html>case page</html>",
+               lambda b: [Result(url="u", title="t")],
+               archive_as="oscn-caddo-CF-2013-00038.html")
+    assert isinstance(out, Hit)
+    assert (tmp_path / "oscn-caddo-CF-2013-00038.html").exists()
+    assert (tmp_path / "MANIFEST-cascade-search.txt").exists()

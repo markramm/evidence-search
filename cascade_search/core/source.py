@@ -37,6 +37,9 @@ def run_source(
     headers: dict | None = None,
     verify=None,
     on_blocked=None,
+    escalate: bool = False,
+    absent_when=None,
+    archive_as: str | None = None,
 ):
     """Run one source end to end and return a typed Outcome.
 
@@ -48,6 +51,20 @@ def run_source(
     `verify(body)` may return a refusal string to reject a response that looks
     successful but is not (e.g. an endpoint that echoes back an empty filter and
     serves its whole unfiltered index).
+
+    `escalate=True` retries a browser-passable block in a real browser, and
+    surfaces an AwaitingHuman gate if the browser cannot clear it either. The
+    resulting coverage names BOTH attempts, so a reader can see the plain fetch
+    and the browser both failed rather than assuming one path was never tried.
+
+    `absent_when(body)` recognises a source's own "nothing here" sentinel. OSCN
+    answers an empty docket with the words "Found No Records" in an otherwise
+    normal page: that is a publishable negative, and distinguishing it from a
+    parser that simply found no rows is the difference between a finding and a
+    silent failure.
+
+    `archive_as(query)` returns a filename; the fetched bytes are archived with
+    a SHA-256 on retrieval, never as an afterthought.
     """
     from .http import fetch as http_fetch
     from .results import AccessBlocker, Blocker
@@ -70,13 +87,32 @@ def run_source(
 
     t0 = time.time()
     body, blocked = http_fetch(url, source=source, query=query, headers=headers)
+    queried = [source]
+
+    # A browser-passable wall is what the browser tier exists for. If the
+    # browser cannot clear it either, its AwaitingHuman gate is returned as-is:
+    # a gate is a handoff, not a dead end.
+    if blocked and escalate and getattr(blocked, "escalate_to_browser", False):
+        from . import browser as _browser
+        queried.append(f"{source}:browser")
+        b_body, b_out = _browser.fetch(url, source=source, query=query, store=store)
+        if b_body:
+            body, blocked = b_body, None
+        elif b_out is not None:
+            b_out.coverage = Coverage(
+                queried=queried,
+                errored={source: "blocked", f"{source}:browser": "blocked"},
+                elapsed_ms=int((time.time() - t0) * 1000))
+            return b_out
+
     if blocked:
         if on_blocked is not None:
             handled = on_blocked(blocked, body)
             if handled is not None:
                 return handled
         blocked.coverage = Coverage(
-            queried=[source], errored={source: "blocked"},
+            queried=queried,
+            errored={s_: "blocked" for s_ in queried},
             elapsed_ms=int((time.time() - t0) * 1000))
         return blocked
 
@@ -94,8 +130,20 @@ def run_source(
             mechanism=Blocker.SERVER_ERROR, url=url,
             detail=f"payload shape changed ({e}) -- the source may have altered its format")
 
-    cov = Coverage(queried=[source], responsive=[source], indexes=[index_origin],
+    if archive_as:
+        from .archive import archive as _archive
+        _archive(body.encode() if isinstance(body, str) else body,
+                 archive_as, url, f"cascade-search:{source}")
+
+    cov = Coverage(queried=queried, responsive=[source], indexes=[index_origin],
                    elapsed_ms=int((time.time() - t0) * 1000))
+
+    # The source's own sentinel for "nothing here" -- distinct from a parser
+    # that found no rows, which may mean the page shape changed.
+    if absent_when is not None and absent_when(body):
+        if use_cache:
+            store.put(key, source, [], ttl_s=ttl_s)
+        return verified_absence(query, cov, searched)
 
     if use_cache:
         try:
