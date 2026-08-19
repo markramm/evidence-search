@@ -1,0 +1,16 @@
+[project]
+name = "cascade-search"
+version = "0.1.0"
+description = "Federated research client for the cascade investigation pipeline: typed outcomes, coverage metadata, structured government sources, and archive-on-retrieval."
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27", "beautifulsoup4>=4.12", "lxml>=5.0"]
+
+[project.scripts]
+cascade-search = "cascade_search.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["cascade_search*"]
