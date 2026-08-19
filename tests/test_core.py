@@ -239,3 +239,41 @@ def test_savings_reports_expansion_rather_than_negative_reduction():
     s = savings("short source", "a much longer extracted payload " * 20)
     assert s["expanded"] is True
     assert savings("x" * 4000, "y" * 100)["expanded"] is False
+
+
+def test_courtlistener_keeps_the_fields_an_investigator_needs():
+    """The old allowlist kept 4 of 30 fields and was written against type=o.
+
+    When type=r was added nobody rechecked the shape, so RECAP rows lost `firm`
+    and `attorney` (who retained the expert -- the money question), `cause`,
+    `party`, and `recap_documents` (which say whether a filing is an expert
+    disclosure). A worker counting an industry fell back to raw HTTP for all of
+    it. It also emitted an empty url while holding the docket_id needed to build
+    one.
+    """
+    import json
+    from cascade_search.sources.courtlistener import _parse
+    body = json.dumps({"count": 85, "next": "?page=2", "results": [{
+        "caseName": "Dyer v. City of Mesquite Texas",
+        "docketNumber": "3:15-cv-02638", "docket_id": 5409345,
+        "docket_absolute_url": "/docket/5409345/dyer/", "absolute_url": None,
+        "court": "N.D. Tex.", "cause": "42:1983 Civil Rights Act",
+        "firm": ["Stoy Law Group PLLC"], "attorney": ["Christopher Edward Stoy"],
+        "recap_documents": [{"description": "Designation of Experts",
+                             "absolute_url": "/docket/5409345/100/5/"}],
+    }]})
+    r = _parse(body)[0]
+    assert r.url.endswith("/docket/5409345/dyer/"), "must build a usable URL"
+    assert r.meta["total_matches"] == 85
+    assert r.meta["cause"] == "42:1983 Civil Rights Act"
+    assert r.meta["firm"] == ["Stoy Law Group PLLC"]
+    assert r.meta["attorney"] == ["Christopher Edward Stoy"]
+    assert r.meta["recap_documents"][0]["description"] == "Designation of Experts"
+
+
+def test_courtlistener_falls_back_to_docket_id_for_the_url():
+    import json
+    from cascade_search.sources.courtlistener import _parse
+    body = json.dumps({"count": 1, "results": [
+        {"caseName": "X v. Y", "docket_id": 42, "absolute_url": None}]})
+    assert _parse(body)[0].url.endswith("/docket/42/")

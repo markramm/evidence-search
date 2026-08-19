@@ -52,15 +52,45 @@ def _parse(body: str) -> list[Result]:
     returned = len(data.get("results", []))
     out = []
     for r in data.get("results", []):
-        path = r.get("absolute_url") or ""
+        # RECAP rows carry `docket_absolute_url`; opinion rows carry
+        # `absolute_url`. Taking only the latter emitted an empty url for every
+        # RECAP hit while `docket_id` -- everything needed to build the link --
+        # sat unused in the same response.
+        path = r.get("absolute_url") or r.get("docket_absolute_url") or ""
+        if not path and r.get("docket_id"):
+            path = f"/docket/{r['docket_id']}/"
+
+        # Pass through whatever the API sent, minus internal id noise. The old
+        # allowlist kept 4 of 30 fields -- and it was written against `type=o`,
+        # so when `type=r` was added nobody rechecked the shape. It dropped
+        # `firm` and `attorney` (who retained the expert -- the money question),
+        # `cause` (e.g. "42:1983 Civil Rights Act"), `suitNature`, `party`, and
+        # `recap_documents` (the document descriptions that say whether a filing
+        # is an expert disclosure). A worker counting an industry had to fall
+        # back to raw HTTP for all of it.
+        meta = {k: v for k, v in r.items()
+                if v not in (None, "", [], {}) and not k.endswith("_id")}
+        meta["docket_id"] = r.get("docket_id")
+        meta.update({"total_matches": total, "returned_this_page": returned,
+                     "more_available": bool(data.get("next"))})
+
+        # Keep the heaviest field summarised rather than verbatim: full RECAP
+        # document blobs would defeat the point of `extract`.
+        docs = r.get("recap_documents") or []
+        if docs:
+            meta["recap_documents"] = [
+                {"description": d.get("description"),
+                 "page_count": d.get("page_count"),
+                 "url": d.get("absolute_url"),
+                 "snippet": (d.get("snippet") or "")[:300]}
+                for d in docs[:10]]
+            meta["recap_document_count"] = len(docs)
+
         out.append(Result(
             url=f"https://www.courtlistener.com{path}" if path.startswith("/") else path,
             title=r.get("caseName", ""), source=SOURCE, engines=[SOURCE],
             snippet=f"{r.get('court','')} | {r.get('docketNumber','')} | {r.get('dateFiled','')}",
-            meta={**{k: r.get(k) for k in
-                     ("docketNumber", "court", "dateFiled", "judge", "status", "docket_id")},
-                  "total_matches": total, "returned_this_page": returned,
-                  "more_available": bool(data.get("next"))},
+            meta=meta,
         ))
     return out
 
