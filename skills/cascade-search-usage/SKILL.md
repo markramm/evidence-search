@@ -27,11 +27,14 @@ Every call returns one typed outcome, and the exit code carries it:
 
 | Outcome | Exit | What you may write |
 |---|---|---|
-| `Hit` | 0 | the results |
-| `VerifiedAbsence` | 1 | **a publishable negative** — right corpus, right method, every engine answered |
-| `AccessBlocker` | 2 | **not a negative finding.** The mechanism is named (Turnstile, Cloudflare, 403, JS-only) |
-| `RateLimited` | 3 | **tooling-limited, not content-exhausted.** Retry later; never write it up as absence |
-| `AwaitingHuman` | 4 | a human gate was queued with a resume token |
+| `Hit` | 10 | the results |
+| `VerifiedAbsence` | 11 | **a publishable negative** — right corpus, right method, every engine answered |
+| `AccessBlocker` | 12 | **not a negative finding.** The mechanism is named (Turnstile, Cloudflare, 403, JS-only) |
+| `RateLimited` | 13 | **tooling-limited, not content-exhausted.** Retry later; never write it up as absence |
+| `AwaitingHuman` | 14 | a human gate was queued with a resume token |
+
+Anything **below 10 is a tool failure**, not a claim about the world: `1`
+uncaught exception, `2` usage error, `3` no local data, `70` internal error.
 
 The guarantee is enforced in code: if any engine was rate-limited or errored,
 a verified absence **cannot** be constructed — it downgrades to `RateLimited`.
@@ -247,7 +250,7 @@ the URL does not exist`, and it means you guessed the path wrong (`/about` vs
 `/about-us`) or, when sweeping a sequential id range, that the id was never
 issued or has been pruned. Do not read it as suppression: two workers nearly
 wrote that a publication was blocking its own about-page. Check the path and
-retry. The exit code is still 2 — a 404 is never a verified absence.
+retry. The exit code is still 12 (AccessBlocker) — a 404 is never a verified absence.
 
 ## Report the friction
 
@@ -269,7 +272,7 @@ if you worked around it — especially then.
 Two cautions specific to this tool:
 
 - **Copy the command, do not reconstruct it.** Two workers independently
-  reported "extract exits 0 on AccessBlocker." It exits 2. They had piped to
+  reported "extract exits 0 on AccessBlocker." It exits 12. They had piped to
   `head`, so `$?` was `head`'s. Separate what you *observed* from what you
   *concluded*.
 - **Missing sources are findings.** Several real gaps surfaced this way
