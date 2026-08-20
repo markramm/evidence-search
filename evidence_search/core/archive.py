@@ -11,14 +11,19 @@ import os
 import time
 from pathlib import Path
 
-#: Where retrieved documents land. Override with CASCADE_ARCHIVE.
+from .store import _resolve
+
+#: Where retrieved documents land. Override with EVIDENCE_ARCHIVE
+#: (CASCADE_ARCHIVE still works).
 #:
 #: This used to be an unconditional absolute path into one operator's KB, which
 #: made the tool unusable by anyone else and -- worse -- silently wrote into a
 #: different KB than the install instructions implied.
-DEFAULT_ARCHIVE = Path(
-    os.environ.get("CASCADE_ARCHIVE")
-    or Path.home() / ".evidence-search" / "archive")
+#:
+#: The legacy ~/.cascade-search location is honoured when it is the only one
+#: holding an archive; see store._resolve. Splitting the archive across two
+#: roots would put a seam in an append-only provenance chain.
+DEFAULT_ARCHIVE = _resolve("EVIDENCE_ARCHIVE", "CASCADE_ARCHIVE", "archive")
 MANIFEST = "MANIFEST-evidence-search.txt"
 
 

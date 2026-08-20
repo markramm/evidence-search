@@ -16,15 +16,35 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
-#: The call ledger and cache. Override with CASCADE_DB.
+def _resolve(new_env, old_env, leaf):
+    """Storage path: new env var, then old, then the on-disk default.
+
+    The tool was renamed from cascade-search, which moved the default storage
+    root. A rename that silently relocates the ledger is not cosmetic: the
+    budget the rate limiter enforces lives there, so a fresh empty store reads
+    as "no calls spent yet" and the next parallel run walks straight into the
+    upstream 429s this file exists to prevent. Open humanomation gates and
+    stored upstream records go quiet at the same time.
+
+    So the legacy location is honoured when it is the only one holding data.
+    """
+    explicit = os.environ.get(new_env) or os.environ.get(old_env)
+    if explicit:
+        return Path(explicit)
+    current = Path.home() / ".evidence-search" / leaf
+    legacy = Path.home() / ".cascade-search" / leaf
+    if legacy.exists() and not current.exists():
+        return legacy
+    return current
+
+
+#: The call ledger and cache. Override with EVIDENCE_DB (CASCADE_DB still works).
 #:
 #: This is SHARED STATE by design -- the rate limiter's whole point is that
 #: parallel workers spend one budget, not one each. That makes an override
 #: necessary rather than merely convenient: a test suite (or a second profile)
 #: must be able to get its own ledger instead of racing the real one.
-DEFAULT_DB = Path(
-    os.environ.get("CASCADE_DB")
-    or Path.home() / ".evidence-search" / "store.db")
+DEFAULT_DB = _resolve("EVIDENCE_DB", "CASCADE_DB", "store.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cache (

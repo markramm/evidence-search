@@ -88,8 +88,13 @@ python3 -m venv .venv && ./.venv/bin/pip install -e .
 ```
 
 Retrieved documents are archived to `~/.evidence-search/archive` by default;
-set `CASCADE_ARCHIVE` to point it at your own corpus. The call ledger and
-cache live in `~/.evidence-search/store.db`.
+set `EVIDENCE_ARCHIVE` to point it at your own corpus. The call ledger and
+cache live in `~/.evidence-search/store.db`; override with `EVIDENCE_DB`.
+
+Upgrading from `cascade-search`? If `~/.cascade-search/` is the only one of the
+two that exists, it is used as-is, so an existing ledger, archive and any open
+gates keep working. The old `CASCADE_ARCHIVE` / `CASCADE_DB` variables are still
+honoured.
 
 ## Use
 
