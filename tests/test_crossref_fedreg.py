@@ -9,6 +9,7 @@ import json
 import pathlib
 import tempfile
 
+from cascade_search.core import http as core_http
 from cascade_search.core.limits import Limiter
 from cascade_search.core.results import (AccessBlocker, Hit, RateLimited,
                                          VerifiedAbsence)
@@ -74,7 +75,7 @@ def test_unregistered_doi_is_an_absence_not_a_block(monkeypatch):
 
 def test_fedreg_count_is_a_real_total(monkeypatch):
     """Unlike Crossref, this corpus is defined, so the count is a measurement."""
-    monkeypatch.setattr(fr, "fetch", lambda *a, **k: (json.dumps({
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (json.dumps({
         "count": 729, "results": [{
             "document_number": "2026-15726", "title": "Visas: Visa Bond Program",
             "type": "Rule", "publication_date": "2026-08-03",
@@ -91,14 +92,54 @@ def test_fedreg_404_is_absence_but_503_is_a_blocker(monkeypatch):
     """Observed live: a transient 503 mid-session. Conflating it with 'no
     matching documents' is precisely the error this package exists to prevent."""
     from cascade_search.core.results import AccessBlocker as AB, Blocker
-    monkeypatch.setattr(fr, "fetch", lambda *a, **k: (
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (
         None, AB(query="x", mechanism=Blocker.NOT_FOUND, url="u")))
     s, L = _kit()
     assert isinstance(fr.search("nothing", store=s, limiter=L, use_cache=False),
                       VerifiedAbsence)
 
-    monkeypatch.setattr(fr, "fetch", lambda *a, **k: (
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (
         None, AB(query="x", mechanism=Blocker.SERVER_ERROR, url="u", detail="HTTP 503")))
     s2, L2 = _kit()
     out = fr.search("immigration", store=s2, limiter=L2, use_cache=False)
     assert isinstance(out, AccessBlocker) and not isinstance(out, VerifiedAbsence)
+
+
+# --- federal_register on the shared shell -------------------------------------
+# Migrated to run_source. These pin what the migration BOUGHT, so a revert to a
+# hand-rolled shell fails rather than silently dropping the auditable record.
+
+def test_fedreg_absence_is_auditable(monkeypatch):
+    """A hand-rolled shell returned prose-only negatives. The shell records the
+    exact question asked and the boundary of the claim."""
+    monkeypatch.setattr(core_http, "fetch",
+                        lambda *a, **k: (json.dumps({"count": 0, "results": []}), None))
+    s, L = _kit()
+    out = fr.search("no such rule", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, VerifiedAbsence)
+    assert len(out.probes) == 1
+    p = out.probes[0]
+    assert p.query == "no such rule" and p.source == "federal_register"
+    assert p.endpoint and p.corpus
+    assert out.not_searched, "the claim must state what it did not cover"
+
+
+def test_fedreg_parse_failure_is_never_an_absence(monkeypatch):
+    """A payload shape change is not evidence that a thing does not exist."""
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: ("<html>not json</html>", None))
+    s, L = _kit()
+    out = fr.search("x", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, AccessBlocker)
+    assert not isinstance(out, VerifiedAbsence)
+
+
+def test_fedreg_replays_from_cache(monkeypatch):
+    calls = []
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: calls.append(1) or (
+        json.dumps({"count": 1, "results": [{"document_number": "d", "title": "t",
+                                             "html_url": "https://fr.gov/x"}]}), None))
+    s, L = _kit()
+    fr.search("q", store=s, limiter=L)
+    out = fr.search("q", store=s, limiter=L)
+    assert len(calls) == 1, "second call should have replayed from cache"
+    assert out.coverage.cache_hits == 1

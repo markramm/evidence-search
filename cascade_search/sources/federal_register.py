@@ -15,14 +15,12 @@ No key, no advertised limit.
 from __future__ import annotations
 
 import json
-import time
 from urllib.parse import urlencode
 
-from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
-                            Result, replay_cached, verified_absence)
-from ..core.store import Store, cache_key
+from ..core.results import Blocker, Coverage, Result, verified_absence
+from ..core.source import run_source
+from ..core.store import Store
 
 SOURCE = "federal_register"
 API = "https://www.federalregister.gov/api/v1"
@@ -37,68 +35,23 @@ DOC_TYPES = {"rule": "RULE", "proposed": "PRORULE", "notice": "NOTICE",
              "presidential": "PRESDOCU"}
 
 
-def search(query: str, doc_type: str | None = None, agency: str | None = None,
-           date_from: str | None = None, date_to: str | None = None,
-           per_page: int = 20, page: int = 1, store: Store | None = None,
-           limiter: Limiter | None = None, use_cache: bool = True):
-    """Search Federal Register documents. `count` is a real total."""
-    store = store or Store()
-    limiter = limiter or Limiter(store)
+def _parse(body: str, query: str, page: int, store) -> list[Result]:
+    """Rows plus the corpus-wide total.
 
-    key = cache_key(SOURCE, query, doc_type=doc_type, agency=agency,
-                    date_from=date_from, date_to=date_to, page=page, per_page=per_page)
-    if use_cache:
-        entry = store.get_entry(key)
-        if entry is not None:
-            return replay_cached(query, entry[0], entry[1], source=SOURCE,
-                                 searched=f"federal register ({query})")
-
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    params = [("conditions[term]", query), ("per_page", str(per_page)),
-              ("page", str(page)), ("order", "newest")]
-    params += [("fields[]", f) for f in FIELDS]
-    if doc_type:
-        t = DOC_TYPES.get(doc_type.lower(), doc_type.upper())
-        params.append(("conditions[type][]", t))
-    if agency:
-        params.append(("conditions[agencies][]", agency))
-    if date_from:
-        params.append(("conditions[publication_date][gte]", date_from))
-    if date_to:
-        params.append(("conditions[publication_date][lte]", date_to))
-
-    t0 = time.time()
-    url = f"{API}/documents.json?{urlencode(params)}"
-    body, blocked = fetch(url, source=SOURCE, query=query)
-    limiter.note_outcome(SOURCE, blocked)
-    if blocked:
-        # The API 404s a search with zero results rather than returning an empty
-        # list. That is an ABSENCE, not a wall, and conflating them would be
-        # exactly the error this package exists to prevent.
-        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
-            return verified_absence(
-                query, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                f"federal register: no documents matching {query!r}")
-        blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
-        return blocked
-
+    Unlike Crossref, `count` here is a MEASUREMENT -- the corpus is defined --
+    so it rides on every Result as total_matches. Dropping it would turn "how
+    many Federal Register documents mention X" into a per-page floor.
+    """
     try:
         data = json.loads(body)
     except json.JSONDecodeError as e:
-        return AccessBlocker(query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
-                             mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
+        # run_source reports a ValueError from a parser as a blocked/errored
+        # outcome, never as an absence: a payload shape change is not evidence
+        # that a thing does not exist.
+        raise ValueError(f"non-JSON response: {e}") from e
 
-    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"],
-                   elapsed_ms=int((time.time() - t0) * 1000))
     total = data.get("count") or 0
     rows = data.get("results") or []
-    if not rows:
-        return verified_absence(query, cov, f"federal register search for {query!r}")
-
     out = []
     for r in rows:
         agencies = [a.get("name") for a in (r.get("agencies") or []) if a.get("name")]
@@ -129,6 +82,62 @@ def search(query: str, doc_type: str | None = None, agency: str | None = None,
                   "total_matches": total, "page": page,
                   "returned_this_page": len(rows)},
         ))
-    if use_cache:
-        store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=86400)
-    return Hit(query=query, coverage=cov, results=out)
+    return out
+
+
+def _absence_on_404(query: str):
+    """The API 404s a zero-result search instead of returning an empty list.
+
+    That is an ABSENCE, not a wall, and conflating them would be exactly the
+    error this package exists to prevent. Every other status stays a blocker --
+    a transient 503 was observed live mid-session.
+    """
+    def handler(blocked, body):
+        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
+            return verified_absence(
+                query,
+                Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
+                f"federal register: no documents matching {query!r}")
+        return None
+    return handler
+
+
+def search(query: str, doc_type: str | None = None, agency: str | None = None,
+           date_from: str | None = None, date_to: str | None = None,
+           per_page: int = 20, page: int = 1, store: Store | None = None,
+           limiter: Limiter | None = None, use_cache: bool = True):
+    """Search Federal Register documents. `count` is a real total."""
+    # Resolve the store here rather than letting run_source default it, so the
+    # parser has somewhere to persist full records even when the caller passed
+    # nothing. Otherwise records vanish exactly for the simplest call sites.
+    store = store or Store()
+
+    params = [("conditions[term]", query), ("per_page", str(per_page)),
+              ("page", str(page)), ("order", "newest")]
+    params += [("fields[]", f) for f in FIELDS]
+    if doc_type:
+        t = DOC_TYPES.get(doc_type.lower(), doc_type.upper())
+        params.append(("conditions[type][]", t))
+    if agency:
+        params.append(("conditions[agencies][]", agency))
+    if date_from:
+        params.append(("conditions[publication_date][gte]", date_from))
+    if date_to:
+        params.append(("conditions[publication_date][lte]", date_to))
+
+    return run_source(
+        query, source=SOURCE, url=f"{API}/documents.json?{urlencode(params)}",
+        searched=f"federal register search for {query!r}",
+        parse=lambda b: _parse(b, query, page, store),
+        store=store, limiter=limiter, use_cache=use_cache,
+        on_blocked=_absence_on_404(query),
+        corpus=("Federal Register: proposed and final rules, notices, and "
+                "presidential documents. A defined corpus, so counts are "
+                "measurements rather than estimates."),
+        exact_match_supported=False,
+        not_searched=["agency actions never published in the Federal Register",
+                      "the underlying rulemaking dockets on regulations.gov"],
+        cache_params={"doc_type": doc_type, "agency": agency,
+                      "date_from": date_from, "date_to": date_to,
+                      "page": page, "per_page": per_page},
+    )

@@ -11,6 +11,7 @@ import tempfile
 
 import pytest
 
+from cascade_search.core import http as core_http
 from cascade_search.core.limits import Limiter
 from cascade_search.core.results import AccessBlocker, Blocker
 from cascade_search.core.store import Store
@@ -27,8 +28,10 @@ BLOCKED = AccessBlocker(query="q", mechanism=Blocker.SERVER_ERROR, detail="boom"
 
 
 @pytest.mark.parametrize("mod, source, call", [
-    (federal_register, "federal_register",
-     lambda m, s, L: m.search("q", store=s, limiter=L, use_cache=False)),
+    # federal_register now runs through run_source, so its transport is
+    # core.http.fetch; the others still call fetch bound in their own module.
+    (core_http, "federal_register",
+     lambda m, s, L: federal_register.search("q", store=s, limiter=L, use_cache=False)),
     (crossref, "crossref",
      lambda m, s, L: m.search("q", store=s, limiter=L, use_cache=False)),
     (searxng, "searxng",
@@ -53,11 +56,11 @@ def test_a_failing_source_enters_backoff(monkeypatch, mod, source, call):
 
 def test_a_success_clears_the_streak(monkeypatch):
     s, L = _kit()
-    monkeypatch.setattr(federal_register, "fetch", lambda *a, **k: (None, BLOCKED))
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (None, BLOCKED))
     federal_register.search("q", store=s, limiter=L, use_cache=False)
     assert L.backoff_remaining("federal_register")[1] == 1
 
-    monkeypatch.setattr(federal_register, "fetch",
+    monkeypatch.setattr(core_http, "fetch",
                         lambda *a, **k: ('{"results": [], "count": 0}', None))
     federal_register.search("q2", store=s, limiter=L, use_cache=False)
     assert L.backoff_remaining("federal_register")[1] == 0, "a success must clear the streak"
