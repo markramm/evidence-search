@@ -205,6 +205,34 @@ class VerifiedAbsence(Outcome):
             head += f". Caveats: {'; '.join(self.caveats)}"
         return head
 
+    def to_dict(self) -> dict:
+        """Lift the exact strings asked to the TOP LEVEL.
+
+        They were always present, nested one level down inside probes[].query.
+        Reaching them meant walking the structure -- the same defect the
+        total_matches fix addressed on Hit. A consumer deciding whether to
+        trust a negative should not have to dig for the thing the negative is
+        ABOUT. `asked` is the specification; `outcome` is the verdict on it.
+        """
+        d = super().to_dict()
+        seen: list[dict] = []
+        for pr in self.probes:
+            q = (pr.query or "").strip()
+            if not q:
+                continue
+            entry = {
+                "query": q,
+                "source": pr.source,
+                "params": {k: v for k, v in (pr.params or {}).items() if v not in (None, "")},
+                "exact_match_supported": pr.exact_match_supported,
+            }
+            if entry not in seen:
+                seen.append(entry)
+        d["asked"] = seen
+        d["asked_note"] = ("An absence of THESE STRINGS. A variant spelling, married "
+                           "name, transliteration, or data-entry variant is a "
+                           "different question and was not asked.")
+        return d
 
 @dataclass
 class AccessBlocker(Outcome):

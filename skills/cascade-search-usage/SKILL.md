@@ -37,6 +37,17 @@ The guarantee is enforced in code: if any engine was rate-limited or errored,
 a verified absence **cannot** be constructed — it downgrades to `RateLimited`.
 So `VerifiedAbsence` is the one negative you may report as a finding.
 
+**But read the `ASKED:` block before you write the absence up.** Typed outcomes
+prove the search was *executed* cleanly. They prove nothing about whether it was
+*specified* correctly — the tool will happily certify a flawless search for the
+wrong string. An absence on `Frazier` is an absence of that string: not
+`Frasier`, not a married name, not a hyphenation, not a data-entry variant. In
+`--json` the same thing is at the top level as `asked`.
+
+When a name could vary, ask the variants before you claim the absence. When the
+`ASKED` line says `FUZZY`, the endpoint could not honour exact-phrase matching
+and the negative is weaker than it looks.
+
 **Outcome exit codes are 10+; every failure code is below it.** Exit 1 means the
 tool broke — never that the world is empty.
 

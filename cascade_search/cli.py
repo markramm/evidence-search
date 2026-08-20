@@ -51,6 +51,28 @@ EXIT_BY_OUTCOME = {
 }
 
 
+def _asked_strings(outcome) -> list[str]:
+    """The exact query strings sent, one line per distinct (source, query, params).
+
+    Deduped, because five probes against one string is one specification, not
+    five. Params are included because they scope the question as much as the
+    query does -- `Frazier` in Caddo County in 2013 is not `Frazier` statewide.
+    """
+    seen: list[str] = []
+    for pr in getattr(outcome, "probes", []) or []:
+        q = (pr.query or "").strip()
+        if not q:
+            continue
+        scope = ", ".join(f"{k}={v}" for k, v in sorted((pr.params or {}).items()) if v not in (None, ""))
+        line = f"{q!r}" + (f"   [{scope}]" if scope else "")
+        line = f"{line}   via {pr.source}"
+        if pr.exact_match_supported is False:
+            line += "   (FUZZY -- endpoint does not honour exact-phrase matching)"
+        if line not in seen:
+            seen.append(line)
+    return seen
+
+
 def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
     """Print, and return an exit code that encodes the OUTCOME TYPE.
 
@@ -116,6 +138,27 @@ def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
                 if r.meta.get("entity_caveat"):
                     print(f"     !! {r.meta['entity_caveat']}")
         elif isinstance(outcome, VerifiedAbsence):
+            # THE EXACT STRINGS ASKED, first and loudest.
+            #
+            # Typed outcomes make execution auditable; they do nothing for
+            # SPECIFICATION. The tool will certify a flawlessly-executed search
+            # for the wrong string, and an absence on --lname Frazier is an
+            # absence of a STRING: not Frasier, not a married name, not a
+            # hyphenation, not a data-entry variant. The origin bug had two
+            # halves -- searching the wrong corpora, and searching "watch
+            # network" instead of the movement's own name. Typed outcomes fixed
+            # the first half completely and the second not at all.
+            #
+            # So the query outranks the verdict in the display. What was asked
+            # has to be as easy to challenge as whether it was asked properly.
+            asked = _asked_strings(outcome)
+            if asked:
+                print("ASKED:")
+                for line in asked:
+                    print(f"  {line}")
+                print("  ^ this is an absence OF THESE STRINGS. A variant spelling,")
+                print("    married name, or transliteration is a DIFFERENT question.")
+                print()
             print(f"searched: {outcome.searched}")
             for pr in outcome.probes:
                 print(f"  probe:  {pr.describe()}")

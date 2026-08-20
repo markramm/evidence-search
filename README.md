@@ -92,6 +92,25 @@ case $? in
 esac
 ```
 
+### What a negative does and does not cover
+
+`VerifiedAbsence` output leads with `ASKED:` — the exact strings sent, with the
+filters that scoped them — before it prints any verdict. That order is
+deliberate. Typed outcomes make *execution* auditable; nothing in the type
+system makes *specification* auditable, and the tool will certify a
+perfectly-run search for the wrong string.
+
+```
+ASKED:
+  'Frazier'   [db=caddo, year=2013]   via oscn
+  ^ this is an absence OF THESE STRINGS. A variant spelling,
+    married name, or transliteration is a DIFFERENT question.
+```
+
+In `--json`, the same list is at the top level under `asked`, not buried in
+`probes[]`. A consumer deciding whether to trust a negative should not have to
+walk the structure to find what the negative is about.
+
 ## Sources
 
 | Source | Auth | Limits | Notes |
