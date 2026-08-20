@@ -32,6 +32,14 @@ weight — knowing which parts earn their keep is how the rest gets prioritised.
 Maintainers: mark entries `[fixed <commit>]`, `[wontfix — reason]`, or
 `[tracked]`. Leave the original text intact so the pattern stays visible.
 
+**Correctness status:** seven USAspending figures the tool produced — including
+ones that reached near-publication drafts — were recomputed against the primary
+API with cascade-search out of the path. All seven confirmed, four to the cent.
+See the CORRECTNESS AUDIT entry at the end of this file for scope and limits.
+Note what that does and does not cover: everything *else* in this log is agents
+reporting on their own runs, which is usability evidence, not correctness
+evidence.
+
 ### Open items, most valuable first (as of 2026-08-19, post-triage)
 
 Everything else in this file is marked `[fixed]` or `[wontfix]` inline. These
@@ -1744,3 +1752,66 @@ call instead of three. Keep it; consider making it louder in `--json`.
 **Minor:** exit codes are correct (2 / 1 / 0 verified directly) — an earlier note
 in this log suggesting otherwise was a shell artifact from piping into `head`,
 which reports the pipe's status, not the CLI's. Not a tool defect.
+
+---
+
+## 2026-08-19 · CORRECTNESS AUDIT (not a usability pass) · claude-opus-5[1m]
+
+Everything else in this file is agents reporting on their own runs. That is
+good usability signal and it is **not** evidence the numbers were right: a
+worker saying "`--sum` gave me a clean total" tells you the tool felt
+trustworthy, not that it was. This entry closes that gap for seven figures the
+tool produced today, several of which reached near-publication drafts.
+
+**Method.** Each figure was recomputed against `api.usaspending.gov` directly
+with a standalone script — separate paging, separate summing, no
+cascade-search code in the path — and compared to what the tool reported. Per
+the corpus rule: verify against the primary source, never against our own
+writeups.
+
+| # | Claim (as the tool reported it) | Independent recompute | Verdict |
+|---|---|---|---|
+| 1 | `W9124J24C0019` → TECHNOLOGY & BUSINESS MANAGEMENT INC., $3,972,528 | identical | **CONFIRMED** |
+| 2 | <vendor-f> LLC = $915,073,700.81 / 33 awards, `complete` | $915,073,700.81 / 33 | **CONFIRMED (to the cent)** |
+| 3 | <vendor-a> = $3,298,091.75 / 52 awards | $3,298,091.75 / 52 | **CONFIRMED (to the cent)** |
+| 4 | <vendor-d> = $1,564,745.51 / 15 awards, `complete` | $1,564,745.51 / 15, single recipient <VENDOR-D>, LLC | **CONFIRMED (to the cent)** |
+| 5 | "Constellis" + "<vendor-e>" sums double-count | 283/283 "Constellis" awards are recipient TRIPLE CANOPY INC — 100% overlap | **CONFIRMED** |
+| 6 | <vendor-d> PSC codes contradict its SaaS marketing | 5× `6910 TRAINING AIDS`, `U099`, `U008 TRAINING/CURRICULUM DEVELOPMENT`, NAICS `611519 OTHER TECHNICAL AND TRADE SCHOOLS` | **CONFIRMED, understated** |
+| 7 | <vendor-g> FY-window `--sum` = $1,650,428,648.83 / 87 (post-fix) | identical | **CONFIRMED (to the cent)** |
+
+**Seven for seven. No figure was wrong.** Four matched to the cent across
+independent paging, which also means the paging and the `complete`-vs-floor
+marker are doing real work rather than getting lucky on small result sets.
+
+**Three findings worth keeping:**
+
+1. **The $10.7B double-count is now proven, not merely suspected.** The worker
+   inferred it from two shared PIIDs spotted by eye. The full comparison is
+   starker: *every one* of the 283 awards returned by `"Constellis"` has
+   recipient `TRIPLE CANOPY INC`, and the naive sum is $10,737,830,486.25 —
+   the flagged figure, reproduced exactly. "Constellis" is not a second entity
+   in this corpus at all. The 9e18f72 warning fires correctly on it.
+
+2. **Claim 6 was understated by its own author, which is the safe direction.**
+   The worker reported 4× `6910 TRAINING AIDS`; there are 5, plus a `U008
+   TRAINING/CURRICULUM DEVELOPMENT` they did not mention and a NAICS
+   `611519 OTHER TECHNICAL AND TRADE SCHOOLS`. The conclusion that the
+   government classifies <vendor-d> as a training vendor — which corrected a
+   standing KB judgment — holds more strongly than the worker claimed.
+
+3. **The one reported BUG was real, and its fix is verified independently.**
+   The <vendor-g> `--from/--to` case (`--sum` returning an all-time total while
+   self-reporting `complete`) was the single confident-wrong-answer defect in
+   this log. Post-08fa7ae it returns $1,650,428,648.83 / 87 in-window, which
+   the recompute reproduces to the cent, and which matches what `--count`
+   said all along. The prior entry asked whether the fix generalised beyond
+   the one vendor it was tested on; it does.
+
+**Scope, stated honestly.** This audits USAspending figures only — the source
+behind 305 of 552 logged calls and most of the dollar claims. It does NOT
+audit `web`/`news` result quality, `extract` fidelity on PDFs, or CourtListener
+counts, and a clean result here says nothing about those. It also cannot catch
+an error shared by both paths: if USAspending's own data is wrong, both my
+recompute and the tool inherit it. What it does establish is that
+cascade-search is not introducing arithmetic, paging, or attribution errors of
+its own on the source that carries most of its load-bearing numbers.
