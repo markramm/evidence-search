@@ -126,9 +126,11 @@ def validate(job: dict, body: str) -> tuple[bool, str]:
 def _handler(db_path=None):
     """Build a handler that opens its OWN Store per request.
 
-    sqlite connections belong to the thread that created them, and the HTTP
-    server dispatches each request on a fresh thread. Sharing one Store across
-    them raises ProgrammingError on the first POST.
+    sqlite connections belong to the thread that created them. HTTPServer is
+    serial today, so one Store would in fact survive -- but binding the
+    connection to the request keeps that an implementation detail rather than a
+    dependency, and switching to ThreadingHTTPServer would otherwise raise
+    ProgrammingError on the first POST.
     """
     from .archive import archive
     from .gate_page import render
@@ -139,6 +141,40 @@ def _handler(db_path=None):
             if not hasattr(self, "_store"):
                 self._store = Store(db_path)
             return self._store
+
+        def finish(self):
+            # The per-request connection is this request's to release.
+            super().finish()
+            st = getattr(self, "_store", None)
+            if st is not None:
+                st.close()
+
+        def _local_only(self) -> bool:
+            """Reject requests that did not originate from this machine's own UI.
+
+            The page writes an archive record with a SHA-256 and closes a gate
+            against it -- provenance, in a tool whose product is provenance. So
+            a drive-by POST from a page the operator happens to have open must
+            not reach that code.
+
+            Host: blocks DNS rebinding, where an attacker-controlled name
+            resolves to 127.0.0.1 and the browser treats it as same-origin.
+            Content-Type: a cross-site form POST with enctype=text/plain is a
+            CORS *simple* request and gets no preflight; requiring JSON puts the
+            preflight back. Origin: belt and braces where the browser sends it.
+            """
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+            if host not in ("127.0.0.1", "localhost", "::1"):
+                return False
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
+            if ctype != "application/json":
+                return False
+            origin = self.headers.get("Origin")
+            if origin:
+                oh = (urlparse(origin).hostname or "")
+                if oh not in ("127.0.0.1", "localhost", "::1"):
+                    return False
+            return True
 
         def log_message(self, *a):        # keep the terminal for the operator
             pass
@@ -159,6 +195,10 @@ def _handler(db_path=None):
         def do_POST(self):
             if urlparse(self.path).path != "/resume":
                 return self._send(404, "not found", "text/plain")
+            if not self._local_only():
+                return self._send(403, json.dumps(
+                    {"ok": False, "message": "Refused: request did not come from the local gate page."}),
+                    "application/json")
             n = int(self.headers.get("Content-Length") or 0)
             try:
                 data = json.loads(self.rfile.read(n) or b"{}")

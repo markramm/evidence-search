@@ -91,3 +91,106 @@ def test_empty_queue_says_so_without_scolding():
     page = render([])
     assert "Nothing is waiting on you" in page
     assert "<article" not in page
+
+
+# --- origin discipline on /resume ---------------------------------------------
+# The endpoint archives bytes under a SHA-256 and closes a gate against them. A
+# page the operator happens to have open must not be able to write that record.
+
+import json as _json
+import socket
+import threading
+import urllib.error
+import urllib.request
+from http.server import HTTPServer
+
+from cascade_search.core.gateui import _handler
+
+
+class _Server:
+    def __init__(self, store):
+        self.httpd = HTTPServer(("127.0.0.1", 0), _handler(store.path))
+        self.port = self.httpd.server_address[1]
+        self.t = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.t.start()
+
+    def post(self, body=b"{}", ctype="application/json", origin=None):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/resume", data=body, method="POST")
+        req.add_header("Content-Type", ctype)
+        if origin:
+            req.add_header("Origin", origin)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def raw_post(self, host, body=b'{"token":"t"}'):
+        """Send a literal Host header. urllib resolves the name instead of
+        sending it verbatim, but a rebinding attack puts it on the wire."""
+        req = (f"POST /resume HTTP/1.1\r\nHost: {host}\r\n"
+               f"Content-Type: application/json\r\n"
+               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+               ).encode() + body
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(req)
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+        return int(buf.split(b" ")[1])
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _serve():
+    return _Server(_store_with(OSCN))
+
+
+def test_resume_refuses_a_foreign_host_header():
+    """DNS rebinding: an attacker name resolving to 127.0.0.1 is same-origin
+    to the browser, so the Host header is the only thing that catches it."""
+    srv = _serve()
+    try:
+        assert srv.raw_post("evil.example.com") == 403
+        assert srv.raw_post(f"127.0.0.1:{srv.port}") != 403   # our own page is fine
+    finally:
+        srv.close()
+
+
+def test_resume_refuses_a_cross_site_form_post():
+    """enctype=text/plain is a CORS simple request -- no preflight. Requiring
+    JSON is what puts the preflight back."""
+    srv = _serve()
+    try:
+        code, _ = srv.post(body=b'{"token":"t","body":"x"}', ctype="text/plain")
+        assert code == 403
+    finally:
+        srv.close()
+
+
+def test_resume_refuses_a_cross_site_origin():
+    srv = _serve()
+    try:
+        code, _ = srv.post(origin="https://evil.example.com")
+        assert code == 403
+    finally:
+        srv.close()
+
+
+def test_resume_still_accepts_the_local_page():
+    """The guard must not break the operator's own click."""
+    srv = _serve()
+    try:
+        code, raw = srv.post(body=_json.dumps({"token": "nope", "body": "x"}).encode(),
+                             origin=f"http://127.0.0.1:{srv.port}")
+        # Reaches the handler proper: unknown token, not a refused origin.
+        assert code == 404
+        assert "no longer open" in _json.loads(raw)["message"]
+    finally:
+        srv.close()

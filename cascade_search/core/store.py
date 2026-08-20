@@ -155,6 +155,17 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")  # concurrent workers
         self.conn.executescript(SCHEMA)
 
+    def close(self) -> None:
+        """Release the sqlite handle. Idempotent.
+
+        Long-lived processes that open a Store per unit of work (the gate UI
+        opens one per HTTP request) otherwise leak a connection each time.
+        """
+        conn = getattr(self, "conn", None)
+        if conn is not None:
+            conn.close()
+            self.conn = None
+
     # ---- cache -------------------------------------------------------------
     def get(self, key: str):
         row = self.conn.execute(
