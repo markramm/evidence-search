@@ -69,11 +69,11 @@ Every call returns one of these, never a bare list:
 
 | Outcome | Meaning | Exit |
 |---|---|---|
-| `Hit` | results found | 0 |
-| `VerifiedAbsence` | right corpus, right method, every engine answered — **publishable** | 1 |
-| `AccessBlocker` | blocked; **names the mechanism**; flags browser-escalatable | 2 |
-| `RateLimited` | tooling-limited, **explicitly not content-exhausted** — retry | 3 |
-| `AwaitingHuman` | humanomation gate; automate → human → resume | 4 |
+| `Hit` | results found | 10 |
+| `VerifiedAbsence` | right corpus, right method, every engine answered — **publishable** | 11 |
+| `AccessBlocker` | blocked; **names the mechanism**; flags browser-escalatable | 12 |
+| `RateLimited` | tooling-limited, **explicitly not content-exhausted** — retry | 13 |
+| `AwaitingHuman` | humanomation gate; automate → human → resume | 14 |
 
 The core guarantee, enforced in code: **if any engine was rate-limited or
 errored, a verified absence cannot be constructed.** It downgrades to
