@@ -44,12 +44,18 @@ _SIGNATURES = [
     (re.compile(r'class=["\'][^"\']*g-recaptcha'
                 r'|www\.google\.com/recaptcha/api2/'
                 r'|grecaptcha\.(?:render|execute|enterprise)', re.I), Blocker.RECAPTCHA),
-    (re.compile(r"datadome|geo\.captcha-delivery\.com", re.I), Blocker.DATADOME),
+    (re.compile(r'geo\.captcha-delivery\.com|captcha-delivery\.com/'
+                r'|\bdatadome\.co\b|js\.datadome\.co|ct\.datadome\.co'
+                r'|["\']?dd_cookie|window\.__dd|datadome[-_]?(?:captcha|challenge)', re.I),
+     Blocker.DATADOME),
 ]
 
-#: Text that survives tag-stripping. A challenge interstitial is nearly all
-#: widget and nearly no prose; a served record page is the reverse.
-_CHALLENGE_PROSE_MAX = 1200
+#: Text that survives tag-stripping. A challenge interstitial is mostly widget
+#: and little prose; a served record page is the reverse. Cloudflare's "Sorry,
+#: you have been blocked" boilerplate alone runs past 1200 chars, which the
+#: first cut of this gate did not clear -- and an unrecognised wall is the worse
+#: error, because the body then flows downstream as though it were content.
+_CHALLENGE_PROSE_MAX = 3000
 
 
 def _visible_len(body: str) -> int:
@@ -59,13 +65,26 @@ def _visible_len(body: str) -> int:
 
 
 def detect_blocker(status: int, body: str) -> Blocker | None:
+    # The signature scan is bounded, so measure prose over the SAME slice --
+    # judging a page by its whole body while matching only its first 8KB made
+    # large pages likelier to be skipped exactly where the scan is already blind.
     head = body[:8000]
+
     # A challenge REPLACES the content. If the page also carries substantive
     # prose, the widget is furniture on a page that served us -- not a wall.
-    if _visible_len(body) <= _CHALLENGE_PROSE_MAX:
+    challenged = None
+    if _visible_len(head) <= _CHALLENGE_PROSE_MAX:
         for pattern, mech in _SIGNATURES:
             if pattern.search(head):
-                return mech
+                challenged = mech
+                break
+
+    # A named mechanism outranks the status. 403 is the NORMAL status for a
+    # Cloudflare wall, and only the named mechanisms set escalate_to_browser --
+    # so falling through to FORBIDDEN reports a wall a headed browser could pass
+    # as a flat refusal, which is the one thing this function exists to prevent.
+    if challenged is not None:
+        return challenged
     if status == 403:
         return Blocker.FORBIDDEN
     if status == 404:

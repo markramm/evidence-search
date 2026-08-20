@@ -559,3 +559,66 @@ def test_host_allowlist_boundary_is_the_dot():
                 "https://sam.gov.attacker.com/x",  # allowed host as a PREFIX
                 "https://", ""):
         assert host_allowed(url)[0] is False, url
+
+
+# --- prose gate must not swallow real walls -----------------------------------
+# The gate that fixed the false positives introduced the opposite error: a
+# verbose challenge page measured over the ceiling and fell through, losing the
+# named mechanism. That is the worse direction -- an unrecognised wall means the
+# body flows downstream as though it were content.
+
+_CF_BOILERPLATE = (
+    "Sorry, you have been blocked. You are unable to access this site. Please "
+    "enable cookies and try again. This website is using a security service to "
+    "protect itself from online attacks. The action you just performed triggered "
+    "the security solution. You can email the site owner to let them know you "
+    "were blocked. Please include what you were doing when this page came up and "
+    "the Cloudflare Ray ID found at the bottom of this page. " * 3)
+
+
+def test_verbose_cloudflare_wall_on_403_keeps_its_mechanism():
+    """403 is the NORMAL status for a Cloudflare challenge.
+
+    Falling through to FORBIDDEN clears escalate_to_browser, so a wall a headed
+    browser could pass reads as a flat refusal.
+    """
+    body = (f'<html><body><div class="cf-turnstile"></div><p>{_CF_BOILERPLATE}</p>'
+            "</body></html>")
+    assert detect_blocker(403, body) is Blocker.TURNSTILE
+    assert AccessBlocker(query="q", mechanism=detect_blocker(403, body)).escalate_to_browser
+
+
+def test_verbose_recaptcha_wall_on_200_is_still_detected():
+    body = ('<html><body><div class="g-recaptcha" data-sitekey="6Ld"></div><p>'
+            + "Verify you are human to continue. This helps confirm you are a real "
+              "person and not an automated system. " * 12 + "</p></body></html>")
+    assert detect_blocker(200, body) is Blocker.RECAPTCHA
+
+
+def test_datadome_named_in_a_footer_is_not_a_block():
+    """DataDome kept a bare-word signature when the other three were tightened,
+    so a served no-records stub naming its vendor became a fake blocker -- and
+    fetch() discards the body, so the absence was unrecoverable."""
+    assert detect_blocker(
+        200, "<html><body><p>No records found.</p>"
+             "<footer>Protected by DataDome</footer></body></html>") is None
+
+
+def test_datadome_challenge_host_is_still_a_block():
+    assert detect_blocker(
+        200, "<html><body>Please enable JS"
+             "<script src='https://ct.datadome.co/c.js'></script></body></html>"
+    ) is Blocker.DATADOME
+
+
+def test_prose_gate_and_signature_scan_read_the_same_slice():
+    """The gate measured the whole body while the scan matched only the first
+    8KB, so a large page was judged by text the matcher never saw."""
+    body = ("<html><body>" + '<span class="x"></span>' * 400
+            + '<div class="cf-turnstile"></div></body></html>')
+    # The widget sits beyond the scan window, so it is not detectable either
+    # way -- but the gate must not be the thing that decides that.
+    assert detect_blocker(200, body) is None
+    near = ('<html><body><div class="cf-turnstile"></div>'
+            + "<p>Checking your browser.</p></body></html>")
+    assert detect_blocker(200, near) is Blocker.TURNSTILE
