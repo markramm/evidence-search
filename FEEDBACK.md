@@ -1570,3 +1570,86 @@ whole task: it definitively established that a ledger story's cited tier-1 sourc
 contain the dollar figure attributed to it, which is a materially different and more useful
 finding than "the web doesn't discuss X" — deterministic grep against the full text is what
 made that a fact rather than a guess.
+
+## 2026-08-19 · verification-sweep-19-near-publication-pieces · claude-sonnet-5
+
+**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending "Constellis" --sum --wait`
+**Expected:** either a distinct-entity total for the legal/DBA name "Constellis," or a clear
+signal that this is a keyword match rather than a recipient-name match.
+**Got:** `$3,654,682,628.40 across 283 awards | complete` — presented identically to a clean
+recipient-name total, no different from `usaspending "<vendor-e>" --sum`. Nothing in the
+output distinguishes "this is a real distinct recipient" from "this is a keyword hit whose
+underlying awards belong to a recipient you already queried under a different name."
+
+**Friction — a keyword match that looks exactly like a recipient-name match is a real trap,
+and I nearly walked into it.** The task brief I was given (correctly) warned that keyword
+counts aren't vendor totals, but the way I actually caught this wasn't the warning — it was
+noticing that `usaspending "<vendor-e>" --sum` ($7.08B) plus `usaspending "Constellis"
+--sum` ($3.65B) landed suspiciously close to a flagged $10.7B figure I was trying to
+resolve, which made me suspicious enough to pull `--limit 5` on both and eyeball the PIIDs.
+Two award numbers (SAQMMA16F4675, 19AQMM22F0469) appeared in *both* result sets, both
+recipient "TRIPLE CANOPY INC" — i.e. "Constellis" is not a second entity, it's a keyword
+that happens to also match <vendor-e>'s own contract records (<vendor-e> is a
+Constellis subsidiary and its records likely mention the parent). Had I not cross-checked,
+I would have reported $7.08B + $3.65B = $10.7B as a verified two-entity total, which is
+*exactly* the error the flagged figure I was investigating appears to have made in the
+first place — this may be how that $10.7B number got constructed originally. **Severity:
+slowed** (caught it myself this time) but this is a confident-wrong-answer hazard on the
+order of the OCR digit-confusion warning: two independently-run `--sum` calls that look
+equally authoritative, one of which is silently double-counting the other.
+**Would have helped:** any signal in `--sum`/`--limit` output distinguishing a search where
+100% (or some high fraction) of returned awards share a recipient name already seen under a
+different query in the same session — even just printing the distinct recipient names
+found, the way `--detail` already surfaces PSC/NAICS, would have let me catch this in one
+call instead of three. Short of that, the docs' existing "usaspending recipient matching is
+precise on CONTRACTS, fuzzy on grants/loans" caution should be broadened: it's also fuzzy
+between a subsidiary and a parent-company keyword, on contracts, when the parent name isn't
+itself a recipient of record.
+
+**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending --detail 291199463 --wait`
+**Expected:** enough detail to confirm which specific program/system an ICE-<vendor-h> award
+funds (I needed to know whether a Sept 2025 $29.9M transaction was a new contract or a
+modification to an existing one).
+**Got:** one line — PSC and NAICS only (`PSC DA01: IT AND TELECOM - BUSINESS APPLICATION/...
+| NAICS 511210: SOFTWARE PUBLISHERS`). No award description, no transaction history, no
+modification list, no awarding sub-agency name.
+**Friction — `--detail` didn't answer the question it was closest to answering.** I had to
+drop to the raw `api.usaspending.gov/api/v2/awards/<id>/` and
+`api.usaspending.gov/api/v2/search/spending_by_transaction/` endpoints directly via curl to
+get the award `description` field (which is where "INVESTIGATIVE CASE MANAGEMENT (ICM)
+OPERATIONS AND MAINTENANCE..." actually lives) and the per-transaction modification history
+(which is where I found the $29.9M Sept 25 2025 line item and confirmed it was a
+modification to the *same* award, not a new one). This was the single most load-bearing
+check in the whole task — it's what let me catch a piece asserting two dollar figures that
+were actually the same contract — and cascade-search's `--detail` didn't reach it.
+**Would have helped:** `--detail` returning the award `description` field (one string,
+already in the API response I pulled) would cover most of this. A `--transactions` or
+`--modifications` flag surfacing the transaction-level list (date, amount, description) for
+one award ID would cover the rest, and directly serves this beat's recurring "is this a new
+contract or a bigger bite of an old one" question — the same shape of question as the
+<vendor-g>/`<vendor-b>`/etc. keyword-vs-name traps already documented above, just one level
+down at the transaction layer instead of the recipient layer.
+
+**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending "ACADEMI TRAINING CENTER" --sum --wait`
+(repeated ~12 times over roughly 5 minutes)
+**Got:** `RateLimited` every time, with the detail line showing a *different* partial-sum
+progress each retry (500 awards/5 pages, then 700/7, then 0/0, then 800/8...) — i.e. another
+worker or workers were actively running large `--sum` sweeps against usaspending
+concurrently and eating the shared 30-calls/60s budget before my paging could complete. This
+matches the doc's "rate limits are shared across workers" warning exactly, and the doc's
+guidance (retry, don't report as absence) was correct and is what I did — eventually got a
+clean `complete` result once traffic died down. **Not a tool bug**, flagging as confirmation
+that the shared-budget contention described in the docs is a real, current, and non-trivial
+source of delay during a busy multi-worker tick (this cost roughly 5 minutes of wall time on
+one query), not just a theoretical edge case.
+
+**Worked well:** `--from`/`--to` on `usaspending --sum` is fixed and I confirmed it live —
+`usaspending "<vendor-e>" --sum --from 2020-01-01 --to 2022-12-31` correctly returned a
+smaller bounded total ($4.84B/304 awards) than the all-time total ($7.08B/480 awards) and
+still self-reported `complete`. (A prior 2026-08-19 entry in this same log reported this flag
+silently ignored on an <vendor-g> query — worth re-testing that exact query if anyone wants to
+confirm the fix generalizes, since my one confirmation used a different vendor.) Also: the
+plain `--sum`/`--limit` combination on `usaspending` is what actually caught two separate
+wrong-figure findings in this task (a disputed $10.7B aggregate, an overstated $30M-plus-
+$139.3M framing that was really one $150.7M contract) — the tool did its job well once I
+knew to cross-check keyword hits against recipient-name hits by PIID.
