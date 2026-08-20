@@ -270,3 +270,28 @@ def test_dollar_sum_reports_the_scope_it_summed(monkeypatch):
     s2, L2 = _kit()
     out2 = usa.dollar_sum("x", date_from="2026-01-01", store=s2, limiter=L2)
     assert "2026-01-01" in out2.results[0].meta["scope"]
+
+
+def test_sum_warns_when_the_query_name_is_not_the_recipient_name():
+    """recipient_search_text is a SEARCH, not an entity resolver.
+
+    Querying "Constellis" returns records for TRIPLE CANOPY INC -- verified live.
+    Nothing in the output said so, and summing that against a "Triple Canopy"
+    query double-counted the same contracts into $10.73B, the exact wrong figure
+    found sitting in a draft with an editor.
+    """
+    c = usa._entity_caveat("Constellis", ["TRIPLE CANOPY INC"], 1)
+    assert c and "not the name on these awards" in c
+    assert usa._name_matches("Constellis", ["TRIPLE CANOPY INC"]) is False
+
+
+def test_sum_warns_when_several_recipient_names_matched():
+    c = usa._entity_caveat("Acme", ["ACME INC", "ACME HOLDINGS"], 2)
+    assert c and "DISTINCT RECIPIENT NAMES" in c
+    assert "double-count" in c
+
+
+def test_sum_is_quiet_when_the_entity_resolved_cleanly():
+    """Do not cry wolf -- a clean single match must produce no caveat."""
+    assert usa._entity_caveat("Lifeline Training", ["LIFELINE TRAINING, LTD"], 1) is None
+    assert usa._name_matches("Lifeline Training", ["LIFELINE TRAINING, LTD"]) is True

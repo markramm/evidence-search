@@ -43,6 +43,8 @@ def _emit(outcome, as_json: bool) -> int:
                     print(f"     {r.url}")
                 if r.snippet:
                     print(f"     {r.snippet[:140]}")
+                if r.meta.get("entity_caveat"):
+                    print(f"     !! {r.meta['entity_caveat']}")
         elif isinstance(outcome, VerifiedAbsence):
             print(f"searched: {outcome.searched}")
             for pr in outcome.probes:

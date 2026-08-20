@@ -233,6 +233,38 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                )])
 
 
+def _name_matches(query: str, names: list[str]) -> bool:
+    q = query.strip().lower()
+    return any(q in nm.lower() or nm.lower() in q for nm in names)
+
+
+def _entity_caveat(query: str, names: list[str], n_distinct: int) -> str | None:
+    """Warn when the recipient search did not resolve to the entity asked for.
+
+    `recipient_search_text` is a SEARCH, not an entity resolver, and two failure
+    modes both produced wrong published figures:
+
+    1. ONE name that is not yours -- querying "Constellis" returns records for
+       TRIPLE CANOPY INC. The name searched is not the name on the awards.
+    2. SEVERAL names -- a parent-company query sweeps in subsidiary records, so
+       two --sum calls that each look authoritative silently count the same
+       contracts twice. Verified: "Constellis" and "Triple Canopy" share 55 of
+       their top 100 PIIDs, and summing the two yields $10.73B -- the exact wrong
+       figure found sitting in a draft with an editor.
+    """
+    if not names:
+        return None
+    if len(names) == 1 and not _name_matches(query, names):
+        return (f"QUERY {query!r} RETURNED RECORDS FOR {names[0]!r} -- the name you searched "
+                "is not the name on these awards. Confirm this is the entity you meant "
+                "before citing the total.")
+    if n_distinct > 1:
+        return (f"MATCHED {n_distinct} DISTINCT RECIPIENT NAMES: {', '.join(names)}. "
+                "Do NOT add this total to another vendor's sum without checking for shared "
+                "award IDs -- that double-count is how a $10.7B figure reached an edited draft.")
+    return None
+
+
 def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
                date_from: str | None = None, date_to: str | None = None,
                max_pages: int = 10, store: Store | None = None,
@@ -256,6 +288,7 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     n = 0
     page = 1
     more = False
+    recipients: set[str] = set()
     while page <= max_pages:
         allowed, retry, why = limiter.reserve(SOURCE)
         if not allowed:
@@ -292,6 +325,8 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
             if isinstance(v, (int, float)):
                 total += v
                 n += 1
+            if r.get("Recipient Name"):
+                recipients.add(r["Recipient Name"])
         more = bool((data.get("page_metadata") or {}).get("hasNext"))
         if not more:
             break
@@ -300,6 +335,15 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"])
     if not n:
         return verified_absence(query, cov, f"usaspending dollar sum ({query})")
+
+    # recipient_search_text is a SEARCH, not an entity resolver. A parent-company
+    # name matches subsidiaries' records, so two --sum calls that each look
+    # authoritative can silently count the SAME contracts twice. Verified: a
+    # "Constellis" sum and a "Triple Canopy" sum share 55 of their top 100 PIIDs
+    # and the recipient name returned under "Constellis" is TRIPLE CANOPY INC.
+    # Summing the two produced $10.73B -- the exact wrong figure that had been
+    # sitting in a piece with an editor.
+    names = sorted(recipients)[:6]
     complete = not more
     return Hit(query=query, coverage=cov, results=[Result(
         url=f"https://www.usaspending.gov/search?keywords={query}",
@@ -313,6 +357,9 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
               "date_from": date_from, "date_to": date_to,
               "scope": ("all time" if not (date_from or date_to)
                         else f"{date_from or 'earliest'} to {date_to or 'latest'}"),
+              "recipient_names_matched": names,
+              "queried_name_matches_result": _name_matches(query, names),
+              "entity_caveat": _entity_caveat(query, names, len(recipients)),
               "caveat": (None if complete else
                          "This is a FLOOR, not a total -- raise --max-pages to close it.")},
     )])
