@@ -31,7 +31,7 @@ def test_doi_is_recognised_and_routed_to_exact_lookup():
 def test_doi_result_is_marked_exact_and_carries_no_verify_warning(monkeypatch):
     """DOI lookup is authoritative; a title search is not. The flag is the
     difference between a citation and a lead."""
-    monkeypatch.setattr(cr, "fetch", lambda *a, **k: (json.dumps({"message": {
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (json.dumps({"message": {
         "DOI": "10.1177/10986111251357498",
         "title": ["Forced Science: A Critical Appraisal"],
         "container-title": ["Police Quarterly"],
@@ -52,7 +52,7 @@ def test_title_search_warns_that_it_is_fuzzy(monkeypatch):
     """A live probe returned 'Forced to Pursue Science: Entity List Triggers'
     as the top hit for 'Forced Science' -- a plausible near-miss is the failure
     mode here, so the warning rides on every non-exact result."""
-    monkeypatch.setattr(cr, "fetch", lambda *a, **k: (json.dumps({"message": {
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (json.dumps({"message": {
         "total-results": 678393,
         "items": [{"DOI": "10.x/y", "title": ["Forced to Pursue Science"]}]}}), None))
     s, L = _kit()
@@ -65,7 +65,7 @@ def test_title_search_warns_that_it_is_fuzzy(monkeypatch):
 def test_unregistered_doi_is_an_absence_not_a_block(monkeypatch):
     """A 404 on a DOI lookup means the DOI is not registered -- a finding."""
     from evidence_search.core.results import AccessBlocker as AB, Blocker
-    monkeypatch.setattr(cr, "fetch", lambda *a, **k: (
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (
         None, AB(query="x", mechanism=Blocker.NOT_FOUND, url="u")))
     s, L = _kit()
     out = cr.by_doi("10.9999/nope", store=s, limiter=L, use_cache=False)
@@ -143,3 +143,49 @@ def test_fedreg_replays_from_cache(monkeypatch):
     out = fr.search("q", store=s, limiter=L)
     assert len(calls) == 1, "second call should have replayed from cache"
     assert out.coverage.cache_hits == 1
+
+
+# --- crossref on the shared shell ---------------------------------------------
+
+def test_crossref_title_absence_declares_itself_weak(monkeypatch):
+    """The module docstring is emphatic that title search is fuzzy. Before the
+    migration a zero came back as bare prose; the claim must carry its own
+    limits, because a differently-worded title would not have been found."""
+    monkeypatch.setattr(core_http, "fetch",
+                        lambda *a, **k: (json.dumps({"message": {"items": []}}), None))
+    s, L = _kit()
+    out = cr.search("no such paper", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, VerifiedAbsence)
+    assert out.probes and out.probes[0].exact_match_supported is False
+    assert not out.is_absolute, "a fuzzy negative must never read as absolute"
+    assert any("fuzzy" in c.lower() for c in out.caveats)
+    assert out.not_searched
+
+
+def test_crossref_parse_failure_is_never_an_absence(monkeypatch):
+    """A payload that stopped parsing is not evidence the DOI is unregistered."""
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: ("<html>nope</html>", None))
+    s, L = _kit()
+    out = cr.by_doi("10.1/x", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, AccessBlocker) and not isinstance(out, VerifiedAbsence)
+
+
+def test_crossref_doi_lookup_is_marked_exact(monkeypatch):
+    """DOI lookup is authoritative, so its absence CAN be absolute."""
+    monkeypatch.setattr(core_http, "fetch",
+                        lambda *a, **k: (json.dumps({"message": {"DOI": "10.1/x",
+                                                     "title": ["T"]}}), None))
+    s, L = _kit()
+    out = cr.by_doi("10.1/x", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, Hit) and out.results[0].meta["exact"] is True
+
+
+def test_crossref_caches_doi_longer_than_title(monkeypatch):
+    """Bibliographic metadata is stable; a fuzzy result set is not."""
+    calls = []
+    monkeypatch.setattr(core_http, "fetch", lambda *a, **k: calls.append(1) or (
+        json.dumps({"message": {"DOI": "10.1/x", "title": ["T"]}}), None))
+    s, L = _kit()
+    cr.by_doi("10.1/x", store=s, limiter=L)
+    cr.by_doi("10.1/x", store=s, limiter=L)
+    assert len(calls) == 1, "second DOI lookup should have replayed from cache"

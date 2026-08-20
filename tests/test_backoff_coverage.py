@@ -32,8 +32,9 @@ BLOCKED = AccessBlocker(query="q", mechanism=Blocker.SERVER_ERROR, detail="boom"
     # core.http.fetch; the others still call fetch bound in their own module.
     (core_http, "federal_register",
      lambda m, s, L: federal_register.search("q", store=s, limiter=L, use_cache=False)),
-    (crossref, "crossref",
-     lambda m, s, L: m.search("q", store=s, limiter=L, use_cache=False)),
+    # crossref is on run_source too now, so its transport is core.http.fetch.
+    (core_http, "crossref",
+     lambda m, s, L: crossref.search("q", store=s, limiter=L, use_cache=False)),
     (searxng, "searxng",
      lambda m, s, L: m.search("q", store=s, limiter=L, base="http://x", use_cache=False)),
 ])

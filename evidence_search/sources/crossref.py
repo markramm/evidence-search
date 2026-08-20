@@ -27,14 +27,12 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from urllib.parse import quote
 
-from ..core.http import fetch
 from ..core.limits import Limiter
-from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
-                            Result, replay_cached, verified_absence)
-from ..core.store import Store, cache_key
+from ..core.results import Blocker, Coverage, Result, verified_absence
+from ..core.source import run_source
+from ..core.store import Store
 
 SOURCE = "crossref"
 API = "https://api.crossref.org"
@@ -86,53 +84,74 @@ def _record(m: dict, exact: bool) -> Result:
               })
 
 
-def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
-           use_cache: bool = True):
-    """Exact lookup. This is the authoritative path."""
-    store = store or Store()
-    limiter = limiter or Limiter(store)
-    doi = doi.strip().removeprefix("https://doi.org/").removeprefix("doi:")
+def _parse_doi(body: str, doi: str, store) -> list[Result]:
+    """One authoritative record. A missing `message` is a shape change.
 
-    key = cache_key(SOURCE, doi, mode="doi")
-    if use_cache:
-        entry = store.get_entry(key)
-        if entry is not None:
-            return replay_cached(doi, entry[0], entry[1], source=SOURCE,
-                                 searched=f"crossref DOI {doi}")
-
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=doi, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    url = f"{API}/works/{quote(doi, safe='')}"
-    body, blocked = fetch(url, source=SOURCE, query=doi, headers={"User-Agent": UA})
-    limiter.note_outcome(SOURCE, blocked)
-    if blocked:
-        # A 404 here means the DOI is not registered -- which IS a finding, and a
-        # different one from being blocked.
-        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
-            return verified_absence(
-                doi, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                f"crossref: DOI {doi} is not registered")
-        blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
-        return blocked
-
+    run_source turns a ValueError here into a blocked outcome, never an
+    absence: a payload that stopped parsing is not evidence the DOI is
+    unregistered. That distinction is the whole point of the 404 handler below.
+    """
     try:
         m = json.loads(body)["message"]
     except (json.JSONDecodeError, KeyError) as e:
-        return AccessBlocker(query=doi, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
-                             mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
+        raise ValueError(f"no `message` in response: {e}") from e
 
-    r = _record(m, exact=True)
     try:
         store.put_record(f"{SOURCE}:{m.get('DOI')}", SOURCE, doi, m)
     except Exception:
         pass
-    if use_cache:
-        store.put(key, SOURCE, [r.__dict__], ttl_s=604800)   # metadata is stable
-    return Hit(query=doi, coverage=Coverage(queried=[SOURCE], responsive=[SOURCE],
-                                            indexes=["n/a"]), results=[r])
+    return [_record(m, exact=True)]
+
+
+def _unregistered_doi(doi: str):
+    """A 404 on a DOI lookup means the DOI is not registered -- a FINDING, and
+    a different one from being blocked. Every other status stays a blocker."""
+    def handler(blocked, body):
+        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
+            return verified_absence(
+                doi, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
+                f"crossref: DOI {doi} is not registered")
+        return None
+    return handler
+
+
+def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
+           use_cache: bool = True):
+    """Exact lookup. This is the authoritative path."""
+    # Resolve the store here rather than letting run_source default it, so the
+    # parser has somewhere to persist full records even when the caller passed
+    # nothing.
+    store = store or Store()
+    doi = doi.strip().removeprefix("https://doi.org/").removeprefix("doi:")
+
+    return run_source(
+        doi, source=SOURCE, url=f"{API}/works/{quote(doi, safe='')}",
+        searched=f"crossref DOI {doi}",
+        parse=lambda b: _parse_doi(b, doi, store),
+        store=store, limiter=limiter, use_cache=use_cache,
+        on_blocked=_unregistered_doi(doi),
+        headers={"User-Agent": UA},
+        ttl_s=604800,                      # bibliographic metadata is stable
+        exact_match_supported=True,
+        corpus="Crossref DOI registry: the authoritative bibliographic record.",
+        cache_params={"mode": "doi"},
+    )
+
+
+def _parse_title(body: str, query: str, store) -> list[Result]:
+    try:
+        msg = json.loads(body)["message"]
+    except (json.JSONDecodeError, KeyError) as e:
+        raise ValueError(f"no `message` in response: {e}") from e
+
+    items = msg.get("items") or []
+    out = [_record(m, exact=False) for m in items]
+    for m in items:
+        try:
+            store.put_record(f"{SOURCE}:{m.get('DOI')}", SOURCE, query, m)
+        except Exception:
+            pass
+    return out
 
 
 def search(query: str, rows: int = 10, store: Store | None = None,
@@ -140,48 +159,26 @@ def search(query: str, rows: int = 10, store: Store | None = None,
     """Title search. DISCOVERY ONLY -- see the module docstring on why the
     totals are not measurements."""
     store = store or Store()
-    limiter = limiter or Limiter(store)
     if looks_like_doi(query):
         return by_doi(query, store, limiter, use_cache)
 
-    key = cache_key(SOURCE, query, mode="title", rows=rows)
-    if use_cache:
-        entry = store.get_entry(key)
-        if entry is not None:
-            return replay_cached(query, entry[0], entry[1], source=SOURCE,
-                                 searched="crossref title search (FUZZY)")
-
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    t0 = time.time()
-    url = f"{API}/works?query.title={quote(query)}&rows={rows}"
-    body, blocked = fetch(url, source=SOURCE, query=query, headers={"User-Agent": UA})
-    limiter.note_outcome(SOURCE, blocked)
-    if blocked:
-        blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
-        return blocked
-
-    try:
-        msg = json.loads(body)["message"]
-    except (json.JSONDecodeError, KeyError) as e:
-        return AccessBlocker(query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
-                             mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
-
-    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"],
-                   elapsed_ms=int((time.time() - t0) * 1000))
-    items = msg.get("items") or []
-    if not items:
-        return verified_absence(query, cov, "crossref title search")
-
-    out = [_record(m, exact=False) for m in items]
-    for m, r in zip(items, out):
-        try:
-            store.put_record(f"{SOURCE}:{m.get('DOI')}", SOURCE, query, m)
-        except Exception:
-            pass
-    if use_cache:
-        store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=86400)
-    return Hit(query=query, coverage=cov, results=out)
+    return run_source(
+        query, source=SOURCE,
+        url=f"{API}/works?query.title={quote(query)}&rows={rows}",
+        searched="crossref title search (FUZZY)",
+        parse=lambda b: _parse_title(b, query, store),
+        store=store, limiter=limiter, use_cache=use_cache,
+        headers={"User-Agent": UA},
+        # Crossref matches loosely across ~150M records by design, so a zero
+        # here is a weak negative and must say so rather than reading like a
+        # corpus-backed absence.
+        exact_match_supported=False,
+        corpus=("Crossref works index (~150M records), matched LOOSELY on "
+                "title. Totals are not measurements."),
+        caveats=["FUZZY title search: Crossref matches loosely across ~150M "
+                 "records. This negative is weak -- a differently-worded title "
+                 "would not be found. Prefer a DOI lookup where one exists."],
+        not_searched=["works with no Crossref DOI registered",
+                      "full text -- Crossref indexes metadata only"],
+        cache_params={"mode": "title", "rows": rows},
+    )
