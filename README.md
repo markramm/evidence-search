@@ -513,7 +513,7 @@ rather than behaviour you can currently observe.
 ## Status
 
 Phase 1, and honestly labelled: this is a tool built for one reporter's beat,
-in the open, with its warts logged in `FEEDBACK.md`. **184 tests passing** on
+in the open, with its warts logged in `FEEDBACK.md`. **193 tests passing** on
 Python 3.10-3.13. Browser escalation, the humanomation gate (open/list/resume),
 and local extraction are built and working.
 
