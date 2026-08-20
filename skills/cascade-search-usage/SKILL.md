@@ -37,12 +37,19 @@ The guarantee is enforced in code: if any engine was rate-limited or errored,
 a verified absence **cannot** be constructed — it downgrades to `RateLimited`.
 So `VerifiedAbsence` is the one negative you may report as a finding.
 
+**Outcome exit codes are 10+; every failure code is below it.** Exit 1 means the
+tool broke — never that the world is empty.
+
 ```bash
-if $CS oscn --county tulsa --lname Smith --year 2013 >/dev/null; then
-  echo "found"
-elif [ $? -eq 1 ]; then
-  echo "verified absence — publishable"
-fi
+$CS oscn --county tulsa --lname Smith --year 2013 >/dev/null
+case $? in
+  10) echo "found" ;;
+  11) echo "verified absence — publishable as scoped" ;;
+  12) echo "BLOCKED — record the mechanism, claim nothing" ;;
+  13) echo "rate-limited — retry; NOT content-exhausted" ;;
+  14) echo "human gate queued" ;;
+   *) echo "tool failure — say nothing about the world" ;;
+esac
 ```
 
 ## Commands

@@ -4,7 +4,7 @@ Every case here is a mistake a real worker made, or nearly made, in the field
 log. The mechanism was right in each one; the RENDERING was what misled. These
 are rendering tests because that is where the errors actually lived.
 """
-from cascade_search.cli import _emit, main
+from cascade_search.cli import _emit, main, EXIT_ACCESS_BLOCKER
 from cascade_search.core.results import (AccessBlocker, Blocker, Coverage, Hit,
                                          Result)
 
@@ -144,7 +144,7 @@ def test_escalation_hint_survives_for_browser_passable_gates(capsys):
 
 def test_404_still_exits_blocked_not_absent():
     """Register changed; the contract did not. A 404 is never exit 1."""
-    assert _emit(_blocked(Blocker.NOT_FOUND), as_json=True) == 2
+    assert _emit(_blocked(Blocker.NOT_FOUND), as_json=True) == EXIT_ACCESS_BLOCKER
 
 
 def test_is_wall_separates_the_two_classes():

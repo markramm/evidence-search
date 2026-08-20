@@ -221,12 +221,12 @@ def test_unreadable_pdf_is_a_blocker_not_binary_noise(tmp_path, capsys):
 
     A PDF with no text layer and OCR disabled is now a named blocker.
     """
-    from cascade_search.cli import main
+    from cascade_search.cli import main, EXIT_ACCESS_BLOCKER
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(b"%PDF-1.7\n" + b"\x00\x01\x02binary noise" * 500)
     code = main(["extract", str(pdf), "--text", "--no-ocr"])
     out = capsys.readouterr().out
-    assert code == 2, "an unreadable PDF must be a blocker, not silently mangled"
+    assert code == EXIT_ACCESS_BLOCKER, "an unreadable PDF must be a blocker, not silently mangled"
     # Assert the INVARIANT, not one blocker's wording. Which blocker fires is
     # environment-dependent -- with poppler present it is "no text layer", and
     # without it "pdftotext not found". Both are correct refusals; pinning the

@@ -15,11 +15,50 @@ from .core.store import Store
 from .core.limits import Limiter
 
 
+# Exit codes.
+#
+# Outcomes live at 10+ and NOTHING ELSE DOES. This is deliberate and was a bug
+# fix, not a preference: VerifiedAbsence used to be exit 1, which is also what
+# Python returns on any uncaught exception, what argparse returns on a bad flag,
+# and the universal shell convention for "something went wrong." The README's
+# own example branched on `$? -eq 1` and labelled that branch "publishable" --
+# so a crash inside a fetch loop would have read to a shell caller as a
+# certified negative finding. The single claim this tool exists to make is the
+# one the old mapping was most likely to fake.
+#
+# Errors keep the conventional low codes so they behave like every other program:
+#   1  generic failure / uncaught exception (Python's default; we never return it
+#      deliberately, which is the point -- if you see 1, something broke)
+#   2  usage error (argparse's default; bad flags, missing required args)
+#   3  no local data (a `record`/`gate` listing with nothing stored -- an empty
+#      shelf in OUR store, never a claim about the world)
+EXIT_USAGE = 2
+EXIT_NO_LOCAL_DATA = 3
+EXIT_INTERNAL_ERROR = 70  # sysexits.h EX_SOFTWARE
+
+EXIT_HIT = 10
+EXIT_VERIFIED_ABSENCE = 11
+EXIT_ACCESS_BLOCKER = 12
+EXIT_RATE_LIMITED = 13
+EXIT_AWAITING_HUMAN = 14
+
+EXIT_BY_OUTCOME = {
+    Hit: EXIT_HIT,
+    VerifiedAbsence: EXIT_VERIFIED_ABSENCE,
+    AccessBlocker: EXIT_ACCESS_BLOCKER,
+    RateLimited: EXIT_RATE_LIMITED,
+    AwaitingHuman: EXIT_AWAITING_HUMAN,
+}
+
+
 def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
     """Print, and return an exit code that encodes the OUTCOME TYPE.
 
     Exit codes let a shell caller branch without parsing:
-      0 hits | 1 verified absence | 2 blocked | 3 rate-limited | 4 awaiting human
+      10 hit | 11 verified absence | 12 blocked | 13 rate-limited | 14 awaiting human
+
+    Anything below 10 means the tool failed, not that the world is empty. See
+    the EXIT_* block above for why absence is not 1.
 
     `limit` trims the DISPLAY only. Sources that page upstream (usaspending,
     crossref, fedreg) apply their own limit at the API; the rest return what one
@@ -125,8 +164,7 @@ def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
             print(f"url:   {outcome.url}")
             print(f"token: {outcome.resume_token}")
             print(f"\n{outcome.instructions}")
-    return {Hit: 0, VerifiedAbsence: 1, AccessBlocker: 2,
-            RateLimited: 3, AwaitingHuman: 4}.get(type(outcome), 5)
+    return EXIT_BY_OUTCOME.get(type(outcome), EXIT_INTERNAL_ERROR)
 
 
 def main(argv=None) -> int:
@@ -298,7 +336,7 @@ def main(argv=None) -> int:
         if a.case:
             return _emit(oscn.case(a.county, a.case, store, limiter), a.json)
         if not a.county:
-            print("--county is required (or use --list-counties)", file=sys.stderr); return 2
+            print("--county is required (or use --list-counties)", file=sys.stderr); return EXIT_USAGE
         return _emit(oscn.search(a.county, a.lname or "", a.fname or "",
                                  a.year, store, limiter, use_cache), a.json)
 
@@ -324,7 +362,7 @@ def main(argv=None) -> int:
         if not a.query and not a.detail:
             print("usaspending needs a recipient name (or --detail <award-id>)",
                   file=sys.stderr)
-            return 2
+            return EXIT_USAGE
         if a.detail:
             # The positional query is meaningless here -- detail is keyed on the
             # award id. Silently ignoring it meant a worker who mistyped a vendor
@@ -407,10 +445,11 @@ def main(argv=None) -> int:
                 print(f"    {p.get('url','')}")
                 if p.get("capture"):
                     print(f"    capture: {', '.join(p['capture'])}")
-            return 4
+            # Open gates ARE awaiting human action -- same outcome, same code.
+            return EXIT_AWAITING_HUMAN
         res, err = gates.resume(store, a.token, a.file or [])
         if err:
-            print(f"ERROR: {err}"); return 5
+            print(f"ERROR: {err}"); return EXIT_INTERNAL_ERROR
         return _emit(res, a.json)
 
     if a.cmd == "extract":
@@ -595,7 +634,7 @@ def main(argv=None) -> int:
             if a.json:
                 print(json.dumps(rows, indent=2, default=str)); return 0
             if not rows:
-                print("No stored records. They are written as searches run."); return 1
+                print("No stored records. They are written as searches run."); return EXIT_NO_LOCAL_DATA
             print(f"{len(rows)} record(s):\n")
             for r in rows:
                 print(f"  {r['record_id']:44} {r['source']:16} {r['query'][:40]}")
@@ -605,7 +644,7 @@ def main(argv=None) -> int:
         if not rec:
             print(f"No record {a.record_id!r}. List with: cascade-search record --list",
                   file=sys.stderr)
-            return 1
+            return EXIT_NO_LOCAL_DATA
         payload = rec["payload"]
         if a.fields:
             want = [f.strip() for f in a.fields.split(",") if f.strip()]
@@ -638,8 +677,30 @@ def main(argv=None) -> int:
                 if r["note"]:
                     print(f"  note:      {r['note']}")
         return 0
-    return 5
+    # Unreachable in practice -- argparse rejects unknown commands first.
+    return EXIT_USAGE
+
+
+def cli() -> int:
+    """Console entry point.
+
+    Wraps main() so an uncaught exception exits EX_SOFTWARE (70) rather than
+    Python's default 1. Nothing in the outcome range can be produced by a crash:
+    outcomes are 10+, and 70 is not one of them. A caller branching on
+    "is this a finding?" cannot be handed a traceback that looks like one.
+    """
+    try:
+        return main()
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        return 130  # conventional: 128 + SIGINT
+    except Exception as exc:  # noqa: BLE001 -- deliberate top-level guard
+        print(f"cascade-search: internal error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        print("This is a TOOL FAILURE, not a finding about the world.",
+              file=sys.stderr)
+        return EXIT_INTERNAL_ERROR
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli())

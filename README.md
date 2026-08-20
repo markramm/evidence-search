@@ -60,14 +60,36 @@ cascade-search limits                                        # policy + live usa
 cascade-search --json news 'query' | jq '.results[].url'
 ```
 
-Exit codes encode the outcome, so shell callers branch without parsing:
+Exit codes encode the outcome, so shell callers branch without parsing.
+
+**Outcomes are 10 and above. Nothing else is.** That separation is the whole
+point: exit 1 is what Python returns on an uncaught exception, what argparse
+returns on a bad flag, and what the shell means by "it failed." If a negative
+finding shared that code, a crash in a fetch loop would read as a certified
+absence. It used to. It doesn't now.
+
+| Code | Meaning |
+|---|---|
+| `10` | `Hit` |
+| `11` | `VerifiedAbsence` — publishable as scoped |
+| `12` | `AccessBlocker` — **not** a negative finding |
+| `13` | `RateLimited` — retry; not content-exhausted |
+| `14` | `AwaitingHuman` — a gate was queued |
+| `1` | uncaught exception. We never return it deliberately. |
+| `2` | usage error |
+| `3` | no local data — an empty shelf in *our* store, never a claim about the world |
+| `70` | internal error (`EX_SOFTWARE`) |
 
 ```bash
-if cascade-search oscn --county caddo --lname Smith --year 2013 >/dev/null; then
-  echo "found"
-elif [ $? -eq 1 ]; then
-  echo "verified absence — publishable"
-fi
+cascade-search oscn --county caddo --lname Smith --year 2013 >/dev/null
+case $? in
+  10) echo "found" ;;
+  11) echo "verified absence — publishable as scoped" ;;
+  12) echo "BLOCKED — not a finding; record the mechanism" ;;
+  13) echo "rate-limited — retry, do not write this up as absence" ;;
+  14) echo "human gate queued" ;;
+   *) echo "tool failure — say nothing about the world" ;;
+esac
 ```
 
 ## Sources
