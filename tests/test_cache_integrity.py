@@ -82,3 +82,34 @@ def test_put_honours_a_non_cacheable_policy(monkeypatch):
 
     s.put("k2", "oscn", [{"url": "https://example.gov/a"}])
     assert s.get("k2") is not None, "a cacheable source must still be cached"
+
+
+def test_put_reports_whether_it_wrote(monkeypatch):
+    """A silent no-op would read as a TTL or key bug rather than as policy."""
+    import pathlib, tempfile
+    from dataclasses import replace
+    import cascade_search.core.limits as limits_mod
+    from cascade_search.core.store import Store
+
+    s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
+    monkeypatch.setitem(limits_mod.POLICIES, "nostore",
+                        replace(limits_mod.DEFAULT_POLICY, cacheable=False))
+    assert s.put("k", "nostore", [{"url": "https://ex.gov/a"}]) is False
+    assert s.put("k2", "oscn", [{"url": "https://ex.gov/a"}]) is True
+
+
+def test_cacheable_does_not_disable_metadata_caching(monkeypatch):
+    """cacheable is about storing RESULTS. SearXNG caches its /config engine
+    roster under the same source name; disabling that would force a /config
+    fetch per search and degrade coverage arithmetic when it fails."""
+    import pathlib, tempfile
+    from dataclasses import replace
+    import cascade_search.core.limits as limits_mod
+    from cascade_search.core.store import Store
+
+    s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
+    monkeypatch.setitem(limits_mod.POLICIES, "searxng",
+                        replace(limits_mod.DEFAULT_POLICY, cacheable=False))
+    assert s.put("roster", "searxng", ["searxng:google"], is_metadata=True) is True
+    assert s.get("roster") == ["searxng:google"]
+    assert s.put("results", "searxng", [{"url": "https://ex.gov/a"}]) is False

@@ -119,7 +119,9 @@ def _enabled_engines(base: str, store: Store) -> list[str]:
     except json.JSONDecodeError:
         return []
     names = sorted(f"searxng:{e['name']}" for e in cfg.get("engines", []) if e.get("enabled", True))
-    store.put(key, SOURCE, names, ttl_s=_CONFIG_TTL)
+    # The engine roster is bookkeeping, not results: a metered policy must not
+    # cost us a /config fetch on every single search.
+    store.put(key, SOURCE, names, ttl_s=_CONFIG_TTL, is_metadata=True)
     return names
 
 
@@ -265,25 +267,35 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     by_url: dict[str, Result] = {}
     for r in data.get("results", []):
         engines = sorted(r.get("engines") or ([r["engine"]] if r.get("engine") else []))
+        # `positions` is a list of ranks and `engines` a set of names; they are
+        # parallel only by convention, so pair them positionally and only when
+        # the lengths agree. Guessing would invent provenance. Note both empty
+        # satisfies `0 == 0`, so read positions through .get() -- indexing it
+        # raised KeyError on results carrying neither field.
+        positions = r.get("positions") or []
+        ranks = dict(zip(engines, positions)) if len(positions) == len(engines) else {}
+
         # NOT `key` -- that name holds the cache key this function writes under.
         norm = normalize_url(r.get("url", ""))
         if (prior := by_url.get(norm)) is not None:
             prior.engines = sorted(set(prior.engines) | set(engines))
-            for eng, rank in (dict(zip(engines, r["positions"]))
-                              if len(r.get("positions") or []) == len(engines) else {}).items():
-                prior.rank_by_engine.setdefault(eng, rank)
+            for eng, rank in ranks.items():
+                # Keep the BEST rank. setdefault kept whichever copy arrived
+                # first, so a tracking-param duplicate at position 9 could mask
+                # the same engine surfacing the page at position 1.
+                cur = prior.rank_by_engine.get(eng)
+                prior.rank_by_engine[eng] = rank if cur is None else min(cur, rank)
             if not prior.snippet:
                 prior.snippet = (r.get("content") or "")[:400]
+            # The fold is provenance: record that this Result stands for more
+            # than one upstream row, since meta/score keep only the first copy.
+            prior.meta["folded_from"] = prior.meta.get("folded_from", 1) + 1
             continue
         item = Result(
             url=r.get("url", ""), title=r.get("title", ""),
             snippet=(r.get("content") or "")[:400],
             source=SOURCE, engines=engines, index_origin=["mixed"],
-            # `positions` is a list of ranks and `engines` a set of names; they
-            # are parallel only by convention, so pair them positionally and
-            # only when the lengths agree. Guessing would invent provenance.
-            rank_by_engine=(dict(zip(engines, r["positions"]))
-                            if len(r.get("positions") or []) == len(engines) else {}),
+            rank_by_engine=ranks,
             meta={"published": r.get("publishedDate"), "category": r.get("category"),
                   "searxng_score": r.get("score"), "engine": r.get("engine")},
         )

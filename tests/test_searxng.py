@@ -295,3 +295,49 @@ def test_dedup_does_not_clobber_the_cache_key(monkeypatch):
     searxng.search("q", store=s, limiter=L, base="http://x", use_cache=True)
     expected = cache_key("searxng", "q", categories="general", pageno=1, base="http://x")
     assert s.get(expected) is not None, "clean sweep was not cached under its cache key"
+
+
+def test_fold_keeps_the_best_rank_not_the_first_seen(monkeypatch):
+    """setdefault kept whichever duplicate arrived first, so a tracking-param
+    copy at position 9 masked the same engine surfacing the page at 1."""
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://ex.gov/r?utm_source=a", "title": "R",
+         "engines": ["google"], "positions": [9]},
+        {"url": "https://ex.gov/r", "title": "R",
+         "engines": ["google"], "positions": [1]},
+    ]))
+    r = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False).results[0]
+    assert r.rank_by_engine == {"google": 1}
+
+
+def test_duplicates_without_engine_metadata_do_not_crash(monkeypatch):
+    """`len(positions) == len(engines)` is satisfied when BOTH are empty, and
+    indexing r["positions"] then raised KeyError on the merge path."""
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://ex.gov/z"}, {"url": "https://ex.gov/z/"},
+    ]))
+    out = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False)
+    assert isinstance(out, Hit) and len(out.results) == 1
+
+
+def test_fold_records_that_it_folded(monkeypatch):
+    """meta/score are kept from the first copy only, so the Result must at
+    least say it stands for more than one upstream row."""
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://ex.gov/r?utm_source=a", "title": "R",
+         "engines": ["google"], "searxng_score": 0.1},
+        {"url": "https://ex.gov/r", "title": "R",
+         "engines": ["bing"], "searxng_score": 9.9},
+    ]))
+    r = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False).results[0]
+    assert r.meta["folded_from"] == 2
+
+
+def test_unfolded_results_are_not_marked_as_folded(monkeypatch):
+    s, L = _kit()
+    _reply(monkeypatch, _clean([{"url": "https://ex.gov/a", "engines": ["google"]}]))
+    r = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False).results[0]
+    assert "folded_from" not in r.meta

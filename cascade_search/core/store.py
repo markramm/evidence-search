@@ -194,19 +194,30 @@ class Store:
             return None
         return json.loads(payload), fetched_at
 
-    def put(self, key: str, source: str, payload, ttl_s: int | None = 86400) -> None:
+    def put(self, key: str, source: str, payload, ttl_s: int | None = 86400,
+            is_metadata: bool = False) -> bool:
         """Store a response, unless the source's policy forbids it.
+
+        Returns True if written, False if policy refused. Callers that care
+        whether the cache is warm must check: a silent no-op would present an
+        all-miss cache as a TTL or key bug rather than as policy.
 
         Spec §5: payloads from engines whose terms forbid storage must not be
         cached -- we record the call, never the results. That was documented
         here but enforced nowhere, so a future cacheable=False source would
         have been silently cached. No policy sets it today; the check exists so
         that adding one is sufficient.
+
+        `is_metadata` exempts writes that are not results. A source's key is
+        also used for its own bookkeeping (SearXNG caches its /config engine
+        roster under SOURCE), and cacheable is about storing RESULTS -- letting
+        it disable the roster cache would force a /config fetch per search and
+        degrade coverage arithmetic when that fetch fails.
         """
         from .limits import POLICIES
         pol = POLICIES.get(source)
-        if pol is not None and not pol.cacheable:
-            return
+        if not is_metadata and pol is not None and not pol.cacheable:
+            return False
         if looks_degenerate(payload):
             raise CachePoisoned(
                 f"refusing to cache {len(payload)} {source} rows that collapse to a "
@@ -215,6 +226,7 @@ class Store:
         self.conn.execute(
             "INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",
             (key, source, json.dumps(payload), now, now + ttl_s if ttl_s else None))
+        return True
 
     # ---- failure backoff --------------------------------------------------
     def record_failure(self, source: str, reason: str = "") -> int:

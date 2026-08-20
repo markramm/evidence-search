@@ -194,3 +194,25 @@ def test_resume_still_accepts_the_local_page():
         assert "no longer open" in _json.loads(raw)["message"]
     finally:
         srv.close()
+
+
+def test_host_check_accepts_loopback_spellings():
+    """Host is case-insensitive (RFC 7230) and a portless IPv6 literal is
+    bracketed. rsplit-then-strip turned "[::1]" into ":" and refused it."""
+    srv = _serve()
+    try:
+        for host in (f"127.0.0.1:{srv.port}", "localhost", "LOCALHOST",
+                     f"LocalHost:{srv.port}", "[::1]", f"[::1]:{srv.port}"):
+            assert srv.raw_post(host) != 403, f"refused a local request from {host!r}"
+    finally:
+        srv.close()
+
+
+def test_host_check_still_refuses_foreign_names():
+    srv = _serve()
+    try:
+        for host in ("evil.example.com", "attacker.test:8787",
+                     "127.0.0.1.evil.com", "notlocalhost"):
+            assert srv.raw_post(host) == 403, f"accepted a foreign host {host!r}"
+    finally:
+        srv.close()

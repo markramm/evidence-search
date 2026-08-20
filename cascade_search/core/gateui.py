@@ -25,6 +25,10 @@ from .store import Store
 
 HOST, PORT = "127.0.0.1", 8787
 
+#: Hostnames that mean "this machine". urlparse().hostname lowercases, so these
+#: are compared against an already-normalised value.
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
 
 # --- gate normalisation -------------------------------------------------------
 # open_gate() and browser.fetch() write different payload shapes: one carries
@@ -163,16 +167,20 @@ def _handler(db_path=None):
             CORS *simple* request and gets no preflight; requiring JSON puts the
             preflight back. Origin: belt and braces where the browser sends it.
             """
-            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
-            if host not in ("127.0.0.1", "localhost", "::1"):
+            # Parse via urlparse so a bracketed IPv6 literal is handled the same
+            # way the Origin check below handles it -- rsplit-then-strip turned
+            # a portless "[::1]" into ":" and refused a legitimate local
+            # request. hostname also lowercases, and Host is case-insensitive
+            # per RFC 7230, so "LocalHost:8787" is the operator's own page.
+            host = urlparse(f"//{self.headers.get('Host') or ''}").hostname or ""
+            if host not in _LOOPBACK:
                 return False
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if ctype != "application/json":
                 return False
             origin = self.headers.get("Origin")
             if origin:
-                oh = (urlparse(origin).hostname or "")
-                if oh not in ("127.0.0.1", "localhost", "::1"):
+                if (urlparse(origin).hostname or "") not in _LOOPBACK:
                     return False
             return True
 
