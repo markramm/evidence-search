@@ -195,12 +195,18 @@ class Store:
         return json.loads(payload), fetched_at
 
     def put(self, key: str, source: str, payload, ttl_s: int | None = 86400) -> None:
-        """Store a response.
+        """Store a response, unless the source's policy forbids it.
 
-        NOTE (spec §5): callers MUST NOT cache payloads from engines whose terms
-        forbid storage -- Brave's standard plans explicitly do. Those engines set
-        cacheable=False and we record only the call, never the results.
+        Spec §5: payloads from engines whose terms forbid storage must not be
+        cached -- we record the call, never the results. That was documented
+        here but enforced nowhere, so a future cacheable=False source would
+        have been silently cached. No policy sets it today; the check exists so
+        that adding one is sufficient.
         """
+        from .limits import POLICIES
+        pol = POLICIES.get(source)
+        if pol is not None and not pol.cacheable:
+            return
         if looks_degenerate(payload):
             raise CachePoisoned(
                 f"refusing to cache {len(payload)} {source} rows that collapse to a "

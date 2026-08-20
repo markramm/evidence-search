@@ -504,13 +504,16 @@ trailing slashes.
 in output. On this beat, the result only one index found is often the valuable
 one — obscure trade press, an agency subpage, an old docket.
 
-**`cacheable=False` where terms forbid storing results.** Brave's standard plans
-do not grant storage rights; that is a policy field, not a footnote.
+**`cacheable=False` where terms forbid storing results.** `Store.put()` refuses
+to write a payload from a source whose policy clears the flag — we record the
+call, never the results. No source in `POLICIES` sets it today (the Brave plans
+that motivated it are gone), so this is enforcement waiting on a metered source
+rather than behaviour you can currently observe.
 
 ## Status
 
 Phase 1, and honestly labelled: this is a tool built for one reporter's beat,
-in the open, with its warts logged in `FEEDBACK.md`. **156 tests passing** on
+in the open, with its warts logged in `FEEDBACK.md`. **171 tests passing** on
 Python 3.10-3.13. Browser escalation, the humanomation gate (open/list/resume),
 and local extraction are built and working.
 

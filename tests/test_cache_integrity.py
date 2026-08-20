@@ -63,3 +63,22 @@ def test_absence_from_cache_reports_cache_age(monkeypatch):
     assert out.coverage.cache_hits == 1
     assert out.coverage.cache_age_s is not None, "replayed absence must be dated"
     assert "cache" in out.searched.lower()
+
+
+def test_put_honours_a_non_cacheable_policy(monkeypatch):
+    """`cacheable` was a documented policy enforced nowhere. No source sets it
+    False today, so this pins the enforcement rather than a current source."""
+    import pathlib, tempfile
+    from dataclasses import replace
+    import cascade_search.core.limits as limits_mod
+    from cascade_search.core.store import Store
+
+    s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
+    pol = replace(limits_mod.DEFAULT_POLICY, cacheable=False)
+    monkeypatch.setitem(limits_mod.POLICIES, "nostore", pol)
+
+    s.put("k1", "nostore", [{"url": "https://example.gov/a"}])
+    assert s.get("k1") is None, "cached a payload from a source that forbids storage"
+
+    s.put("k2", "oscn", [{"url": "https://example.gov/a"}])
+    assert s.get("k2") is not None, "a cacheable source must still be cached"

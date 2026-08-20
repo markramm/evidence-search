@@ -236,3 +236,62 @@ def test_no_local_exact_filtering():
     src = inspect.getsource(m.search)
     for banned in ("_exact_terms(", "exact_filtered", "if exact:"):
         assert banned not in src, f"local exact-filtering reintroduced via {banned}"
+
+
+# --- dedup on normalized url --------------------------------------------------
+
+def _clean(results):
+    return {"results": results, "unresponsive_engines": []}
+
+
+def test_same_page_under_tracking_params_folds_to_one(monkeypatch):
+    """SearXNG hashes results with no url normalization, so one page recurs
+    under utm_* and reads as independent corroboration."""
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://www.example.gov/report?utm_source=news", "title": "Report",
+         "content": "first", "engines": ["google"], "positions": [1]},
+        {"url": "https://example.gov/report/", "title": "Report",
+         "content": "second", "engines": ["bing"], "positions": [3]},
+    ]))
+    out = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False)
+    assert isinstance(out, Hit)
+    assert len(out.results) == 1, "the same page was counted twice"
+
+
+def test_dedup_merges_provenance_rather_than_dropping_it(monkeypatch):
+    """The engine list is evidence -- unique_to_engine is computed from it -- so
+    folding must union the engines, not keep whichever copy arrived first."""
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://www.example.gov/report?utm_source=x", "title": "Report",
+         "content": "first", "engines": ["google"], "positions": [1]},
+        {"url": "https://example.gov/report", "title": "Report",
+         "content": "second", "engines": ["bing"], "positions": [3]},
+    ]))
+    r = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False).results[0]
+    assert r.engines == ["bing", "google"]
+    assert not r.unique_to_engine, "a two-engine find must not read as single-engine"
+    assert r.rank_by_engine == {"google": 1, "bing": 3}
+
+
+def test_distinct_pages_are_not_folded(monkeypatch):
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": "https://example.gov/a", "title": "A", "engines": ["google"]},
+        {"url": "https://example.gov/b", "title": "B", "engines": ["google"]},
+    ]))
+    assert len(searxng.search("q", store=s, limiter=L, base="http://x",
+                              use_cache=False).results) == 2
+
+
+def test_dedup_does_not_clobber_the_cache_key(monkeypatch):
+    """Regression: the fold key was briefly named `key`, shadowing the cache key
+    this function writes under -- so a clean sweep cached itself under the last
+    result's URL and was never replayable."""
+    s, L = _kit()
+    payload = _clean([{"url": "https://example.gov/a", "title": "A", "engines": ["google"]}])
+    _reply(monkeypatch, payload)
+    searxng.search("q", store=s, limiter=L, base="http://x", use_cache=True)
+    expected = cache_key("searxng", "q", categories="general", pageno=1, base="http://x")
+    assert s.get(expected) is not None, "clean sweep was not cached under its cache key"

@@ -45,7 +45,7 @@ from ..core.http import fetch
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
                             Result, replay_cached, verified_absence)
-from ..core.store import Store, cache_key
+from ..core.store import Store, cache_key, normalize_url
 
 SOURCE = "searxng"
 DEFAULT_BASE = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
@@ -256,10 +256,26 @@ def search(query: str, categories: str = "general", pageno: int = 1,
               f"{', '.join(unclassified)} -- treated as errors, coverage dirty. "
               f"Is the instance ignoring `locale=en`?", file=sys.stderr)
 
+    # SearXNG hashes results with NO url normalization (its own docs say so), so
+    # the same page recurs under tracking params and reads as independent
+    # corroboration when it is one page counted twice. Fold on the normalized
+    # url and MERGE provenance rather than dropping the later copy: the engine
+    # list is evidence, and unique_to_engine is computed from it.
     out = []
+    by_url: dict[str, Result] = {}
     for r in data.get("results", []):
         engines = sorted(r.get("engines") or ([r["engine"]] if r.get("engine") else []))
-        out.append(Result(
+        # NOT `key` -- that name holds the cache key this function writes under.
+        norm = normalize_url(r.get("url", ""))
+        if (prior := by_url.get(norm)) is not None:
+            prior.engines = sorted(set(prior.engines) | set(engines))
+            for eng, rank in (dict(zip(engines, r["positions"]))
+                              if len(r.get("positions") or []) == len(engines) else {}).items():
+                prior.rank_by_engine.setdefault(eng, rank)
+            if not prior.snippet:
+                prior.snippet = (r.get("content") or "")[:400]
+            continue
+        item = Result(
             url=r.get("url", ""), title=r.get("title", ""),
             snippet=(r.get("content") or "")[:400],
             source=SOURCE, engines=engines, index_origin=["mixed"],
@@ -270,7 +286,9 @@ def search(query: str, categories: str = "general", pageno: int = 1,
                             if len(r.get("positions") or []) == len(engines) else {}),
             meta={"published": r.get("publishedDate"), "category": r.get("category"),
                   "searxng_score": r.get("score"), "engine": r.get("engine")},
-        ))
+        )
+        by_url[norm] = item
+        out.append(item)
 
     if use_cache and cov.is_clean:
         # Only cache a CLEAN sweep. Caching a partial one would replay a
