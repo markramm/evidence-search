@@ -14,11 +14,11 @@ import tempfile
 
 import pytest
 
-from cascade_search.core.limits import Limiter
-from cascade_search.core.results import (AccessBlocker, Hit, RateLimited,
+from evidence_search.core.limits import Limiter
+from evidence_search.core.results import (AccessBlocker, Hit, RateLimited,
                                          VerifiedAbsence)
-from cascade_search.core.store import Store, cache_key
-from cascade_search.engines import searxng
+from evidence_search.core.store import Store, cache_key
+from evidence_search.engines import searxng
 
 
 def _kit():
@@ -38,7 +38,7 @@ def test_engine_names_are_namespaced():
     """SearXNG's upstream engines share names with nothing in our ledger -- but a
     live worker could not tell them apart.
 
-    It saw `RATE-LIMITED: brave`, ran `cascade-search limits`, saw brave at 0/20,
+    It saw `RATE-LIMITED: brave`, ran `evidence-search limits`, saw brave at 0/20,
     and reasonably concluded the tool was contradicting itself. Our limiter
     governs calls WE make; this reports what Brave did to SearXNG. The prefix is
     the only thing that distinguishes the two namespaces.
@@ -228,7 +228,7 @@ def test_no_local_exact_filtering():
     Local filtering is not a substitute for upstream query semantics, and on a
     counting task it actively manufactures a wrong figure.
     """
-    from cascade_search.engines import searxng as m
+    from evidence_search.engines import searxng as m
     assert m.EXACT_PHRASE_SUPPORTED is False
     # Guard the BEHAVIOUR, not the source text: a string check tripped on the
     # legitimate `exact_match_supported` provenance field once that was added.

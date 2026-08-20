@@ -55,7 +55,7 @@ def _parse(body: str) -> list[Result]:
                   "url_note": ("Google News redirect, not the publisher's URL. "
                                "It 400s to automated clients. Find the piece on "
                                f"{src.text if src is not None else 'the publisher'}'s "
-                               "own site, or via `cascade-search web`, before citing.")},
+                               "own site, or via `evidence-search web`, before citing.")},
         ))
     return out
 

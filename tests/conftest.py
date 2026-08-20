@@ -18,7 +18,7 @@ from dataclasses import replace
 
 import pytest
 
-import cascade_search.core.limits as limits_mod
+import evidence_search.core.limits as limits_mod
 
 
 def pytest_configure(config):
@@ -30,8 +30,8 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path, monkeypatch, request):
-    import cascade_search.core.archive as archive_mod
-    import cascade_search.core.store as store_mod
+    import evidence_search.core.archive as archive_mod
+    import evidence_search.core.store as store_mod
 
     monkeypatch.setattr(store_mod, "DEFAULT_DB", tmp_path / "store.db")
     monkeypatch.setattr(archive_mod, "DEFAULT_ARCHIVE", tmp_path / "archive")

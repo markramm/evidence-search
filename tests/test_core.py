@@ -4,11 +4,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from cascade_search.core.results import (
+from evidence_search.core.results import (
     Coverage, Blocker, AccessBlocker, RateLimited, VerifiedAbsence, verified_absence, Result)
-from cascade_search.core.store import Store, normalize_url, cache_key
-from cascade_search.core.limits import Limiter
-from cascade_search.core.http import detect_blocker
+from evidence_search.core.store import Store, normalize_url, cache_key
+from evidence_search.core.limits import Limiter
+from evidence_search.core.http import detect_blocker
 
 
 def tmpstore():
@@ -170,7 +170,7 @@ def test_cache_roundtrip():
 
 def test_propublica_deref():
     """SvelteKit index-referenced payloads must resolve to plain data."""
-    from cascade_search.sources.propublica_disclosures import _deref
+    from evidence_search.sources.propublica_disclosures import _deref
     arr = [{"result": 1, "q": 3}, [2], {"a_txt": 4}, "Blue Owl", "Jane Doe"]
     assert _deref(arr, arr[0]) == {"result": [{"a_txt": "Jane Doe"}], "q": "Blue Owl"}
 
@@ -184,7 +184,7 @@ def test_propublica_policy_registered():
 
 def test_browser_allowlist_is_public_records_only():
     """Browser escalation must never target arbitrary hosts."""
-    from cascade_search.core.browser import host_allowed
+    from evidence_search.core.browser import host_allowed
     for good in ("https://www.oscn.net/dockets/x", "https://biz.sosmt.gov/y",
                  "https://storage.courtlistener.com/z"):
         assert host_allowed(good)[0], good
@@ -196,8 +196,8 @@ def test_browser_allowlist_is_public_records_only():
 def test_gate_open_list_resume_cycle():
     """The humanomation loop: park at a gate, list it, resume with artifacts."""
     import tempfile as _tf, pathlib as _p
-    from cascade_search.core import gates
-    from cascade_search.core.results import GateType, AwaitingHuman, Hit
+    from evidence_search.core import gates
+    from evidence_search.core.results import GateType, AwaitingHuman, Hit
 
     s = tmpstore()
     g = gates.open_gate(s, source="oscn", url="https://www.oscn.net/x", query="q",
@@ -214,20 +214,20 @@ def test_gate_open_list_resume_cycle():
 
 
 def test_gate_resume_rejects_unknown_token():
-    from cascade_search.core import gates
+    from evidence_search.core import gates
     res, err = gates.resume(tmpstore(), "nope", [])
     assert res is None and "no job" in err
 
 
 def test_identifiers_no_word_false_positives():
     """First cut matched BROADCASTING as a UEI and COURT as a CAGE code."""
-    from cascade_search.core.extract import identifiers
+    from evidence_search.core.extract import identifiers
     got = identifiers("THE BROADCASTING COURT ORDERED PAYMENT", is_html=False)
     assert "uei" not in got and "cage" not in got
 
 
 def test_identifiers_match_real_investigation_values():
-    from cascade_search.core.extract import identifiers
+    from evidence_search.core.extract import identifiers
     probe = ("Award 15DDNE21P00000038, UEI VG1HDQR1Y1P5, CAGE 4ZVJ2, "
              "docket 1:16-cv-02237, CF-2013-00038, CIV-15-188-M, $250,000.00, "
              "725 ILCS 150/13.2, NAICS 611699")
@@ -239,7 +239,7 @@ def test_identifiers_match_real_investigation_values():
 
 
 def test_grep_returns_passages_not_pages():
-    from cascade_search.core.extract import grep, est_tokens
+    from evidence_search.core.extract import grep, est_tokens
     html = "<html><body>" + ("filler " * 3000) + "NEEDLE here" + ("filler " * 3000) + "</body></html>"
     hits = grep(html, ["NEEDLE"])
     assert len(hits) == 1 and "NEEDLE" in hits[0]["context"]
@@ -247,7 +247,7 @@ def test_grep_returns_passages_not_pages():
 
 
 def test_page_text_strips_chrome():
-    from cascade_search.core.extract import page_text
+    from evidence_search.core.extract import page_text
     html = "<html><nav>MENU</nav><script>var x=1</script><body><p>real content</p></body></html>"
     t = page_text(html)
     assert "real content" in t and "MENU" not in t and "var x" not in t
@@ -293,7 +293,7 @@ def test_unreadable_pdf_is_a_blocker_not_binary_noise(tmp_path, capsys):
 
     A PDF with no text layer and OCR disabled is now a named blocker.
     """
-    from cascade_search.cli import main, EXIT_ACCESS_BLOCKER
+    from evidence_search.cli import main, EXIT_ACCESS_BLOCKER
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(b"%PDF-1.7\n" + b"\x00\x01\x02binary noise" * 500)
     code = main(["extract", str(pdf), "--text", "--no-ocr"])
@@ -317,7 +317,7 @@ def test_savings_reports_expansion_rather_than_negative_reduction():
     short scanned page's decoded text -- but "-285.3% reduction" reads like a
     malfunction rather than the honest 'this source was already small'.
     """
-    from cascade_search.core.extract import savings
+    from evidence_search.core.extract import savings
     s = savings("short source", "a much longer extracted payload " * 20)
     assert s["expanded"] is True
     assert savings("x" * 4000, "y" * 100)["expanded"] is False
@@ -334,7 +334,7 @@ def test_courtlistener_keeps_the_fields_an_investigator_needs():
     one.
     """
     import json
-    from cascade_search.sources.courtlistener import _parse
+    from evidence_search.sources.courtlistener import _parse
     body = json.dumps({"count": 85, "next": "?page=2", "results": [{
         "caseName": "Dyer v. City of Mesquite Texas",
         "docketNumber": "3:15-cv-02638", "docket_id": 5409345,
@@ -355,7 +355,7 @@ def test_courtlistener_keeps_the_fields_an_investigator_needs():
 
 def test_courtlistener_falls_back_to_docket_id_for_the_url():
     import json
-    from cascade_search.sources.courtlistener import _parse
+    from evidence_search.sources.courtlistener import _parse
     body = json.dumps({"count": 1, "results": [
         {"caseName": "X v. Y", "docket_id": 42, "absolute_url": None}]})
     assert _parse(body)[0].url.endswith("/docket/42/")
@@ -372,8 +372,8 @@ def test_full_records_are_stored_while_results_stay_curated():
     import json
     import pathlib
     import tempfile
-    from cascade_search.core.store import Store
-    from cascade_search.sources.courtlistener import _parse
+    from evidence_search.core.store import Store
+    from evidence_search.sources.courtlistener import _parse
 
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     body = json.dumps({"count": 85, "results": [{
@@ -406,7 +406,7 @@ def test_full_records_are_stored_while_results_stay_curated():
 def test_a_storage_failure_never_loses_the_caller_results():
     """Persisting records is a convenience; returning results is the job."""
     import json
-    from cascade_search.sources.courtlistener import _parse
+    from evidence_search.sources.courtlistener import _parse
 
     class Broken:
         def put_record(self, *a, **k):
@@ -425,8 +425,8 @@ def test_oscn_rejects_an_unknown_county_instead_of_searching_it():
     negative, which is the failure this package exists to prevent. A worker had
     to guess `oklahoma` from the `caddo` example with no way to check.
     """
-    from cascade_search.core.results import AccessBlocker
-    from cascade_search.sources import oscn
+    from evidence_search.core.results import AccessBlocker
+    from evidence_search.sources import oscn
     out = oscn.search("oklohoma", lname="Smith")
     assert isinstance(out, AccessBlocker)
     assert "oklahoma" in out.detail, "should suggest the near match"
@@ -434,7 +434,7 @@ def test_oscn_rejects_an_unknown_county_instead_of_searching_it():
 
 
 def test_oscn_county_list_is_complete_and_normalises():
-    from cascade_search.sources import oscn
+    from evidence_search.sources import oscn
     assert len(oscn.COUNTIES) == 77, "Oklahoma has 77 counties"
     for c in ("caddo", "oklahoma", "tulsa", "rogermills", "mcclain"):
         assert c in oscn.COUNTIES
@@ -445,7 +445,7 @@ def test_gate_creation_dedupes_on_url(tmp_path):
     """One search parked three times under three tokens meant a person would
     have solved the identical Turnstile three times. Nine open gates covered
     five distinct URLs."""
-    from cascade_search.core.store import Store
+    from evidence_search.core.store import Store
     s = Store(tmp_path / "t.db")
     p = {"url": "https://www.oscn.net/dockets/Results.aspx?db=tulsa", "query": "x"}
     t1 = s.create_job("oscn", "awaiting_human", p)
@@ -459,7 +459,7 @@ def test_gate_creation_dedupes_on_url(tmp_path):
 def test_extract_announces_display_truncation(tmp_path, capsys):
     """Silent truncation corrupted seven files for a worker who only noticed
     when parsing failed -- data loss that looks like success."""
-    from cascade_search.cli import main
+    from evidence_search.cli import main
     f = tmp_path / "big.txt"
     f.write_text("x" * 9000)
     main(["extract", str(f), "--text"])
@@ -472,7 +472,7 @@ def test_extract_announces_display_truncation(tmp_path, capsys):
 def test_global_flags_are_accepted_after_the_subcommand():
     """argparse's bare 'unrecognized arguments: --json' gave no hint which way
     to move the flag. A worker lost time to it; accept either order."""
-    from cascade_search.cli import main
+    from evidence_search.cli import main
     assert main(["extract", "/etc/hosts", "--text", "--json"]) == 0
     assert main(["--json", "extract", "/etc/hosts", "--text"]) == 0
 
@@ -485,7 +485,7 @@ def test_grep_cap_is_per_pattern_and_never_skips_a_pattern():
     absence produced by the search path itself. Found by a worker whose terms
     were provably present in the document.
     """
-    from cascade_search.core.extract import grep
+    from evidence_search.core.extract import grep
     text = ("COMMON " * 200) + " RARETERM " + ("filler " * 50)
     hits = grep(text, ["COMMON", "RARETERM"], is_html=False)
     pats = {h["pattern"] for h in hits}
@@ -495,7 +495,7 @@ def test_grep_cap_is_per_pattern_and_never_skips_a_pattern():
 
 def test_grep_reports_its_true_match_count_when_capped():
     """A capped result must not read as a complete one."""
-    from cascade_search.core.extract import grep
+    from evidence_search.core.extract import grep
     hits = grep("HIT " * 500, ["HIT"], is_html=False, max_hits=10)
     real = [h for h in hits if h["pattern"] == "HIT"]
     note = [h for h in hits if h["pattern"] == "__truncated__"]
@@ -504,7 +504,7 @@ def test_grep_reports_its_true_match_count_when_capped():
 
 
 def test_grep_does_not_flag_truncation_when_under_the_cap():
-    from cascade_search.core.extract import grep
+    from evidence_search.core.extract import grep
     hits = grep("one HIT here", ["HIT"], is_html=False)
     assert not any(h["pattern"] == "__truncated__" for h in hits)
 
@@ -517,7 +517,7 @@ def test_a_blocked_host_with_a_known_json_route_says_so():
     generalise: loc.gov /item/ JSON works while /collections/ JSON is blocked
     too. An automatic rewrite would have been wrong.
     """
-    import cascade_search.core.http as http
+    import evidence_search.core.http as http
     assert "www.loc.gov" in http._JSON_ESCAPE_HATCH
     hint = http._JSON_ESCAPE_HATCH["www.loc.gov"]
     assert "fo=json" in hint
@@ -528,7 +528,7 @@ def test_grep_with_zero_matches_does_not_read_as_success(tmp_path, capsys):
     """"100.0% reduction" over zero matches reads as success and means the
     opposite. Reported twice by workers; it nearly produced a wrong conclusion
     on an attorney-of-record question."""
-    from cascade_search.cli import main
+    from evidence_search.cli import main
     f = tmp_path / "doc.txt"
     f.write_text("some text without the term")
     main(["extract", str(f), "--grep", "ZZZNOTPRESENT"])
@@ -545,7 +545,7 @@ def test_host_allowlist_boundary_is_the_dot():
     what keeps the browser tier on public records -- so the suffix match has to
     land on a real label boundary.
     """
-    from cascade_search.core.browser import host_allowed
+    from evidence_search.core.browser import host_allowed
 
     for url in ("https://oscn.net/x", "https://www.oscn.net/x",
                 "https://evil.oscn.net/x",      # true subdomain of an allowed org

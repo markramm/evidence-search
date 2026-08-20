@@ -1,20 +1,20 @@
 ---
-name: cascade-search-usage
-description: Use cascade-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) covering courts, contracts, disclosures, news, vendor docs, and the general web via a local SearXNG instance — and log usability friction back to its maintainers. Use when searching court dockets, federal cases, financial disclosures, news, or the general web during investigation work; when you need a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; when a page must be read cheaply instead of pulled whole into context; when a search hits a CAPTCHA or Cloudflare wall; or when the user says "use cascade-search", "search with the new tool", "log a cascade-search issue", or "/cascade-search-usage".
+name: evidence-search-usage
+description: Use evidence-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) covering courts, contracts, disclosures, news, vendor docs, and the general web via a local SearXNG instance — and log usability friction back to its maintainers. Use when searching court dockets, federal cases, financial disclosures, news, or the general web during investigation work; when you need a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; when a page must be read cheaply instead of pulled whole into context; when a search hits a CAPTCHA or Cloudflare wall; or when the user says "use evidence-search", "search with the new tool", "log a evidence-search issue", or "/evidence-search-usage".
 ---
 
-# cascade-search-usage
+# evidence-search-usage
 
-Operate `cascade-search`, and report back on how it went.
+Operate `evidence-search`, and report back on how it went.
 
 Two jobs, and **the second is not optional**. Your account of where the tool
 confused you is the primary evidence for what gets fixed. See *Report the
 friction* below.
 
 ```bash
-CS=cascade-search          # if installed on PATH (pip install -e .)
+CS=evidence-search          # if installed on PATH (pip install -e .)
 # or, from a venv checkout:
-CS=/path/to/cascade-search/.venv/bin/cascade-search
+CS=/path/to/evidence-search/.venv/bin/evidence-search
 ```
 
 ## Why this instead of WebSearch
@@ -107,7 +107,7 @@ not, so only `web` can support a coverage claim.
 **That is not a reason to avoid `WebSearch`.** It is a first-class tool for a
 different job: exploratory questions, first leads, and citable news links (this
 tool's `news` returns Google redirects that cannot be cited). A worker reported
-"~11 cascade-search calls, no WebSearch fallback" as if that were the goal. It is
+"~11 evidence-search calls, no WebSearch fallback" as if that were the goal. It is
 not — use whichever finds the thing, and be precise about which one supports a
 claim of absence.
 
@@ -254,13 +254,13 @@ retry. The exit code is still 12 (AccessBlocker) — a 404 is never a verified a
 
 ## Report the friction
 
-**This is the second half of the task**, and it is not optional. cascade-search
+**This is the second half of the task**, and it is not optional. evidence-search
 is new and under active evaluation; your account of where it confused you is the
 primary evidence for what gets fixed next.
 
 Invoke the `hallway-agent-testing` skill — it carries the method (what counts as
 friction, how to write it so it is actionable, how to report a command
-faithfully). Log to `FEEDBACK.md` in the cascade-search repo, or open an
+faithfully). Log to `FEEDBACK.md` in the evidence-search repo, or open an
 issue using the "False negative" or "New source request" template.
 
 The short version: report anything you had to look up or guess, anything

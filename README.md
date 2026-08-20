@@ -1,4 +1,4 @@
-# cascade-search
+# evidence-search
 
 Federated research client for the cascade investigation pipeline.
 
@@ -82,25 +82,25 @@ errored, a verified absence cannot be constructed.** It downgrades to
 ## Install
 
 ```bash
-git clone https://github.com/markramm/cascade-search.git
-cd cascade-search
+git clone https://github.com/markramm/evidence-search.git
+cd evidence-search
 python3 -m venv .venv && ./.venv/bin/pip install -e .
 ```
 
-Retrieved documents are archived to `~/.cascade-search/archive` by default;
+Retrieved documents are archived to `~/.evidence-search/archive` by default;
 set `CASCADE_ARCHIVE` to point it at your own corpus. The call ledger and
-cache live in `~/.cascade-search/store.db`.
+cache live in `~/.evidence-search/store.db`.
 
 ## Use
 
 ```bash
-cascade-search news '"Desert Snow" interdiction'
-cascade-search oscn --county caddo --lname Frazier --year 2013
-cascade-search oscn --county caddo --case CF-2013-00038      # archives w/ SHA-256
-cascade-search courtlistener "Desert Snow" --type r
-cascade-search propublica "Blue Owl"
-cascade-search limits                                        # policy + live usage
-cascade-search --json news 'query' | jq '.results[].url'
+evidence-search news '"Desert Snow" interdiction'
+evidence-search oscn --county caddo --lname Frazier --year 2013
+evidence-search oscn --county caddo --case CF-2013-00038      # archives w/ SHA-256
+evidence-search courtlistener "Desert Snow" --type r
+evidence-search propublica "Blue Owl"
+evidence-search limits                                        # policy + live usage
+evidence-search --json news 'query' | jq '.results[].url'
 ```
 
 Exit codes encode the outcome, so shell callers branch without parsing.
@@ -124,7 +124,7 @@ absence. It used to. It doesn't now.
 | `70` | internal error (`EX_SOFTWARE`) |
 
 ```bash
-cascade-search oscn --county caddo --lname Smith --year 2013 >/dev/null
+evidence-search oscn --county caddo --lname Smith --year 2013 >/dev/null
 case $? in
   10) echo "found" ;;
   11) echo "verified absence — publishable as scoped" ;;
@@ -183,10 +183,10 @@ That is the humanomation loop: **automate to the gate, let the human do only
 what a human must do, automate again from there.**
 
 ```bash
-cascade-search oscn --county caddo --lname Frazier --year 2013
+evidence-search oscn --county caddo --lname Frazier --year 2013
 #   -> AwaitingHuman, token 0e96cf371939
 
-cascade-search gate ui        # <- the easy path: worklist in a browser
+evidence-search gate ui        # <- the easy path: worklist in a browser
 ```
 
 `gate ui` opens a local page (127.0.0.1, stdlib only, no build step) listing
@@ -215,9 +215,9 @@ one paste clears them all.
 The CLI path still works, unchanged:
 
 ```bash
-cascade-search gate list
-cascade-search browser <url> --headed --save /tmp/page.html
-cascade-search gate resume 0e96cf371939 --file /tmp/page.html
+evidence-search gate list
+evidence-search browser <url> --headed --save /tmp/page.html
+evidence-search gate resume 0e96cf371939 --file /tmp/page.html
 ```
 
 **Ethical boundary, enforced in code.** `core/browser.py` carries an
@@ -246,13 +246,13 @@ extracted three fields.
 
 ```bash
 # a worker asking "what happened to Andrea Frazier?"
-cascade-search extract case.html \
+evidence-search extract case.html \
   --grep "FRAZIER, ANDREA" --grep TRAFFICKING --grep "PAUPER|INDIGENT" --grep DISMISS
 # raw ~17,371 tok -> extracted ~841 tok (95.2% reduction)
 
-cascade-search extract https://example.gov/page --ids      # award IDs, dockets, UEIs, statutes
-cascade-search extract page.html --tables                  # registry rows, no markup
-cascade-search extract page.html --text                    # chrome stripped
+evidence-search extract https://example.gov/page --ids      # award IDs, dockets, UEIs, statutes
+evidence-search extract page.html --tables                  # registry rows, no markup
+evidence-search extract page.html --text                    # chrome stripped
 ```
 
 Every reduction is reported honestly on each run (`raw -> extracted, N%`) —
@@ -294,11 +294,11 @@ would — not to extract at machine speed because it can.
 
 **What it actually does, not what it promises:**
 
-- **Identifies itself.** Every request carries a `cascade-search` User-Agent.
+- **Identifies itself.** Every request carries a `evidence-search` User-Agent.
   Crossref gets a `mailto` in the UA because they ask for one — that is their
   documented "polite pool," and joining it costs nothing.
 - **Rate limits are per-source, declared, and enforced before the fetch, not
-  after.** Run `cascade-search limits` to see every ceiling and current usage.
+  after.** Run `evidence-search limits` to see every ceiling and current usage.
   They are set from what each source publishes, and where a source publishes
   nothing, from what its behaviour implies: OSCN engages Turnstile after
   roughly ten fetches in a session, so the cap is 8 over a 30-minute window —
@@ -343,7 +343,7 @@ disclosures, news, docs, and (via a local SearXNG instance) the general web.
 
 ```bash
 deploy/searxng-native.sh up   # no container runtime needed
-cascade-search web "query"
+evidence-search web "query"
 ```
 
 SearXNG is a Flask app whose dependencies are pure-Python or ship arm64
@@ -392,9 +392,9 @@ per-result `engines` set and let `unique_to_engine` mark those instead.
 `courtlistener` counts filings, this counts federal money:
 
 ```bash
-cascade-search usaspending "Relentless LLC" --count     # 52 awards, by type
-cascade-search usaspending "Relentless LLC" --limit 10  # the awards themselves
-cascade-search usaspending "detention" --keywords --count
+evidence-search usaspending "Relentless LLC" --count     # 52 awards, by type
+evidence-search usaspending "Relentless LLC" --limit 10  # the awards themselves
+evidence-search usaspending "detention" --keywords --count
 ```
 
 Two search modes, and the difference decides whether the number means anything.
@@ -424,9 +424,9 @@ Science: Entity List Triggers" as the top hit, so every non-exact result carries
 a verify-before-citing warning.
 
 ```bash
-cascade-search crossref 10.1177/10986111251357498   # exact, authoritative
-cascade-search crossref "Forced Science"            # fuzzy, verify the match
-cascade-search fedreg "immigration detention" --type rule
+evidence-search crossref 10.1177/10986111251357498   # exact, authoritative
+evidence-search crossref "Forced Science"            # fuzzy, verify the match
+evidence-search fedreg "immigration detention" --type rule
 ```
 
 **`web` is discovery, not census.** Its engines largely ignore quoted phrases,
@@ -455,7 +455,7 @@ Electron app to proxy search queries — a lot of machine for the job.
 ## Design notes
 
 **Rate limits are shared state, and reservation is atomic.** Cache, limiter,
-and job queue live in one SQLite DB (`~/.cascade-search/store.db`, WAL mode)
+and job queue live in one SQLite DB (`~/.evidence-search/store.db`, WAL mode)
 because limits belong to the *source*, not the worker. Twelve workers each
 assuming they owned the budget is how 200 calls vanished.
 
@@ -485,9 +485,9 @@ So every upstream object is persisted verbatim in the `records` table, results
 carry a curated view plus a `record_id`, and the rest is one call away:
 
 ```bash
-cascade-search record --list --source courtlistener
-cascade-search record courtlistener:5409345
-cascade-search record courtlistener:5409345 --fields party,recap_documents
+evidence-search record --list --source courtlistener
+evidence-search record courtlistener:5409345
+evidence-search record courtlistener:5409345 --fields party,recap_documents
 ```
 
 **Silent-wrong-answer guards.** ProPublica's endpoint returns the *unfiltered*
@@ -523,7 +523,7 @@ together), local semantic layer, MCP shim (Phase 2).
 
 ## Using it from an agent
 
-`skills/cascade-search-usage/` is a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills)
+`skills/evidence-search-usage/` is a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills)
 that teaches an agent to drive this tool — which command answers which question,
 how to read the coverage line before trusting a result, when an empty result is
 a finding and when it is a tooling failure, and how to use `extract` instead of
@@ -532,7 +532,7 @@ pulling pages into context.
 Install it by symlinking (or copying) into your skills directory:
 
 ```bash
-ln -s "$PWD/skills/cascade-search-usage" ~/.claude/skills/cascade-search-usage
+ln -s "$PWD/skills/evidence-search-usage" ~/.claude/skills/evidence-search-usage
 ```
 
 It pairs with [`hallway-agent-testing`](https://github.com/markramm/ramm-agent-skills),

@@ -67,7 +67,7 @@ MSG
       else
         echo "json format: DISABLED — add 'json' to search.formats in deploy/searxng/settings.yml" >&2
       fi
-      echo; echo "  cascade-search web 'your query'"
+      echo; echo "  evidence-search web 'your query'"
       return 0
     fi
     printf '.'; sleep 1

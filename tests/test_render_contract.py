@@ -4,8 +4,8 @@ Every case here is a mistake a real worker made, or nearly made, in the field
 log. The mechanism was right in each one; the RENDERING was what misled. These
 are rendering tests because that is where the errors actually lived.
 """
-from cascade_search.cli import _emit, main, EXIT_ACCESS_BLOCKER
-from cascade_search.core.results import (AccessBlocker, Blocker, Coverage, Hit,
+from evidence_search.cli import _emit, main, EXIT_ACCESS_BLOCKER
+from evidence_search.core.results import (AccessBlocker, Blocker, Coverage, Hit,
                                          Result)
 
 

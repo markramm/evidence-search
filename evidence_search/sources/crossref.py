@@ -39,7 +39,7 @@ from ..core.store import Store, cache_key
 SOURCE = "crossref"
 API = "https://api.crossref.org"
 MAILTO = "mark.ramm@gmail.com"
-UA = f"cascade-search (mailto:{MAILTO})"
+UA = f"evidence-search (mailto:{MAILTO})"
 
 _DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+\b")
 

@@ -7,9 +7,9 @@ human slip becomes a permanent false record.
 import pathlib
 import tempfile
 
-from cascade_search.core.gate_page import render
-from cascade_search.core.gateui import collect, validate, _describe
-from cascade_search.core.store import Store
+from evidence_search.core.gate_page import render
+from evidence_search.core.gateui import collect, validate, _describe
+from evidence_search.core.store import Store
 
 
 def _store_with(*payloads):
@@ -104,7 +104,7 @@ import urllib.error
 import urllib.request
 from http.server import HTTPServer
 
-from cascade_search.core.gateui import _handler
+from evidence_search.core.gateui import _handler
 
 
 class _Server:

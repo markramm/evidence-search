@@ -11,6 +11,13 @@ costs the worker the time they spent routing around it.
 Precise complaints beat praise. A clean run is a data point too — say so in one
 line.
 
+## A note on the tool's old name
+
+This log predates a rename. Entries below invoke `cascade-search`; the tool is
+now `evidence-search`. The commands are left exactly as they were run, because
+a field report that has been tidied up is no longer a record of what happened —
+substitute the new name when reproducing one.
+
 ## A note on the placeholders
 
 Entries logged before this repo went public named real investigative subjects,

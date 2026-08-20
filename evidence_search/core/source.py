@@ -150,7 +150,7 @@ def run_source(
     if archive_as:
         from .archive import archive as _archive
         _archive(body.encode() if isinstance(body, str) else body,
-                 archive_as, url, f"cascade-search:{source}")
+                 archive_as, url, f"evidence-search:{source}")
 
     cov = Coverage(queried=queried, responsive=[source], indexes=[index_origin],
                    elapsed_ms=int((time.time() - t0) * 1000))

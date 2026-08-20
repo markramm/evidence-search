@@ -1,4 +1,4 @@
-# A SearXNG instance for cascade-search — LOCAL, not a public service.
+# A SearXNG instance for evidence-search — LOCAL, not a public service.
 #
 # Bound to 127.0.0.1 deliberately. An open SearXNG instance gets scraped by
 # others, and a shared instance means shared rate limits across users, which is
@@ -16,7 +16,7 @@
 #
 #   deploy/searxng.sh up                                   # preferred on macOS
 #   docker compose -f deploy/searxng-compose.yml up -d     # if you use compose
-#   cascade-search web "query"
+#   evidence-search web "query"
 
 services:
   searxng:

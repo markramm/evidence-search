@@ -9,8 +9,8 @@ import threading
 
 import pytest
 
-from cascade_search.core.limits import Limiter
-from cascade_search.core.store import Store
+from evidence_search.core.limits import Limiter
+from evidence_search.core.store import Store
 
 
 def _db():
@@ -126,7 +126,7 @@ def test_wait_covers_spacing_but_never_a_budget_window(monkeypatch):
     # sibling test's complete sum into a RateLimited partial. Reaching into a
     # stdlib module from a test is how one test breaks another.
     slept: list[float] = []
-    import cascade_search.core.limits as limits_mod
+    import evidence_search.core.limits as limits_mod
     monkeypatch.setattr(limits_mod.time, "sleep", lambda s: slept.append(s),
                         raising=False)
 

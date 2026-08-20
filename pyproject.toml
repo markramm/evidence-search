@@ -1,5 +1,5 @@
 [project]
-name = "cascade-search"
+name = "evidence-search"
 version = "0.1.0"
 description = "Federated research client for the cascade investigation pipeline: typed outcomes, coverage metadata, structured government sources, and archive-on-retrieval."
 requires-python = ">=3.10"
@@ -17,8 +17,8 @@ classifiers = [
 dependencies = ["httpx>=0.27", "beautifulsoup4>=4.12", "lxml>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/markramm/cascade-search"
-Issues = "https://github.com/markramm/cascade-search/issues"
+Homepage = "https://github.com/markramm/evidence-search"
+Issues = "https://github.com/markramm/evidence-search/issues"
 
 [project.optional-dependencies]
 # PDF text extraction and OCR shell out to system binaries, not Python
@@ -26,11 +26,11 @@ Issues = "https://github.com/markramm/cascade-search/issues"
 test = ["pytest>=8.0"]
 
 [project.scripts]
-cascade-search = "cascade_search.cli:cli"
+evidence-search = "evidence_search.cli:cli"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cascade_search*"]
+include = ["evidence_search*"]

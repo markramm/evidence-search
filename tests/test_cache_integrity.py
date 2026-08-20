@@ -12,8 +12,8 @@ import time
 
 import pytest
 
-from cascade_search.core.results import VerifiedAbsence
-from cascade_search.core.store import Store, CachePoisoned, looks_degenerate
+from evidence_search.core.results import VerifiedAbsence
+from evidence_search.core.store import Store, CachePoisoned, looks_degenerate
 
 
 def _store():
@@ -52,9 +52,9 @@ def test_cached_absence_carries_its_real_age():
 
 def test_absence_from_cache_reports_cache_age(monkeypatch):
     """The outcome a caller receives says the negative is cached, and how old."""
-    from cascade_search.engines import news_rss
+    from evidence_search.engines import news_rss
     s = _store()
-    key = __import__("cascade_search.core.store", fromlist=["cache_key"]).cache_key(
+    key = __import__("evidence_search.core.store", fromlist=["cache_key"]).cache_key(
         "news_rss", "nothing here")
     s.put(key, "news_rss", [], ttl_s=3600)
 
@@ -70,8 +70,8 @@ def test_put_honours_a_non_cacheable_policy(monkeypatch):
     False today, so this pins the enforcement rather than a current source."""
     import pathlib, tempfile
     from dataclasses import replace
-    import cascade_search.core.limits as limits_mod
-    from cascade_search.core.store import Store
+    import evidence_search.core.limits as limits_mod
+    from evidence_search.core.store import Store
 
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     pol = replace(limits_mod.DEFAULT_POLICY, cacheable=False)
@@ -88,8 +88,8 @@ def test_put_reports_whether_it_wrote(monkeypatch):
     """A silent no-op would read as a TTL or key bug rather than as policy."""
     import pathlib, tempfile
     from dataclasses import replace
-    import cascade_search.core.limits as limits_mod
-    from cascade_search.core.store import Store
+    import evidence_search.core.limits as limits_mod
+    from evidence_search.core.store import Store
 
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     monkeypatch.setitem(limits_mod.POLICIES, "nostore",
@@ -104,8 +104,8 @@ def test_cacheable_does_not_disable_metadata_caching(monkeypatch):
     fetch per search and degrade coverage arithmetic when it fails."""
     import pathlib, tempfile
     from dataclasses import replace
-    import cascade_search.core.limits as limits_mod
-    from cascade_search.core.store import Store
+    import evidence_search.core.limits as limits_mod
+    from evidence_search.core.store import Store
 
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     monkeypatch.setitem(limits_mod.POLICIES, "searxng",

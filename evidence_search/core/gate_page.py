@@ -176,13 +176,13 @@ def render(gates: list[dict]) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gates awaiting a human · cascade-search</title>
+<title>Gates awaiting a human · evidence-search</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>{CSS}</style></head><body>
 <header>
-  <p class="kicker">cascade-search · humanomation</p>
+  <p class="kicker">evidence-search · humanomation</p>
   <h1>Gates awaiting a human</h1>
   {stand}
 </header>

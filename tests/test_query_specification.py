@@ -9,8 +9,8 @@ import io
 import time
 from contextlib import redirect_stdout
 
-from cascade_search.cli import _emit, _asked_strings
-from cascade_search.core.results import Coverage, Probe, VerifiedAbsence
+from evidence_search.cli import _emit, _asked_strings
+from evidence_search.core.results import Coverage, Probe, VerifiedAbsence
 
 
 def _absence(**kw):

@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from cascade_search.cli import (
+from evidence_search.cli import (
     EXIT_ACCESS_BLOCKER,
     EXIT_AWAITING_HUMAN,
     EXIT_BY_OUTCOME,
@@ -68,7 +68,7 @@ def test_uncaught_exception_exits_internal_error_not_an_outcome(monkeypatch):
     def boom(*_a, **_k):
         raise RuntimeError("simulated fetch explosion")
 
-    monkeypatch.setattr("cascade_search.cli.main", boom)
+    monkeypatch.setattr("evidence_search.cli.main", boom)
     assert cli() == EXIT_INTERNAL_ERROR
     assert EXIT_INTERNAL_ERROR not in OUTCOME_CODES
 
@@ -77,7 +77,7 @@ def test_keyboard_interrupt_is_not_an_outcome(monkeypatch):
     def interrupt(*_a, **_k):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("cascade_search.cli.main", interrupt)
+    monkeypatch.setattr("evidence_search.cli.main", interrupt)
     assert cli() == 130
     assert 130 not in OUTCOME_CODES
 
@@ -85,7 +85,7 @@ def test_keyboard_interrupt_is_not_an_outcome(monkeypatch):
 def test_bad_flag_is_a_usage_error_not_an_absence():
     """argparse exits 2 on its own; assert that 2 is not a finding."""
     r = subprocess.run(
-        [sys.executable, "-m", "cascade_search.cli", "--definitely-not-a-flag"],
+        [sys.executable, "-m", "evidence_search.cli", "--definitely-not-a-flag"],
         capture_output=True, text=True,
     )
     assert r.returncode not in OUTCOME_CODES, (

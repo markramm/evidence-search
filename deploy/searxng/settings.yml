@@ -1,4 +1,4 @@
-# cascade-search instance settings.
+# evidence-search instance settings.
 #
 # The one line that matters: `formats` must include `json`. SearXNG ships with
 # the JSON API DISABLED, and without it every request returns HTML and the
@@ -16,7 +16,7 @@ server:
 search:
   formats:
     - html
-    - json          # <- required by cascade-search
+    - json          # <- required by evidence-search
   safe_search: 0
   autocomplete: ""
   # Fail fast: a slow engine should surface as unresponsive (which we translate

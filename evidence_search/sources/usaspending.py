@@ -81,7 +81,7 @@ def _post(path: str, body: dict, timeout: float = 45.0):
     import httpx
     try:
         r = httpx.post(f"{API}{path}", json=body, timeout=timeout,
-                       headers={"User-Agent": "cascade-search",
+                       headers={"User-Agent": "evidence-search",
                                 "Content-Type": "application/json"})
     except httpx.TimeoutException as e:
         return None, ("timeout", str(e))
@@ -187,7 +187,7 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
     import httpx
     url = f"{API}/awards/{quote(num, safe='')}/"
     try:
-        r = httpx.get(url, timeout=45, headers={"User-Agent": "cascade-search"})
+        r = httpx.get(url, timeout=45, headers={"User-Agent": "evidence-search"})
     except httpx.HTTPError as e:
         limiter.note_outcome(SOURCE, ("http", str(e)))
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "http"}),
@@ -215,7 +215,7 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                 detail=(f"{num!r} is not USAspending's internal numeric award id, and "
                         "this endpoint accepts nothing else. THIS IS NOT AN ABSENCE -- "
                         "the award may well exist. Look it up by name or keyword first "
-                        "(`cascade-search usaspending \"<recipient>\"`), then pass the "
+                        "(`evidence-search usaspending \"<recipient>\"`), then pass the "
                         "numeric id from that result's meta.record_id."))
         return verified_absence(num, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
                                 f"usaspending award detail for numeric award id {num}")

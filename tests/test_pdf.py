@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from cascade_search.core import pdf
+from evidence_search.core import pdf
 
 
 def test_text_layer_threshold_is_about_scanned_vs_typed():
@@ -68,8 +68,8 @@ def test_remote_pdfs_are_decoded_not_grepped_as_binary(monkeypatch, tmp_path, ca
     them. The same file by local path found the passage. Worker-reported on a
     live Kane County records task.
     """
-    import cascade_search.cli as cli
-    from cascade_search.core import pdf as pdfmod
+    import evidence_search.cli as cli
+    from evidence_search.core import pdf as pdfmod
 
     pdf_bytes = b"%PDF-1.7\n" + b"binary" * 200
 
@@ -77,7 +77,7 @@ def test_remote_pdfs_are_decoded_not_grepped_as_binary(monkeypatch, tmp_path, ca
         return (pdf_bytes if kw.get("binary") else "%PDF-1.7\nmangled"), None
 
     monkeypatch.setattr(cli, "_fetch", fake_fetch, raising=False)
-    import cascade_search.core.http as http
+    import evidence_search.core.http as http
     monkeypatch.setattr(http, "fetch", fake_fetch)
     monkeypatch.setattr(pdfmod, "text_layer",
                         lambda p, timeout=120: "SEC. 11101. AUTHORIZATION " * 40)
@@ -94,6 +94,6 @@ def test_remote_pdf_is_refetched_as_bytes(monkeypatch):
     a perfect text layer fell back to OCR. The bytes must come off the wire
     undecoded."""
     import inspect
-    import cascade_search.cli as cli
+    import evidence_search.cli as cli
     src = inspect.getsource(cli.main)
     assert "binary=True" in src, "remote PDF path must re-fetch as bytes"

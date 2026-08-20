@@ -33,7 +33,7 @@ def open_gate(store: Store, *, source: str, url: str, query: str,
         query=query, coverage=Coverage(queried=[source], errored={source: "human-gate"}),
         gate_type=gate_type, url=url, resume_token=token, capture=capture or [],
         instructions=instructions or f"Open {url}, pass the gate, then:\n"
-                                     f"  cascade-search gate resume {token} --file <saved>")
+                                     f"  evidence-search gate resume {token} --file <saved>")
 
 
 def list_gates(store: Store) -> list[dict]:

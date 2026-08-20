@@ -24,7 +24,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 #: must be able to get its own ledger instead of racing the real one.
 DEFAULT_DB = Path(
     os.environ.get("CASCADE_DB")
-    or Path.home() / ".cascade-search" / "store.db")
+    or Path.home() / ".evidence-search" / "store.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cache (

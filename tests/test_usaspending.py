@@ -6,10 +6,10 @@ procurement beat and fell back to raw HTTP in its absence.
 import pathlib
 import tempfile
 
-from cascade_search.core.limits import Limiter
-from cascade_search.core.results import Hit, RateLimited, VerifiedAbsence
-from cascade_search.core.store import Store
-from cascade_search.sources import usaspending as usa
+from evidence_search.core.limits import Limiter
+from evidence_search.core.results import Hit, RateLimited, VerifiedAbsence
+from evidence_search.core.store import Store
+from evidence_search.sources import usaspending as usa
 
 
 def _kit():
@@ -68,7 +68,7 @@ def test_zero_awards_is_a_verified_absence(monkeypatch):
 
 def test_a_server_error_is_never_an_absence(monkeypatch):
     """The 500 found in testing must not read as 'this vendor has no awards'."""
-    from cascade_search.core.results import AccessBlocker
+    from evidence_search.core.results import AccessBlocker
     monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (
         None, ("status", "HTTP 500: Server Error")))
     s, L = _kit()
@@ -101,7 +101,7 @@ def test_award_groups_are_never_mixed_on_a_listing():
 
 
 def test_mixed_groups_are_refused_before_the_api_422s(monkeypatch):
-    from cascade_search.core.results import AccessBlocker
+    from evidence_search.core.results import AccessBlocker
     s, L = _kit()
     out = usa.search("x", award_types=usa.CONTRACT_TYPES + usa.LOAN_TYPES,
                      store=s, limiter=L, use_cache=False)
@@ -259,7 +259,7 @@ def test_detail_ignores_the_positional_query_and_says_so(monkeypatch, capsys):
     shipping.
     """
     import httpx
-    from cascade_search.cli import main
+    from evidence_search.cli import main
     class R:
         status_code = 200
         def json(self):
@@ -275,7 +275,7 @@ def test_detail_ignores_the_positional_query_and_says_so(monkeypatch, capsys):
 
 def test_detail_works_without_a_query():
     """The query became optional so the correct usage is also the simple one."""
-    from cascade_search.cli import main
+    from evidence_search.cli import main
     import inspect
     src = inspect.getsource(main)
     assert 'nargs="?"' in src
@@ -361,7 +361,7 @@ def test_piid_to_detail_is_a_blocker_not_an_absence(monkeypatch):
     Rendering that 404 as VerifiedAbsence tells the researcher the record is not
     there, which is the worst thing this tool can say.
     """
-    from cascade_search.core.results import AccessBlocker, Blocker
+    from evidence_search.core.results import AccessBlocker, Blocker
     _force_404(monkeypatch)
     store, limiter = _kit()
 

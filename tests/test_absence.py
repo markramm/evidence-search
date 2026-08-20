@@ -7,7 +7,7 @@ structurally so it can be audited, re-run, and argued with.
 """
 import time
 
-from cascade_search.core.results import (Coverage, Probe, RateLimited,
+from evidence_search.core.results import (Coverage, Probe, RateLimited,
                                          VerifiedAbsence, verified_absence)
 
 

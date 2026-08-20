@@ -67,7 +67,7 @@ def _parse(body: str, query: str = "", store=None) -> list[Result]:
         # 4 loses the ones that answer the question. So: persist the upstream
         # object verbatim under a stable id, surface the fields that are
         # generally useful on this beat, and let a caller who needs the rest
-        # fetch it with `cascade-search record <id>`.
+        # fetch it with `evidence-search record <id>`.
         record_id = f"{SOURCE}:{r.get('docket_id') or r.get('id') or r.get('docketNumber')}"
         if store is not None:
             try:
@@ -165,7 +165,7 @@ def document(storage_url: str, filename: str, store: Store | None = None,
     data, blocked = fetch(storage_url, source=SOURCE, query=filename, binary=True)
     if blocked:
         return blocked
-    info = archive(data, filename, storage_url, "cascade-search:courtlistener")
+    info = archive(data, filename, storage_url, "evidence-search:courtlistener")
     return Hit(query=filename,
                coverage=Coverage(queried=[SOURCE], responsive=[SOURCE]),
                results=[Result(url=storage_url, title=filename, source="courtlistener",

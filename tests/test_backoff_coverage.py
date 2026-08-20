@@ -11,12 +11,12 @@ import tempfile
 
 import pytest
 
-from cascade_search.core import http as core_http
-from cascade_search.core.limits import Limiter
-from cascade_search.core.results import AccessBlocker, Blocker
-from cascade_search.core.store import Store
-from cascade_search.engines import searxng
-from cascade_search.sources import crossref, federal_register
+from evidence_search.core import http as core_http
+from evidence_search.core.limits import Limiter
+from evidence_search.core.results import AccessBlocker, Blocker
+from evidence_search.core.store import Store
+from evidence_search.engines import searxng
+from evidence_search.sources import crossref, federal_register
 
 
 def _kit():

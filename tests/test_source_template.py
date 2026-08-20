@@ -7,11 +7,11 @@ template currently carried.
 import pathlib
 import tempfile
 
-from cascade_search.core.limits import Limiter
-from cascade_search.core.results import (AccessBlocker, Hit, RateLimited,
+from evidence_search.core.limits import Limiter
+from evidence_search.core.results import (AccessBlocker, Hit, RateLimited,
                                          Result, VerifiedAbsence)
-from cascade_search.core.source import run_source
-from cascade_search.core.store import Store
+from evidence_search.core.source import run_source
+from evidence_search.core.store import Store
 
 
 def _kit():
@@ -20,7 +20,7 @@ def _kit():
 
 
 def _run(monkeypatch, body, parse, **kw):
-    import cascade_search.core.http as http
+    import evidence_search.core.http as http
     monkeypatch.setattr(http, "fetch", lambda *a, **k: (body, None))
     s, L = _kit()
     return run_source("q", source="news_rss", url="https://x/y", searched="probe",
@@ -52,7 +52,7 @@ def test_verify_refusal_blocks_a_false_success(monkeypatch):
 
 
 def test_rate_limit_short_circuits_before_fetch(monkeypatch):
-    import cascade_search.core.http as http
+    import evidence_search.core.http as http
     called = []
     monkeypatch.setattr(http, "fetch", lambda *a, **k: called.append(1) or ("x", None))
     s, L = _kit()
@@ -84,9 +84,9 @@ def test_escalation_coverage_names_both_attempts(monkeypatch):
     Naming only one attempt lets a reader assume the other path was never
     tried -- the ambiguity typed outcomes exist to remove.
     """
-    import cascade_search.core.http as http
-    import cascade_search.core.browser as browser
-    from cascade_search.core.results import AccessBlocker, AwaitingHuman, Blocker
+    import evidence_search.core.http as http
+    import evidence_search.core.browser as browser
+    from evidence_search.core.results import AccessBlocker, AwaitingHuman, Blocker
 
     monkeypatch.setattr(http, "fetch", lambda *a, **k: (
         None, AccessBlocker(query="q", mechanism=Blocker.TURNSTILE, url="u")))
@@ -102,9 +102,9 @@ def test_escalation_coverage_names_both_attempts(monkeypatch):
 
 
 def test_escalation_recovers_when_the_browser_passes(monkeypatch):
-    import cascade_search.core.http as http
-    import cascade_search.core.browser as browser
-    from cascade_search.core.results import AccessBlocker, Blocker
+    import evidence_search.core.http as http
+    import evidence_search.core.browser as browser
+    from evidence_search.core.results import AccessBlocker, Blocker
 
     monkeypatch.setattr(http, "fetch", lambda *a, **k: (
         None, AccessBlocker(query="q", mechanism=Blocker.TURNSTILE, url="u")))
@@ -131,11 +131,11 @@ def test_sentinel_absence_is_distinct_from_an_empty_parse(monkeypatch):
 
 
 def test_archive_on_retrieval_writes_hash_and_manifest(monkeypatch, tmp_path):
-    from cascade_search.core import archive as arch
+    from evidence_search.core import archive as arch
     monkeypatch.setattr(arch, "DEFAULT_ARCHIVE", tmp_path)
     out = _run(monkeypatch, "<html>case page</html>",
                lambda b: [Result(url="u", title="t")],
                archive_as="oscn-caddo-CF-2013-00038.html")
     assert isinstance(out, Hit)
     assert (tmp_path / "oscn-caddo-CF-2013-00038.html").exists()
-    assert (tmp_path / "MANIFEST-cascade-search.txt").exists()
+    assert (tmp_path / "MANIFEST-evidence-search.txt").exists()

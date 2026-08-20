@@ -133,7 +133,7 @@ def fetch(url: str, *, source: str, query: str = "", wait_ms: int = 3500,
                 f"  1. Open: {url}\n"
                 f"  2. Pass the challenge.\n"
                 f"  3. Save the page, or copy what you need.\n\n"
-                f"Then: cascade-search gate resume {token} --file <saved.html>\n"
+                f"Then: evidence-search gate resume {token} --file <saved.html>\n"
                 f"(Or re-run with --headed to solve it in the browser this tool opens.)"))
 
     return html, None

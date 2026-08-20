@@ -134,7 +134,7 @@ def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
     """
     # Namespaced `searxng:<engine>`, because these are UPSTREAM engines the
     # instance proxies -- NOT sources in our own ledger. A live worker read
-    # "RATE-LIMITED: brave", checked `cascade-search limits`, saw brave at
+    # "RATE-LIMITED: brave", checked `evidence-search limits`, saw brave at
     # 0/20, and reasonably concluded the tool was contradicting itself. Our
     # limiter governs calls WE make; this governs what Brave did to SearXNG.
     # Same word, two namespaces, no way to tell them apart without the prefix.
@@ -255,7 +255,7 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     if unclassified:
         # Loud, not silent: if this fires, the instance is answering in a locale
         # we did not expect and the signal map needs updating.
-        print(f"cascade-search: unclassified searxng failure(s) for "
+        print(f"evidence-search: unclassified searxng failure(s) for "
               f"{', '.join(unclassified)} -- treated as errors, coverage dirty. "
               f"Is the instance ignoring `locale=en`?", file=sys.stderr)
 

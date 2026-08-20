@@ -1,4 +1,4 @@
-"""Documentation search — the gap cascade-search had.
+"""Documentation search — the gap evidence-search had.
 
 On 2026-08-19 this tool was asked a pricing question and returned product
 announcements, because Google News RSS indexes news, not docs. The answer came

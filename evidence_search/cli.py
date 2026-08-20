@@ -1,4 +1,4 @@
-"""cascade-search CLI.
+"""evidence-search CLI.
 
 Primary interface for Claude Code workers: Bash-native, pipeable, and it costs
 no context until invoked. An MCP shim over the same core is Phase 2.
@@ -211,7 +211,7 @@ def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="cascade-search",
+    p = argparse.ArgumentParser(prog="evidence-search",
                                 description="Federated research client with typed outcomes.")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-cache", action="store_true")
@@ -415,7 +415,7 @@ def main(argv=None) -> int:
             if a.query and isinstance(out, _Hit_t):
                 got = (out.results[0].meta.get("recipient") or "")
                 if a.query.strip().lower() not in got.lower():
-                    print(f"cascade-search: NOTE -- you passed query {a.query!r}, but "
+                    print(f"evidence-search: NOTE -- you passed query {a.query!r}, but "
                           f"--detail is keyed on the award id and returned "
                           f"{got!r}. The query was NOT used to select this record.",
                           file=sys.stderr)
@@ -463,7 +463,7 @@ def main(argv=None) -> int:
         if a.save:
             from pathlib import Path as _P
             _P(a.save).write_text(html)
-            rec = _archive(html.encode(), _P(a.save).name, a.url, "cascade-search:browser")
+            rec = _archive(html.encode(), _P(a.save).name, a.url, "evidence-search:browser")
         from .core.results import Hit as _Hit, Result as _R, Coverage as _C
         return _emit(_Hit(query=a.url, coverage=_C(queried=["browser"], responsive=["browser"]),
                           results=[_R(url=a.url, title=f"{len(html)} bytes retrieved",
@@ -533,7 +533,7 @@ def main(argv=None) -> int:
                     raw, _prov = _pdf.read(_tmp_path, allow_ocr=not a.no_ocr,
                                            max_pages=a.ocr_pages)
                     if _prov["source"] == "ocr":
-                        print(f"cascade-search: remote PDF had NO TEXT LAYER "
+                        print(f"evidence-search: remote PDF had NO TEXT LAYER "
                               f"({_prov['text_layer_chars']} chars) -- fell back to OCR, "
                               f"{_prov['pages_ocred']} page(s). NOT verbatim, NOT "
                               "human-verified.", file=sys.stderr)
@@ -582,7 +582,7 @@ def main(argv=None) -> int:
                 if _prov["source"] == "ocr":
                     # Loud, on stderr, every time. An OCR read that a worker
                     # mistakes for verbatim text is the failure this guards.
-                    print(f"cascade-search: NO TEXT LAYER "
+                    print(f"evidence-search: NO TEXT LAYER "
                           f"({_prov['text_layer_chars']} chars) -- fell back to OCR. "
                           f"{_prov['pages_ocred']} page(s) at {_prov['dpi']}dpi"
                           + (f", TRUNCATED at the {_prov['page_cap']}-page cap"
@@ -685,7 +685,7 @@ def main(argv=None) -> int:
 
         rec = store.get_record(a.record_id)
         if not rec:
-            print(f"No record {a.record_id!r}. List with: cascade-search record --list",
+            print(f"No record {a.record_id!r}. List with: evidence-search record --list",
                   file=sys.stderr)
             return EXIT_NO_LOCAL_DATA
         payload = rec["payload"]
@@ -738,7 +738,7 @@ def cli() -> int:
         print("\ninterrupted", file=sys.stderr)
         return 130  # conventional: 128 + SIGINT
     except Exception as exc:  # noqa: BLE001 -- deliberate top-level guard
-        print(f"cascade-search: internal error: {type(exc).__name__}: {exc}",
+        print(f"evidence-search: internal error: {type(exc).__name__}: {exc}",
               file=sys.stderr)
         print("This is a TOOL FAILURE, not a finding about the world.",
               file=sys.stderr)

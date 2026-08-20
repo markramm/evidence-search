@@ -9,13 +9,13 @@ import json
 import pathlib
 import tempfile
 
-from cascade_search.core import http as core_http
-from cascade_search.core.limits import Limiter
-from cascade_search.core.results import (AccessBlocker, Hit, RateLimited,
+from evidence_search.core import http as core_http
+from evidence_search.core.limits import Limiter
+from evidence_search.core.results import (AccessBlocker, Hit, RateLimited,
                                          VerifiedAbsence)
-from cascade_search.core.store import Store
-from cascade_search.sources import crossref as cr
-from cascade_search.sources import federal_register as fr
+from evidence_search.core.store import Store
+from evidence_search.sources import crossref as cr
+from evidence_search.sources import federal_register as fr
 
 
 def _kit():
@@ -64,7 +64,7 @@ def test_title_search_warns_that_it_is_fuzzy(monkeypatch):
 
 def test_unregistered_doi_is_an_absence_not_a_block(monkeypatch):
     """A 404 on a DOI lookup means the DOI is not registered -- a finding."""
-    from cascade_search.core.results import AccessBlocker as AB, Blocker
+    from evidence_search.core.results import AccessBlocker as AB, Blocker
     monkeypatch.setattr(cr, "fetch", lambda *a, **k: (
         None, AB(query="x", mechanism=Blocker.NOT_FOUND, url="u")))
     s, L = _kit()
@@ -91,7 +91,7 @@ def test_fedreg_count_is_a_real_total(monkeypatch):
 def test_fedreg_404_is_absence_but_503_is_a_blocker(monkeypatch):
     """Observed live: a transient 503 mid-session. Conflating it with 'no
     matching documents' is precisely the error this package exists to prevent."""
-    from cascade_search.core.results import AccessBlocker as AB, Blocker
+    from evidence_search.core.results import AccessBlocker as AB, Blocker
     monkeypatch.setattr(core_http, "fetch", lambda *a, **k: (
         None, AB(query="x", mechanism=Blocker.NOT_FOUND, url="u")))
     s, L = _kit()

@@ -18,8 +18,8 @@ from pathlib import Path
 #: different KB than the install instructions implied.
 DEFAULT_ARCHIVE = Path(
     os.environ.get("CASCADE_ARCHIVE")
-    or Path.home() / ".cascade-search" / "archive")
-MANIFEST = "MANIFEST-cascade-search.txt"
+    or Path.home() / ".evidence-search" / "archive")
+MANIFEST = "MANIFEST-evidence-search.txt"
 
 
 def sha256_bytes(data: bytes) -> str:
