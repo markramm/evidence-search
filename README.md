@@ -20,6 +20,49 @@ because it searched `"watch network"` instead of the movement's own name.
 
 Empty lists lie. Typed outcomes don't.
 
+## A negative I could actually publish
+
+In August 2026 I reported on a $244 million federal contract awarded without
+competition — the Office of Refugee Resettlement hired a charity with no
+documented legal practice to represent unaccompanied immigrant children.
+
+The load-bearing fact in that story is an absence:
+
+> Query the federal spending database by the organization's unique entity
+> identifier — every prime contract and every grant, back to fiscal year 2008.
+> The result is zero. This contract is the entire federal prime-award history
+> of the recipient. *(The query covers prime awards; it would not capture money
+> reaching the organization as a subcontractor or through a pass-through.)*
+
+*(The piece is written and fact-checked; at the time of writing it is held
+pending responses to requests for comment. The finding below is what the tool
+produced, not a claim about where it ran.)*
+
+That parenthetical is the point. Without it the sentence is an overclaim a
+lawyer could take apart, because a UEI-level prime-award query genuinely does
+not see subawards. With it, the claim is narrow, checkable, and survives.
+
+Getting there needed three things this tool provides and a bare search does not:
+
+1. **A typed negative.** The zero came back as `VerifiedAbsence`, not an empty
+   list — which means every engine answered. Had any been rate-limited, the
+   result would have downgraded to `RateLimited` and the claim would have been
+   unpublishable. That distinction is not a discipline you remember at 2am; it
+   is enforced in the type.
+2. **A control query.** The same query shape returned eleven awards for the
+   displaced incumbent. An absence you cannot contrast against a positive is
+   just a query you should not trust.
+3. **The scope, printed.** The `ASKED:` block names the exact strings and the
+   filters that bounded them, so the caveat in the published sentence was
+   copied from the tool rather than remembered.
+
+The same reporting also caught the tool being **wrong**, which is worth saying.
+An earlier draft claimed a $244,034,658 figure "appears nowhere in the
+contracting database" — because USAspending's API returns `null` for
+`base_and_all_options_value`. It is not absent; USAspending simply does not
+mirror it. FPDS-NG carries it directly. A null field in one mirror is not an
+absence in the record, and no type system catches that for you.
+
 ## Outcomes
 
 Every call returns one of these, never a bare list:
@@ -242,6 +285,53 @@ requires at least one digit.
 **This composes with subagent isolation rather than replacing it.** Isolation
 keeps bulk output out of the *conductor's* context; extraction keeps it out of
 the *worker's*. Both are needed.
+
+## How it behaves on other people's servers
+
+This hits court systems, government registries, and public APIs. Those are
+public records, and the tool is built to read them the way a careful person
+would — not to extract at machine speed because it can.
+
+**What it actually does, not what it promises:**
+
+- **Identifies itself.** Every request carries a `cascade-search` User-Agent.
+  Crossref gets a `mailto` in the UA because they ask for one — that is their
+  documented "polite pool," and joining it costs nothing.
+- **Rate limits are per-source, declared, and enforced before the fetch, not
+  after.** Run `cascade-search limits` to see every ceiling and current usage.
+  They are set from what each source publishes, and where a source publishes
+  nothing, from what its behaviour implies: OSCN engages Turnstile after
+  roughly ten fetches in a session, so the cap is 8 over a 30-minute window —
+  deliberate headroom, not the maximum we could get away with.
+- **The ledger is shared and reservation is atomic.** Twelve parallel agents
+  draw from one budget in a single SQLite ledger with `BEGIN IMMEDIATE`. Fan-out
+  cannot be used to multiply your way past a limit, which is the usual way
+  polite tooling becomes impolite.
+- **Caches for 24 hours by default.** The cheapest courtesy is not asking twice.
+- **Backs off instead of retrying.** A rate limit returns `RateLimited` (13) and
+  stops. There is no retry loop, because a retry loop against a struggling
+  server is how a research tool becomes a load test.
+
+**The browser tier is deliberately narrow.** Escalation to a real browser is
+restricted by an `ALLOWED_HOSTS` allow-list to court systems and government
+registries. It exists because CAPTCHA-walled public-records UIs frequently sit
+in front of data the same agency publishes ungated elsewhere, and a human with
+a browser is permitted to read those records. It is not a general-purpose
+bypass, and it will not run against a host that is not on the list.
+
+**What this does not do:** it does not evade paywalls, forge sessions, rotate
+identity to defeat rate limits, or fetch anything behind a login. When a wall
+is a wall, the tool returns `AccessBlocker` and names the mechanism. That is
+the whole design — a blocked request is a *reportable fact*, not an obstacle to
+route around.
+
+**On robots.txt:** the tool does not currently parse it. For the government
+APIs and public dockets it targets, the operative constraints are the published
+rate limits and terms it already honours. If you point it somewhere else, that
+is your call to make and your terms to read.
+
+**If you operate one of these sources and the behaviour here is wrong for you,
+open an issue.** The limits are configuration, not conviction.
 
 ## What this does NOT do
 
