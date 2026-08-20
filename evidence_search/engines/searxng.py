@@ -45,7 +45,7 @@ from ..core.http import fetch
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
                             Result, replay_cached, verified_absence)
-from ..core.store import Store, cache_key, normalize_url
+from ..core.store import CachePoisoned, Store, cache_key, normalize_url
 
 SOURCE = "searxng"
 DEFAULT_BASE = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
@@ -306,7 +306,15 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     if use_cache and cov.is_clean:
         # Only cache a CLEAN sweep. Caching a partial one would replay a
         # degraded search as though every engine had answered.
-        store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=3600)
+        try:
+            store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=3600)
+        except CachePoisoned as e:
+            # Refusing to cache is right, but the caller still asked a question:
+            # serve this run and let the next call re-fetch. This must NOT touch
+            # coverage -- coverage records WHO ANSWERED, and marking it errored
+            # would flip is_clean and downgrade a legitimate absence to
+            # RateLimited, conflating a storage problem with a retrieval one.
+            cov.cache_write_refused = str(e)
 
     if not out:
         # A zero from a fuzzy tier is a weak negative. Say so in the artifact

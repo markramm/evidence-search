@@ -341,3 +341,31 @@ def test_unfolded_results_are_not_marked_as_folded(monkeypatch):
     _reply(monkeypatch, _clean([{"url": "https://ex.gov/a", "engines": ["google"]}]))
     r = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=False).results[0]
     assert "folded_from" not in r.meta
+
+
+def test_a_refused_cache_write_still_serves_the_results(monkeypatch):
+    """CachePoisoned propagated out of searxng and crashed the call.
+
+    Refusing to cache is right, but the caller still asked a question. And the
+    refusal must NOT touch coverage: marking it errored would flip is_clean and
+    downgrade a legitimate absence to RateLimited, conflating a storage problem
+    with a retrieval one -- the precise confusion this package prevents.
+    """
+    from evidence_search.core.store import CachePoisoned
+    s, L = _kit()
+    _reply(monkeypatch, _clean([
+        {"url": f"https://ex.gov/{i}", "title": "T", "engines": ["google"]}
+        for i in range(4)]))
+
+    real_put = s.put
+    def refusing_put(key, source, payload, **kw):
+        if not kw.get("is_metadata"):
+            raise CachePoisoned("simulated parse-failure payload")
+        return real_put(key, source, payload, **kw)
+    monkeypatch.setattr(s, "put", refusing_put)
+
+    out = searxng.search("q", store=s, limiter=L, base="http://x", use_cache=True)
+    assert isinstance(out, Hit)
+    assert len(out.results) == 4, "results the caller asked for were dropped"
+    assert out.coverage.cache_write_refused
+    assert out.coverage.is_clean, "a storage problem must not dirty coverage"
