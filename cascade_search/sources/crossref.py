@@ -107,6 +107,7 @@ def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
 
     url = f"{API}/works/{quote(doi, safe='')}"
     body, blocked = fetch(url, source=SOURCE, query=doi, headers={"User-Agent": UA})
+    limiter.note_outcome(SOURCE, blocked)
     if blocked:
         # A 404 here means the DOI is not registered -- which IS a finding, and a
         # different one from being blocked.
@@ -158,6 +159,7 @@ def search(query: str, rows: int = 10, store: Store | None = None,
     t0 = time.time()
     url = f"{API}/works?query.title={quote(query)}&rows={rows}"
     body, blocked = fetch(url, source=SOURCE, query=query, headers={"User-Agent": UA})
+    limiter.note_outcome(SOURCE, blocked)
     if blocked:
         blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"})
         return blocked

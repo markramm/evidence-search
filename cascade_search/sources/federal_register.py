@@ -74,6 +74,7 @@ def search(query: str, doc_type: str | None = None, agency: str | None = None,
     t0 = time.time()
     url = f"{API}/documents.json?{urlencode(params)}"
     body, blocked = fetch(url, source=SOURCE, query=query)
+    limiter.note_outcome(SOURCE, blocked)
     if blocked:
         # The API 404s a search with zero results rather than returning an empty
         # list. That is an ABSENCE, not a wall, and conflating them would be

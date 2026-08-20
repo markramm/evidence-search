@@ -131,6 +131,36 @@ class Limiter:
     def note_success(self, source: str) -> None:
         self.store.clear_failures(source)
 
+    def note_outcome(self, source: str, blocked) -> None:
+        """Feed the escalating-backoff counter from a fetch result.
+
+        `reserve()` consults backoff_remaining() for EVERY source, but the
+        counter it reads was fed from exactly one place -- run_source() -- so
+        the four sources that predate that shell (crossref, federal_register,
+        usaspending, searxng) never backed off no matter how many times they
+        failed. Verified: five consecutive failures put a run_source source into
+        a 120s backoff and left the others at zero.
+
+        Bookkeeping must never convert a good answer into an error, so this
+        swallows its own exceptions -- same posture as the call site in
+        run_source, and the reason that one is wrapped there.
+        """
+        try:
+            if blocked is None:
+                self.note_success(source)
+                return
+            # Sources hand back either an outcome object carrying `mechanism`
+            # or, where the transport predates that shape (usaspending._post),
+            # a plain ("rate"|"status"|"timeout"|..., detail) tuple. Keep the
+            # specific reason in both cases -- backoff_remaining() surfaces it
+            # to the operator, and "error" explains nothing.
+            mech = getattr(blocked, "mechanism", None)
+            if mech is None and isinstance(blocked, tuple) and blocked:
+                mech = blocked[0]
+            self.note_failure(source, str(mech or "error"))
+        except Exception:
+            pass
+
     def reserve(self, source: str) -> tuple[bool, float | None, str]:
         """Atomically claim one call. (allowed, retry_after_s, reason).
 

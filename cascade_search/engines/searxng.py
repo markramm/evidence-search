@@ -217,6 +217,7 @@ def search(query: str, categories: str = "general", pageno: int = 1,
            f"&categories={quote(categories)}&pageno={pageno}&locale=en")
     body, blocked = fetch(url, source=SOURCE, query=query,
                           headers={"Accept-Language": "en-US,en;q=0.9"})
+    limiter.note_outcome(SOURCE, blocked)
     if blocked:
         blocked.coverage = Coverage(queried=[SOURCE], errored={SOURCE: "blocked"},
                                     elapsed_ms=int((time.time() - t0) * 1000))

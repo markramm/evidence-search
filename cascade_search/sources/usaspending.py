@@ -125,6 +125,7 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
                       {"filters": _filters(query, by_recipient,
                                            award_types or ALL_AWARD_TYPES,
                                            date_from, date_to)})
+    limiter.note_outcome(SOURCE, err)
     if err:
         kind, detail = err
         if kind in ("timeout", "rate"):
@@ -188,8 +189,16 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
     try:
         r = httpx.get(url, timeout=45, headers={"User-Agent": "cascade-search"})
     except httpx.HTTPError as e:
+        limiter.note_outcome(SOURCE, ("http", str(e)))
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "http"}),
                              mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
+    # A 404 is an ANSWER here, not a transport failure -- either the wrong id
+    # type or a genuine absence -- so it must not push the source toward
+    # backoff. Only 5xx/transport trouble counts against it.
+    if r.status_code >= 500:
+        limiter.note_outcome(SOURCE, ("status", f"HTTP {r.status_code}"))
+    elif r.status_code < 400:
+        limiter.note_outcome(SOURCE, None)
     if r.status_code == 404:
         # A 404 here is AMBIGUOUS and must never become a publishable negative.
         # This endpoint keys on USAspending's INTERNAL numeric award id (the one
@@ -348,6 +357,7 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
             **({"sort": "Award Amount", "order": "desc"}
                if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
                else {"sort": "Award ID", "order": "desc"})})
+        limiter.note_outcome(SOURCE, err)
         if err:
             kind, detail = err
             return AccessBlocker(query=query,
@@ -444,6 +454,7 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
         **({"sort": "Award Amount", "order": "desc"}
            if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
            else {"sort": "Award ID", "order": "desc"})})
+    limiter.note_outcome(SOURCE, err)
     if err:
         kind, detail = err
         if kind in ("timeout", "rate"):
