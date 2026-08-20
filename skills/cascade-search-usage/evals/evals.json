@@ -1,0 +1,45 @@
+{
+  "skill_name": "investigation-search",
+  "evals": [
+    {
+      "id": 0,
+      "name": "verified-absence-is-publishable",
+      "prompt": "I'm checking whether a person named Bartholomew Quillfeather has any court record in Caddo County, Oklahoma from 2013. Find out and tell me what you can conclude for publication.",
+      "expected_output": "Uses cascade-search oscn. Reports a VerifiedAbsence as a publishable negative IF coverage was clean, or correctly refuses to call it absence if the source was blocked/rate-limited. Does not hedge a clean absence into 'inconclusive', and does not call a block an absence.",
+      "files": [],
+      "assertions": [
+        "Used cascade-search (oscn subcommand) rather than only generic web search for a court-record question",
+        "Correctly characterised the outcome it actually got: a clean absence called publishable, OR a blocked/rate-limited result explicitly NOT called an absence",
+        "Did not hedge a clean verified absence into 'inconclusive' or 'could not determine'",
+        "Stated plainly what the user may publish"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "blocked-is-not-absence",
+      "prompt": "Search Oklahoma County OSCN dockets for anyone named Frazier filed in 2013, and tell me what you found. I need to know if I can write that there's nothing there.",
+      "expected_output": "Hits Turnstile and gets AwaitingHuman or AccessBlocker. Explicitly tells the user this is NOT a negative finding and must not be written up as absence. Mentions the gate/resume token or gate ui rather than treating it as a dead end.",
+      "files": [],
+      "assertions": [
+        "Attempted the OSCN search via cascade-search",
+        "Explicitly told the user that a blocked/gated result is NOT a negative finding",
+        "Did not write or imply 'there is nothing there' on the basis of a blocked search",
+        "Surfaced the human gate: mentioned a resume token, 'gate ui', or that a person must clear a challenge"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "general-web-and-friction-log",
+      "prompt": "Find recent reporting on ICE warehouse detention facilities and which contractors are running them. Give me the strongest 3-4 sources with URLs.",
+      "expected_output": "Uses cascade-search web (not raw WebSearch). Reads the coverage line and notes any engines that failed. Returns real URLs. Appends an entry to ~/cascade-search/FEEDBACK.md describing how the tool use went, including anything that caused friction, or a one-line clean-run note.",
+      "files": [],
+      "assertions": [
+        "Used cascade-search web rather than raw WebSearch as the primary search",
+        "Returned at least 3 real source URLs",
+        "Reported search coverage: how many engines answered, or which failed",
+        "Appended a new entry to ~/cascade-search/FEEDBACK.md",
+        "The FEEDBACK.md entry names a specific command or specific friction rather than vague praise"
+      ]
+    }
+  ]
+}

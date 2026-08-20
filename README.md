@@ -385,6 +385,25 @@ Not yet built: async job-queue consumption, cross-source federated merge
 (Phase 3b — ranking one result set across `web`/`news`/`courtlistener`
 together), local semantic layer, MCP shim (Phase 2).
 
+## Using it from an agent
+
+`skills/cascade-search-usage/` is a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills)
+that teaches an agent to drive this tool — which command answers which question,
+how to read the coverage line before trusting a result, when an empty result is
+a finding and when it is a tooling failure, and how to use `extract` instead of
+pulling pages into context.
+
+Install it by symlinking (or copying) into your skills directory:
+
+```bash
+ln -s "$PWD/skills/cascade-search-usage" ~/.claude/skills/cascade-search-usage
+```
+
+It pairs with [`hallway-agent-testing`](https://github.com/markramm/ramm-agent-skills),
+which carries the method for logging friction back here. That pairing is not
+incidental: most of the bug fixes in this repo came from agents reporting where
+the tool confused them mid-task, not from tests written in advance.
+
 ## Contributing
 
 Field reports are the most valuable contribution here. `FEEDBACK.md` is a
