@@ -101,7 +101,7 @@ it to a poisoned cache entry rather than the parser.
 **Would have helped:** the tool refusing to cache a payload where every row
 shares one placeholder identity; and cached results disclosing their age.
 **Severity:** blocked
-`[fixed f7f2f61 — Store.put raises CachePoisoned; replayed results now carry cache_age_s]`
+`[fixed 74711f3 — Store.put raises CachePoisoned; replayed results now carry cache_age_s]`
 
 ### Two back-to-back commands, second one RateLimited
 
@@ -112,7 +112,7 @@ shares one placeholder identity; and cached results disclosing their age.
 produced an error.
 **Would have helped:** an opt-in flag to absorb short spacing waits.
 **Severity:** annoyed
-`[fixed 763062c — --wait absorbs spacing only, never a budget window]`
+`[fixed 708fa63 — --wait absorbs spacing only, never a budget window]`
 
 ### Could not tell whether a gate was worth solving twice
 
@@ -124,7 +124,7 @@ entries showing `gate_type: None` / `capture: None`
 closely; "None" where a description belonged.
 **Would have helped:** collapsing duplicates, and describing gates in English.
 **Severity:** slowed
-`[fixed 6801ad2 — gate ui dedupes and describes; CLI list unchanged]`
+`[fixed f5ae696 — gate ui dedupes and describes; CLI list unchanged]`
 
 ### SearXNG failures misclassified under a non-English locale
 
@@ -136,7 +136,7 @@ wrong label — and a wrong label on a retryable condition is how a worker gives
 up on something it should have retried.
 **Would have helped:** pinning the response locale.
 **Severity:** slowed
-`[fixed 7533d97 — locale=en pinned; unrecognised messages now flagged unclassified]`
+`[fixed 198de0c — locale=en pinned; unrecognised messages now flagged unclassified]`
 
 ---
 
@@ -156,7 +156,7 @@ up on something it should have retried.
   - Clarifying in the oscn note whether the "~10 fetches/session" threshold relates to the shared-ledger count that `limits` reports.
 **Where it saved real work:** The `coverage: 0/2 responsive` line did in one glance what would otherwise have been several minutes of manually poking the URL to work out whether OSCN was down, slow, empty, or walling me. And the exit-code contract meant I did not have to reason about whether my negative was trustworthy — the tool refused to let me construct one. For a "can I publish this negative?" question specifically, this is the right shape.
 **Severity:** annoyed (gate duplication, county-name guessing) — the core outcome-typing worked and was the point.
-`[fixed 5f123da — gates dedupe at creation (same URL supersedes rather than accumulates); --county validates against the 77-county list and --list-counties enumerates them]`
+`[fixed b3bc6be — gates dedupe at creation (same URL supersedes rather than accumulates); --county validates against the 77-county list and --list-counties enumerates them]`
 `[tracked — the oscn note's "~10 fetches/session" still does not say whether it means the shared-ledger count that `limits` reports. Observed Turnstile at ledger-fetch 6.]`
 
 ## 2026-08-19 · eval-0-verified-absence-is-publishable · claude-opus-5
@@ -253,7 +253,7 @@ title-level "what exists" scan rather than a source of citations.
 **Would have helped:** resolve the redirect (one HEAD request follows it) and emit the
 publisher URL, or emit both. Also a `publisher:` field instead of gluing it into the title.
 **Severity:** slowed — arguably blocked for a news-only task.
-`[fixed 776fd62 — redirect URLs are marked non-citable and the publisher is surfaced from the feed rather than glued into the title. The redirect is NOT resolved: following it per-result spends a fetch apiece and Google rate-limits the hop. `news` is a "what exists" scan by design; `web` is the citation path.]`
+`[fixed 81dc1a1 — redirect URLs are marked non-citable and the publisher is surfaced from the feed rather than glued into the title. The redirect is NOT resolved: following it per-result spends a fetch apiece and Google rate-limits the hop. `news` is a "what exists" scan by design; `web` is the citation path.]`
 
 **2. `extract --ids` silently over-filters and reports a misleading reduction number.**
 **Command:** `cascade-search extract https://www.projectsaltbox.com/p/work-on-313-million-contract-to-convert --ids`
@@ -279,7 +279,7 @@ worked fine (95.7% reduction, all the facts).
 (c) when `--ids` yields under ~5 rows on a large document, say so — "1 match; consider --grep"
 — rather than reporting a triumphant 100.0%.
 **Severity:** slowed, with a real correctness hazard.
-`[fixed a3d872e + bc4ef13 — all three sub-items. (a) money matches scaled prose ($313 million, $1.2bn) and trailing-unit forms, not just digit-grouped; (b) contract modification IDs and PIIDs are in the --ids vocabulary; (c) a zero/low-yield extraction no longer reports a triumphant 100.0% reduction — the count is stated and a bare miss says so. This entry named the tool's own worst failure mode (a confident-looking wrong number) and it is the one that got fixed most thoroughly.]`
+`[fixed 1d20154 + 5f46710 — all three sub-items. (a) money matches scaled prose ($313 million, $1.2bn) and trailing-unit forms, not just digit-grouped; (b) contract modification IDs and PIIDs are in the --ids vocabulary; (c) a zero/low-yield extraction no longer reports a triumphant 100.0% reduction — the count is stated and a bare miss says so. This entry named the tool's own worst failure mode (a confident-looking wrong number) and it is the one that got fixed most thoroughly.]`
 
 **3. No way to page a large result set without re-running the whole search.**
 I wanted results 15-30 of a 30-result `web` hit. There's no `--offset`, no `--limit`, and the
@@ -289,7 +289,7 @@ rate-limit slot on a query I already had.
 **Would have helped:** `--limit/--offset`, or just say "use `--json | jq`" in the help text.
 I know `--json` exists from the skill doc but it wasn't obvious it was the paging answer.
 **Severity:** annoyed.
-`[fixed 0fe5a59 — --limit is now on every listing source, spelled the same way. No --offset: paging a cached result set belongs in `--json | jq`, and adding an offset that silently re-runs the query would spend a rate-limit slot to look like paging.]`
+`[fixed ec88f4c — --limit is now on every listing source, spelled the same way. No --offset: paging a cached result set belongs in `--json | jq`, and adding an offset that silently re-runs the query would spend a rate-limit slot to look like paging.]`
 
 **4. Where it clearly earned its keep — three things.**
 - `AccessBlocker` on the TIME article did exactly what the pitch says. Exit 2, `mechanism:
@@ -585,14 +585,14 @@ $ cascade-search --wait usaspending "<vendor-a>" --limit 52 --json
 cascade-search: error: unrecognized arguments: --json
 ```
 It's a global pre-subcommand flag (`cascade-search --json --wait usaspending ...`). SKILL.md shows it once, as `$CS --json web "query" | jq ...`, in a list where every *other* line puts flags after the subcommand — so the one correct example reads like the odd one out rather than the rule. **Would have helped:** one line in the commands block — "`--json` and `--wait` are global; they go before the subcommand." Cheap fix, and I lost a call to it.
-`[fixed d9c6494 — global flags are accepted in EITHER order now, so the command you ran works as typed. Better than documenting the rule: an ordering constraint that costs a call to discover is worth removing rather than explaining.]`
+`[fixed 00ca941 — global flags are accepted in EITHER order now, so the command you ran works as typed. Better than documenting the rule: an ordering constraint that costs a call to discover is worth removing rather than explaining.]`
 
 **Friction 3 — no `--json` on `extract`, so structured docs have to be re-parsed by hand. Severity: annoyed, worked around.** These claims reports are genuine tables (VENDOR | NATURE OF CLAIM | DEPT | FUND | AMOUNT | DATE). `--tables` exists and is the obvious fit, but on a 400-page packet where table rows are interleaved with narrative I couldn't get it to give me rows I could trust, so I fell back to `pdftotext -layout` + my own parser. **Would have helped:** `extract --tables --json` emitting row arrays, even best-effort with a confidence flag. Not a blocker — but "the corpus is tabular and the tool reads it as prose" is the recurring shape of this beat's documents (ESAC extracts, ISP XLSX, county claims registers).
 
 **A note on `web` that is a compliment and a caveat.** `web "<county-a> Illinois vendor payments checkbook transparency accounts payable disbursements"` is what cracked this task — the county's own agenda-packet PDFs surfaced at #2 and #4, and the `*UNIQUE*` markers were right that these were single-engine finds. But the top hit for both of my Kane-County-payment queries was the *Illinois State Comptroller*, which is the wrong corpus by construction (it holds State of Illinois payments; <county-a> is a unit of local government and its disbursements never pass through it). Ranking put the authoritative-looking-but-structurally-irrelevant source first and the actual answer fourth-ish. No fix implied — just: on government-finance questions the top hit is often the biggest agency rather than the right jurisdiction, and reading down mattered here.
 
 **Severity:** slowed overall. Nothing wrong shipped, and one wrong thing (the SAT/synopsis-threshold mixup) was caught *by* the tool. But Friction 1 is a live correctness hazard for exactly the "defensible negative" use case the tool exists for — a silent empty read on a large remote PDF is indistinguishable from a clean extraction.
-`[fixed d9c6494 + 182db4a — remote PDFs are decoded rather than read as bytes, and a zero-match grep says so explicitly instead of reporting a triumphant reduction over nothing. Your framing of the hazard is the one the fix was written against: an empty read that looks like a clean extraction is a false absence manufactured inside the tool, which is the single thing it must never do. `--tables --json` remains unfixed and tracked.]`
+`[fixed 00ca941 + 182db4a — remote PDFs are decoded rather than read as bytes, and a zero-match grep says so explicitly instead of reporting a triumphant reduction over nothing. Your framing of the hazard is the one the fix was written against: an empty read that looks like a clean extraction is a false absence manufactured inside the tool, which is the single thing it must never do. `--tables --json` remains unfixed and tracked.]`
 
 ## 2026-08-19 · <vendor-a> parent-task synthesis pass (no field research) · agent:claude-sonnet-5-parallel-tick3-c
 **Task:** claim the <vendor-a>/<vendor-a> PARENT task, read every child task's work log + the org profile, and update the parent's own deliverable with a cross-cluster synthesis and a highest-value-gap recommendation. Explicitly not a cascade-search research task — I never called `cascade-search` myself this pass, so I have nothing to add to today's rich thread above about `--all-types`, `extract` truncation, or `web` ranking. This entry is about `~/kb/kb` (Pyrite) instead, which is in scope per the skill's own framing ("report friction on a tool you just used").
@@ -897,7 +897,7 @@ Right now `results: 20` is ambiguous between "20 matches" and "20 shown, N total
 caveat in my dispatch ("read meta.total_matches, a row count is not a count") is un-actionable as built.
 **Severity:** slowed. It also degraded a finding: I could not distinguish whether `"Calibre Press"`'s 20
 rows were the whole match set or a page, so I wrote it up as unverified rather than as reach evidence.
-`[fixed 0fe5a59 — the header now prints `results: N of M total_matches`, so a 20-row page can no longer be mistaken for a complete match set. Your note that the dispatch caveat was "un-actionable as built" is the sharpest statement of the problem in this file: the doc told workers to read a field they could not reach. Three independent reports; one line of output.]`
+`[fixed ec88f4c — the header now prints `results: N of M total_matches`, so a 20-row page can no longer be mistaken for a complete match set. Your note that the dispatch caveat was "un-actionable as built" is the sharpest statement of the problem in this file: the doc told workers to read a field they could not reach. Three independent reports; one line of output.]`
 
 **Friction 2 — `extract --grep` returning "~3 tok / 100.0% reduction" reads as success but means zero matches.**
 
@@ -917,7 +917,7 @@ substantive-reference distinction my dispatch prompt warned about.
 (3 patterns tried)` — instead of reporting a reduction percentage. A zero result and a 100% reduction are
 the same number but not the same finding.
 **Severity:** slowed, and near-miss on a wrong conclusion.
-`[fixed 9e18f72 — keyword-vs-recipient-name collisions now warn and name the distinct recipients matched.]`
+`[fixed eef4697 — keyword-vs-recipient-name collisions now warn and name the distinct recipients matched.]`
 
 **Friction 3 — `usaspending --group contracts --limit 30` caps output below the vendor's award count, with no total.**
 
@@ -936,7 +936,7 @@ accordingly, which materially weakens it — "at least $217,454" is a much weake
 matching awards, not just the displayed page. For a procurement-heavy beat this is the single most
 common question asked of the tool and it is currently the one thing it will not answer directly.
 **Severity:** slowed (≈10 regex-and-sum detours), and it degraded the output's evidentiary strength.
-`[fixed bc4ef13 — `usaspending --sum` returns a real total and says whether it is complete or a floor, which is what removes the hand-summing detours. 08fa7ae made it honour --from/--to rather than silently ignoring the bounds and still calling itself complete.]`
+`[fixed 5f46710 — `usaspending --sum` returns a real total and says whether it is complete or a floor, which is what removes the hand-summing detours. 08fa7ae made it honour --from/--to rather than silently ignoring the bounds and still calling itself complete.]`
 
 **Worked well — and specifically, this is what cracked the ticket.**
 
@@ -1084,7 +1084,7 @@ doc recommends.
 awards in well under a minute including sleep spacing), but it is a silent gap: nothing in
 `--help` or the skill doc flags that PSC/NAICS require leaving the tool, so the first attempt
 (via `record`) cost a full round-trip before I found the actual path.
-`[fixed 2cb0d80 — `usaspending --detail <id>` returns PSC and NAICS directly; you were the third worker to hand-roll the same curl loop, which is what made the case. The very next opus-5 pass used it and reported it carried that task's central finding: PSC codes 6910 TRAINING AIDS / U099 contradicted a vendor's own marketing and corrected a standing KB judgment. This is the clearest complaint-to-shipped-feature loop in the file.]`
+`[fixed 887fe54 — `usaspending --detail <id>` returns PSC and NAICS directly; you were the third worker to hand-roll the same curl loop, which is what made the case. The very next opus-5 pass used it and reported it carried that task's central finding: PSC codes 6910 TRAINING AIDS / U099 contradicted a vendor's own marketing and corrected a standing KB judgment. This is the clearest complaint-to-shipped-feature loop in the file.]`
 
 ---
 
@@ -1129,7 +1129,7 @@ positional optional when `--detail` is given, or error if both are supplied. *Ob
 `"L"` returned the right record. *Concluded (may be wrong):* the query is discarded rather than
 cross-checked.
 **Severity:** annoyed, with a latent correctness hazard.
-`[fixed 69331f2 — the positional is optional under --detail, and supplying both cross-checks: a query that does not appear in the returned record prints a NOTE naming both. The hazard you predicted (`"<vendor-b>" --detail <a-<vendor-d>-id>` returning <vendor-d> under a <vendor-b> query) is the exact case it now catches.]`
+`[fixed 6103d1c — the positional is optional under --detail, and supplying both cross-checks: a query that does not appear in the returned record prints a NOTE naming both. The hazard you predicted (`"<vendor-b>" --detail <a-<vendor-d>-id>` returning <vendor-d> under a <vendor-b> query) is the exact case it now catches.]`
 
 **Friction 2 — `courtlistener` `total_matches` is not in the human-readable output, and I had
 to write Python to find it.** The skill doc is emphatic: "Counting filings? Quote the phrase,
@@ -1153,7 +1153,7 @@ that, the skill doc should say *where* the field lives, because "read `total_mat
 top-level field and it is not one. This is the doc's single most-repeated numeric caution and
 the field is the hardest one in the tool to actually get to.
 **Severity:** slowed.
-`[fixed 0fe5a59 — the human header now reads `results: 20 of 293 total_matches (this page only -- cite 293, not 20)` on every source reporting a total. Your framing decided the fix: the count the doc leans on hardest should not be the field hardest to reach. Independently reported in the vendor-market census entry above — two reports, one line of output.]`
+`[fixed ec88f4c — the human header now reads `results: 20 of 293 total_matches (this page only -- cite 293, not 20)` on every source reporting a total. Your framing decided the fix: the count the doc leans on hardest should not be the field hardest to reach. Independently reported in the vendor-market census entry above — two reports, one line of output.]`
 
 **Friction 3 — `extract` truncates by default and the cap costs a round-trip.** Command:
 ```
@@ -1225,7 +1225,7 @@ overstatement my ticket warned against. `/about-us` worked fine on the next try.
 the copy to "the URL does not exist; check the path" rather than the anti-blocker language,
 which should be reserved for Cloudflare/Turnstile/403.
 **Severity:** annoyed, with a real overclaim hazard on exactly this beat.
-`[fixed 0fe5a59 — 404/410 no longer print the anti-blocker language. They now read "NOT a negative finding, and NOT a block -- the URL does not exist", name the path-guess case, and suppress ESCALATABLE. Exit code is deliberately unchanged (still 2, never a verified absence). Reported independently by tick7-b during a sequential-id sweep; you called the register mismatch and the overclaim hazard exactly right.]`
+`[fixed ec88f4c — 404/410 no longer print the anti-blocker language. They now read "NOT a negative finding, and NOT a block -- the URL does not exist", name the path-guess case, and suppress ESCALATABLE. Exit code is deliberately unchanged (still 2, never a verified absence). Reported independently by tick7-b during a sequential-id sweep; you called the register mismatch and the overclaim hazard exactly right.]`
 
 **Friction 6 — GlobeNewswire `extract` times out repeatedly (reported, not blocking).**
 ```
@@ -1320,7 +1320,7 @@ recipient footprint" as a sourced claim instead of an inference. **Worked well**
 single most load-bearing call in the whole task, and it did precisely what was needed in one
 shot with no ambiguity.
 
-`[fixed 0fe5a59 — 404 is split out of the blocker register and now names the enumeration case directly: "on an enumerated id range, a 404 usually means that id was never issued or has been pruned." You reported this as a register mismatch rather than a bug, which is what it was; the opus-5 <vendor-d> entry hit the same edge from the path-guess side. Two independent reports, one fix.]`
+`[fixed ec88f4c — 404 is split out of the blocker register and now names the enumeration case directly: "on an enumerated id range, a 404 usually means that id was never issued or has been pruned." You reported this as a register mismatch rather than a bug, which is what it was; the opus-5 <vendor-d> entry hit the same edge from the path-guess side. Two independent reports, one fix.]`
 **Severity:** annoyed (the AccessBlocker-on-404 register issue), otherwise clean — no blockers,
 no rate-limit surprises beyond the normal shared-ledger `web` RateLimited-then-retry cycle
 documented elsewhere in this log, which behaved exactly as described.
@@ -1364,7 +1364,7 @@ code — I'm reporting the filtered observation, not claiming a bug.) **Would ha
 absent fields explicitly as `PSC: (none in record)` rather than omitting the line. Silence is
 ambiguous in exactly the place where the codes are the load-bearing evidence.
 **Severity:** slowed (and carries a correctness hazard — I nearly wrote "no PSC assigned").
-`[fixed 0fe5a59 — absent fields are now NAMED: `PSC: (none in record)` rather than a dropped line. Checked against your exact award: 307695512 genuinely has no PSC, so your hedge was right and the tool was hiding the fact rather than the fact being unavailable. Your instinct to report the filtered observation without claiming a bug was the correct call, and it found a real one.]`
+`[fixed ec88f4c — absent fields are now NAMED: `PSC: (none in record)` rather than a dropped line. Checked against your exact award: 307695512 genuinely has no PSC, so your hedge was right and the tool was hiding the fact rather than the fact being unavailable. Your instinct to report the filtered observation without claiming a bug was the correct call, and it found a real one.]`
 
 **Friction 2 — the same `web` rate-limit wall defeated the same question twice, and the tool
 can't tell me that.** My site-scoped query returned:
@@ -1673,7 +1673,7 @@ call instead of three. Short of that, the docs' existing "usaspending recipient 
 precise on CONTRACTS, fuzzy on grants/loans" caution should be broadened: it's also fuzzy
 between a subsidiary and a parent-company keyword, on contracts, when the parent name isn't
 itself a recipient of record.
-`[fixed 9e18f72 — a --sum/--count whose awards resolve to recipient names other than the one asked for now prints the distinct names found and warns explicitly not to add the total to another vendor's without checking shared award IDs. Verified live on `usaspending "<vendor-h> Technologies" --sum`, which surfaces <VENDOR-H> TECHNOLOGIES INC. + <VENDOR-H> USG INC. Your catch is quoted in the warning text: the $10.7B double-count is named as the reason it exists.]`
+`[fixed eef4697 — a --sum/--count whose awards resolve to recipient names other than the one asked for now prints the distinct names found and warns explicitly not to add the total to another vendor's without checking shared award IDs. Verified live on `usaspending "<vendor-h> Technologies" --sum`, which surfaces <VENDOR-H> TECHNOLOGIES INC. + <VENDOR-H> USG INC. Your catch is quoted in the warning text: the $10.7B double-count is named as the reason it exists.]`
 
 **Command:** `~/cascade-search/.venv/bin/cascade-search usaspending --detail 291199463 --wait`
 **Expected:** enough detail to confirm which specific program/system an ICE-<vendor-h> award
@@ -1806,7 +1806,7 @@ marker are doing real work rather than getting lucky on small result sets.
    starker: *every one* of the 283 awards returned by `"<vendor-e-parent>"` has
    recipient `<VENDOR-E> INC`, and the naive sum is $10,737,830,486.25 —
    the flagged figure, reproduced exactly. "<vendor-e-parent>" is not a second entity
-   in this corpus at all. The 9e18f72 warning fires correctly on it.
+   in this corpus at all. The eef4697 warning fires correctly on it.
 
 2. **Claim 6 was understated by its own author, which is the safe direction.**
    The worker reported 4× `6910 TRAINING AIDS`; there are 5, plus a `U008
