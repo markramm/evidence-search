@@ -36,6 +36,7 @@ from typing import Any
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
                             Result, replay_cached, verified_absence)
+from ..core.source import run_source
 from ..core.store import Store, cache_key
 
 SOURCE = "usaspending"
@@ -97,6 +98,46 @@ def _post(path: str, body: dict, timeout: float = 45.0):
         return None, ("parse", str(e))
 
 
+def _post_transport(body: dict):
+    """Adapt _post to the (payload, outcome_or_None) shape run_source expects.
+
+    The shell is GET-only because every other source is. Everything around the
+    request -- cache, reserve, backoff, absence, CachePoisoned -- is identical
+    here, so only the request is swapped rather than the whole shell being
+    re-implemented around it, which is what this module used to do.
+
+    _post already classifies its own failures, so the mapping is direct: a
+    timeout or a 429 is a RateLimited, anything else is a blocker. Returning
+    the decoded dict as the payload means parse callbacks receive JSON rather
+    than re-parsing text.
+    """
+    def transport(url, *, source, query="", headers=None):
+        path = url[len(API):] if url.startswith(API) else url
+        data, err = _post(path, body)
+        if err is None:
+            return data, None
+        kind, detail = err
+        if kind in ("timeout", "rate"):
+            return None, RateLimited(
+                query=query, coverage=Coverage(queried=[source], errored={source: kind}),
+                source=source, retry_after_s=60, detail=detail)
+        return None, AccessBlocker(
+            query=query, coverage=Coverage(queried=[source], errored={source: kind}),
+            mechanism=Blocker.SERVER_ERROR, url=url, detail=detail)
+    return transport
+
+
+def _keep_transport_outcome(blocked, body):
+    """Return the transport's own outcome unchanged.
+
+    run_source otherwise rewrites coverage to errored={source: "blocked"},
+    which would flatten the kind _post worked out -- "rate" and "timeout" are
+    the ones that distinguish a retryable pause from a wall, and a RateLimited
+    that reads as blocked loses its retry_after_s meaning.
+    """
+    return blocked
+
+
 def _filters(query: str, by_recipient: bool, award_types: list[str],
              date_from: str | None, date_to: str | None) -> dict:
     f: dict[str, Any] = {"award_type_codes": award_types}
@@ -110,40 +151,17 @@ def _filters(query: str, by_recipient: bool, award_types: list[str],
     return f
 
 
-def counts(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
-           date_from: str | None = None, date_to: str | None = None,
-           store: Store | None = None, limiter: Limiter | None = None):
-    """Real totals by award type. The countable primitive this beat needs."""
-    store = store or Store()
-    limiter = limiter or Limiter(store)
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    data, err = _post("/search/spending_by_award_count/",
-                      {"filters": _filters(query, by_recipient,
-                                           award_types or ALL_AWARD_TYPES,
-                                           date_from, date_to)})
-    limiter.note_outcome(SOURCE, err)
-    if err:
-        kind, detail = err
-        if kind in ("timeout", "rate"):
-            return RateLimited(query=query,
-                               coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
-                               source=SOURCE, retry_after_s=60, detail=detail)
-        return AccessBlocker(query=query,
-                             coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
-                             mechanism=Blocker.SERVER_ERROR, url=f"{API}/search/spending_by_award_count/",
-                             detail=detail)
-
+def _parse_counts(data, query: str, by_recipient: bool) -> list[Result]:
+    """The count endpoint returns one summary row, not a list of awards."""
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object, got {type(data).__name__}")
     res = data.get("results") or {}
     total = sum(v for v in res.values() if isinstance(v, int))
-    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"])
-    mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
     if not total:
-        return verified_absence(query, cov, f"usaspending award counts ({mode})")
-    return Hit(query=query, coverage=cov, results=[Result(
+        return []
+
+    mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
+    return [Result(
         url=f"https://www.usaspending.gov/search?keywords={query}",
         title=f"{total} federal awards matching {query!r}",
         snippet=" | ".join(f"{k}: {v}" for k, v in res.items() if v),
@@ -157,7 +175,37 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
                                "KEYWORD search is full-text across descriptions: this "
                                "counts records CONTAINING the words, not awards TO a "
                                "vendor. Use --recipient for a vendor total.")},
-    )])
+    )]
+
+
+def counts(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
+           date_from: str | None = None, date_to: str | None = None,
+           store: Store | None = None, limiter: Limiter | None = None,
+           use_cache: bool = True):
+    """Real totals by award type. The countable primitive this beat needs."""
+    types = award_types or ALL_AWARD_TYPES
+    mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
+    return run_source(
+        query, source=SOURCE, url=f"{API}/search/spending_by_award_count/",
+        searched=f"usaspending award counts ({mode})",
+        parse=lambda d: _parse_counts(d, query, by_recipient),
+        transport=_post_transport(
+            {"filters": _filters(query, by_recipient, types, date_from, date_to)}),
+        on_blocked=_keep_transport_outcome,
+        store=store, limiter=limiter, use_cache=use_cache,
+        exact_match_supported=False,
+        corpus=("USAspending award counts from FY2008. Unlike a web tier this "
+                "IS a measurement -- the endpoint counts the matching awards."),
+        caveats=([] if by_recipient else
+                 ["KEYWORD counts records CONTAINING the words, not awards TO a "
+                  "vendor. A count from a keyword search is not a count of "
+                  "anything in particular."]),
+        not_searched=["awards below the reporting threshold",
+                      "classified and otherwise unreported spending"],
+        cache_params={"mode": "count", "recipient": by_recipient,
+                      "types": ",".join(types),
+                      "date_from": date_from, "date_to": date_to},
+    )
 
 
 def detail(record_id: str, store: Store | None = None, limiter: Limiter | None = None):
@@ -410,72 +458,12 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     )])
 
 
-def search(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
-           date_from: str | None = None, date_to: str | None = None, limit: int = 25,
-           page: int = 1, store: Store | None = None, limiter: Limiter | None = None,
-           use_cache: bool = True):
-    """List awards. Carries the real total from the count endpoint alongside."""
-    store = store or Store()
-    limiter = limiter or Limiter(store)
-    types = award_types or CONTRACT_TYPES
-    # Refuse a mixed group here rather than letting the API 422 mid-task.
-    groups = {g for g, codes in AWARD_GROUPS.items() if set(types) & set(codes)}
-    if len(groups) > 1:
-        return AccessBlocker(
-            query=query,
-            coverage=Coverage(queried=[SOURCE], errored={SOURCE: "mixed-award-groups"}),
-            mechanism=Blocker.SERVER_ERROR, url=f"{API}/search/spending_by_award/",
-            detail=("USAspending rejects a listing that mixes award-type groups "
-                    f"({', '.join(sorted(groups))}). List one group at a time: "
-                    "--group contracts | idvs | assistance. (`--count` accepts a "
-                    "mixed list, which is why a total can succeed where a listing "
-                    "cannot.)"))
-
-    key = cache_key(SOURCE, query, recipient=by_recipient, types=",".join(types),
-                    date_from=date_from, date_to=date_to, page=page, limit=limit)
-    if use_cache:
-        entry = store.get_entry(key)
-        if entry is not None:
-            return replay_cached(query, entry[0], entry[1], source=SOURCE,
-                                 searched=f"usaspending awards ({query})")
-
-    allowed, retry, why = limiter.reserve(SOURCE)
-    if not allowed:
-        return RateLimited(query=query, coverage=Coverage(queried=[SOURCE], rate_limited=[SOURCE]),
-                           source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
-
-    t0 = time.time()
-    data, err = _post("/search/spending_by_award/", {
-        "filters": _filters(query, by_recipient, types, date_from, date_to),
-        "fields": FIELDS, "limit": limit, "page": page,
-        # Loans have no "Award Amount" field -- sorting on it returns HTTP 400
-        # ("not found in Loan Award mappings"). Sort by the one field every
-        # group shares, and let the caller re-sort if they care.
-        **({"sort": "Award Amount", "order": "desc"}
-           if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
-           else {"sort": "Award ID", "order": "desc"})})
-    limiter.note_outcome(SOURCE, err)
-    if err:
-        kind, detail = err
-        if kind in ("timeout", "rate"):
-            return RateLimited(query=query,
-                               coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
-                               source=SOURCE, retry_after_s=60, detail=detail)
-        return AccessBlocker(query=query,
-                             coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
-                             mechanism=Blocker.SERVER_ERROR,
-                             url=f"{API}/search/spending_by_award/", detail=detail)
-
+def _parse_awards(data, query: str, page: int, store) -> list[Result]:
+    """Rows into Results. `data` is already-decoded JSON from _post_transport."""
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object, got {type(data).__name__}")
     rows = data.get("results") or []
     pm = data.get("page_metadata") or {}
-    cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"],
-                   elapsed_ms=int((time.time() - t0) * 1000))
-    if not rows:
-        if use_cache:
-            store.put(key, SOURCE, [], ttl_s=86400)
-        return verified_absence(query, cov,
-                                f"usaspending awards, {'recipient' if by_recipient else 'keyword'} "
-                                f"search across {len(types)} award types")
 
     out = []
     for r in rows:
@@ -507,6 +495,62 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
                   "page_note": ("USAspending paginates without a total; call "
                                 "`usaspending --count` for the real figure.")},
         ))
-    if use_cache:
-        store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=86400)
-    return Hit(query=query, coverage=cov, results=out)
+    return out
+
+
+def search(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
+           date_from: str | None = None, date_to: str | None = None, limit: int = 25,
+           page: int = 1, store: Store | None = None, limiter: Limiter | None = None,
+           use_cache: bool = True):
+    """List awards. Carries the real total from the count endpoint alongside."""
+    store = store or Store()
+    types = award_types or CONTRACT_TYPES
+
+    # Refuse a mixed group BEFORE spending a ledger slot: the API 422s on it,
+    # and this is a caller error we can name precisely rather than a wall.
+    groups = {g for g, codes in AWARD_GROUPS.items() if set(types) & set(codes)}
+    if len(groups) > 1:
+        return AccessBlocker(
+            query=query,
+            coverage=Coverage(queried=[SOURCE], errored={SOURCE: "mixed-award-groups"}),
+            mechanism=Blocker.SERVER_ERROR, url=f"{API}/search/spending_by_award/",
+            detail=("USAspending rejects a listing that mixes award-type groups "
+                    f"({', '.join(sorted(groups))}). List one group at a time: "
+                    "--group contracts | idvs | assistance. (`--count` accepts a "
+                    "mixed list, which is why a total can succeed where a listing "
+                    "cannot.)"))
+
+    body = {
+        "filters": _filters(query, by_recipient, types, date_from, date_to),
+        "fields": FIELDS, "limit": limit, "page": page,
+        # Loans have no "Award Amount" field -- sorting on it returns HTTP 400
+        # ("not found in Loan Award mappings"). Sort by the one field every
+        # group shares, and let the caller re-sort if they care.
+        **({"sort": "Award Amount", "order": "desc"}
+           if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
+           else {"sort": "Award ID", "order": "desc"})}
+
+    mode = "recipient" if by_recipient else "keyword"
+    return run_source(
+        query, source=SOURCE, url=f"{API}/search/spending_by_award/",
+        searched=(f"usaspending awards, {mode} search across "
+                  f"{len(types)} award types"),
+        parse=lambda d: _parse_awards(d, query, page, store),
+        transport=_post_transport(body),
+        on_blocked=_keep_transport_outcome,
+        store=store, limiter=limiter, use_cache=use_cache,
+        # recipient_search_text is precise on contracts and much fuzzier on
+        # assistance awards; keywords is full-text and fuzzy by construction.
+        exact_match_supported=False,
+        corpus=("USAspending: federal awards from FY2008. A defined corpus, but "
+                "this LISTING is one page -- `--count` gives the real total."),
+        caveats=([] if by_recipient else
+                 ["KEYWORD search is full-text across award descriptions: it "
+                  "matches records CONTAINING the words, not awards TO a vendor."]),
+        not_searched=["awards below the reporting threshold",
+                      "classified and otherwise unreported spending",
+                      f"award-type groups other than {', '.join(sorted(groups)) or 'contracts'}"],
+        cache_params={"recipient": by_recipient, "types": ",".join(types),
+                      "date_from": date_from, "date_to": date_to,
+                      "page": page, "limit": limit},
+    )

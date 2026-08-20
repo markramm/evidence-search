@@ -430,7 +430,8 @@ def main(argv=None) -> int:
             types = usa.ALL_AWARD_TYPES if a.all_types else usa.CONTRACT_TYPES
             return _emit(usa.counts(a.query, by_recipient=not a.keywords,
                                     award_types=types, date_from=a.date_from,
-                                    date_to=a.date_to, store=store, limiter=limiter), a.json)
+                                    date_to=a.date_to, store=store, limiter=limiter,
+                                    use_cache=use_cache), a.json)
         types = usa.AWARD_GROUPS[a.group]
         return _emit(usa.search(a.query, by_recipient=not a.keywords, award_types=types,
                                 date_from=a.date_from, date_to=a.date_to,

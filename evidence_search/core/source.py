@@ -44,6 +44,7 @@ def run_source(
     corpus: str = "",
     not_searched: list[str] | None = None,
     caveats: list[str] | None = None,
+    transport=None,
 ):
     """Run one source end to end and return a typed Outcome.
 
@@ -69,9 +70,19 @@ def run_source(
 
     `archive_as(query)` returns a filename; the fetched bytes are archived with
     a SHA-256 on retrieval, never as an afterthought.
+
+    `transport(url, source=, query=, headers=)` replaces the default GET,
+    returning the same (payload, outcome_or_None) pair. USAspending is a
+    POST-body API, and before this it had to re-implement the whole shell --
+    cache, reserve, absence, backoff -- around one differently-shaped request.
+    Everything except the request itself is identical, so only the request is
+    swapped. A transport that returns a non-str payload skips archiving, which
+    expects bytes or text.
     """
     from .http import fetch as http_fetch
     from .results import AccessBlocker, Blocker
+
+    request = transport or http_fetch
 
     store = store or Store()
     limiter = limiter or Limiter(store)
@@ -90,7 +101,7 @@ def run_source(
             source=source, retry_after_s=int(retry) if retry else None, detail=why)
 
     t0 = time.time()
-    body, blocked = http_fetch(url, source=source, query=query, headers=headers)
+    body, blocked = request(url, source=source, query=query, headers=headers)
     queried = [source]
 
     # Feed the escalating-backoff counter. A source that keeps failing should be
@@ -147,7 +158,10 @@ def run_source(
                       result_count=n, exact_match_supported=exact_match_supported,
                       at=time.time())]
 
-    if archive_as:
+    if archive_as and isinstance(body, (str, bytes, bytearray)):
+        # A custom transport may hand back already-decoded JSON; archiving wants
+        # the bytes as served, and inventing a serialisation would archive
+        # something the source never actually sent.
         from .archive import archive as _archive
         _archive(body.encode() if isinstance(body, str) else body,
                  archive_as, url, f"evidence-search:{source}")

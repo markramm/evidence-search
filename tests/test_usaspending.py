@@ -379,3 +379,77 @@ def test_numeric_id_that_404s_is_a_real_absence(monkeypatch):
     out = usa.detail("999999999999", store, limiter)
     assert isinstance(out, VerifiedAbsence), type(out)
     assert "numeric award id" in out.searched
+
+
+# --- on the shared shell ------------------------------------------------------
+# search() and counts() run through run_source via a POST transport. dollar_sum
+# and detail() deliberately do not -- see the module for why.
+
+def test_a_429_stays_rate_limited_and_keeps_its_kind(monkeypatch):
+    """run_source rewrites a blocked outcome's coverage to errored={src:
+    "blocked"}, which would flatten the kind _post worked out. "rate" is what
+    distinguishes a retryable pause from a wall."""
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (None, ("rate", "60")))
+    s, L = _kit()
+    out = usa.counts("x", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, RateLimited)
+    assert out.coverage.errored == {"usaspending": "rate"}
+    assert out.retry_after_s == 60
+
+
+def test_a_500_is_a_blocker_not_a_rate_limit(monkeypatch):
+    from evidence_search.core.results import AccessBlocker
+    monkeypatch.setattr(usa, "_post",
+                        lambda p, b, timeout=45.0: (None, ("status", "HTTP 500")))
+    s, L = _kit()
+    out = usa.counts("x", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, AccessBlocker) and not isinstance(out, RateLimited)
+    assert out.coverage.errored == {"usaspending": "status"}
+
+
+def test_a_zero_count_is_an_auditable_absence(monkeypatch):
+    monkeypatch.setattr(usa, "_post",
+                        lambda p, b, timeout=45.0: ({"results": {"contracts": 0}}, None))
+    s, L = _kit()
+    out = usa.counts("nobody", store=s, limiter=L, use_cache=False)
+    assert isinstance(out, VerifiedAbsence)
+    assert out.probes and out.probes[0].query == "nobody"
+    assert out.not_searched
+
+
+def test_counts_now_caches(monkeypatch):
+    """It never did. The module docstring says to pace an unmetered public API
+    conservatively; re-asking the same question was a free call it did not make."""
+    calls = []
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: (
+        calls.append(1) or ({"results": {"contracts": 7}}, None)))
+    s, L = _kit()
+    usa.counts("v", store=s, limiter=L)
+    out = usa.counts("v", store=s, limiter=L)
+    assert len(calls) == 1, "identical count query hit the API twice"
+    assert out.coverage.cache_hits == 1
+
+
+def test_keyword_counts_declare_themselves_fuzzy(monkeypatch):
+    """A count from a keyword search is not a count OF anything in particular."""
+    monkeypatch.setattr(usa, "_post",
+                        lambda p, b, timeout=45.0: ({"results": {"contracts": 0}}, None))
+    s, L = _kit()
+    out = usa.counts("x", by_recipient=False, store=s, limiter=L, use_cache=False)
+    assert isinstance(out, VerifiedAbsence)
+    assert any("keyword" in c.lower() for c in out.caveats)
+
+
+def test_mixed_award_groups_refused_before_a_ledger_slot_is_spent(monkeypatch):
+    """The API 422s on mixed groups. That is a caller error we can name, and it
+    must not cost a rate-limit reservation."""
+    from evidence_search.core.results import AccessBlocker
+    called = []
+    monkeypatch.setattr(usa, "_post", lambda p, b, timeout=45.0: called.append(1) or ({}, None))
+    s, L = _kit()
+    out = usa.search("x", award_types=usa.CONTRACT_TYPES + usa.GRANT_TYPES,
+                     store=s, limiter=L, use_cache=False)
+    assert isinstance(out, AccessBlocker)
+    assert "one group at a time" in out.detail
+    assert not called, "a refused call still hit the network"
+    assert s.count_calls("usaspending", 60.0) == 0, "a refused call spent a ledger slot"
