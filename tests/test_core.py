@@ -2,6 +2,8 @@
 import tempfile, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import pytest
+
 from cascade_search.core.results import (
     Coverage, Blocker, AccessBlocker, RateLimited, VerifiedAbsence, verified_absence, Result)
 from cascade_search.core.store import Store, normalize_url, cache_key
@@ -101,6 +103,7 @@ def test_propublica_deref():
     assert _deref(arr, arr[0]) == {"result": [{"a_txt": "Jane Doe"}], "q": "Blue Owl"}
 
 
+@pytest.mark.real_spacing
 def test_propublica_policy_registered():
     L = Limiter(tmpstore())
     p = L.policy("propublica_disclosures")

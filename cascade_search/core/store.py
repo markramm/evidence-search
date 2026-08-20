@@ -9,13 +9,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
-DEFAULT_DB = Path.home() / ".cascade-search" / "store.db"
+#: The call ledger and cache. Override with CASCADE_DB.
+#:
+#: This is SHARED STATE by design -- the rate limiter's whole point is that
+#: parallel workers spend one budget, not one each. That makes an override
+#: necessary rather than merely convenient: a test suite (or a second profile)
+#: must be able to get its own ledger instead of racing the real one.
+DEFAULT_DB = Path(
+    os.environ.get("CASCADE_DB")
+    or Path.home() / ".cascade-search" / "store.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cache (

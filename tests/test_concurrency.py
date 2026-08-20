@@ -7,6 +7,8 @@ import pathlib
 import tempfile
 import threading
 
+import pytest
+
 from cascade_search.core.limits import Limiter
 from cascade_search.core.store import Store
 
@@ -74,6 +76,7 @@ def test_reserve_rolls_back_when_over_limit():
     assert s.count_calls("brave", 1.0) == before, "refused reservation still recorded a call"
 
 
+@pytest.mark.real_spacing
 def test_wait_covers_spacing_but_never_a_budget_window(monkeypatch):
     """--wait may absorb sub-second spacing; it must NOT hide a real limit.
 
