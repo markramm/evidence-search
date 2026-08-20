@@ -163,7 +163,7 @@ walk the structure to find what the negative is about.
 | `courtlistener` | optional token | **5/min · 50/hr · 125/day, concurrent** | `storage.courtlistener.com` serves PDFs where `/recap` 403s. |
 | `propublica_disclosures` | none | 15/min | SvelteKit `__data.json`; param is **`q=`** not `search=`. |
 | `docs` | none | 25/min | Documentation `llms.txt` indexes. Sites: `claude-code`, `claude-api`. |
-| `searxng` | none | 30/min | General web via a LOCAL container. 251 engines; coverage rebuilt from its metadata. |
+| `searxng` | none | 30/min | General web via a LOCAL instance (native or containerised). 251 engines; coverage rebuilt from its metadata. |
 | `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — the countable primitive. |
 | `fedreg` | none | 30/min | Federal Register rules/notices/EOs. `count` is a real total. |
 | `crossref` | none | 40/min | Scholarly records. DOI lookup is exact; title search is FUZZY. |
@@ -337,7 +337,7 @@ open an issue.** The limits are configuration, not conviction.
 
 **It is not a general web search replacement** — though `searxng` now closes
 most of that gap. It covers the sources this beat uses: courts, contracts,
-disclosures, news, docs, and (via a local SearXNG container) the general web.
+disclosures, news, docs, and (via a local SearXNG instance) the general web.
 
 ## General web, on our terms
 
@@ -509,8 +509,10 @@ do not grant storage rights; that is a policy field, not a footnote.
 
 ## Status
 
-Phase 1. **54 tests passing.** Browser escalation, the humanomation gate
-(open/list/resume), and local extraction are built and working.
+Phase 1, and honestly labelled: this is a tool built for one reporter's beat,
+in the open, with its warts logged in `FEEDBACK.md`. **156 tests passing** on
+Python 3.10-3.13. Browser escalation, the humanomation gate (open/list/resume),
+and local extraction are built and working.
 
 Not yet built: async job-queue consumption, cross-source federated merge
 (Phase 3b — ranking one result set across `web`/`news`/`courtlistener`
