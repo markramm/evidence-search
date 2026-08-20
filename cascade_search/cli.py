@@ -8,18 +8,33 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 
 from .core.results import AccessBlocker, AwaitingHuman, Hit, RateLimited, VerifiedAbsence
 from .core.store import Store
 from .core.limits import Limiter
 
 
-def _emit(outcome, as_json: bool) -> int:
+def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
     """Print, and return an exit code that encodes the OUTCOME TYPE.
 
     Exit codes let a shell caller branch without parsing:
       0 hits | 1 verified absence | 2 blocked | 3 rate-limited | 4 awaiting human
+
+    `limit` trims the DISPLAY only. Sources that page upstream (usaspending,
+    crossref, fedreg) apply their own limit at the API; the rest return what one
+    call returns, and this caps the rows printed so `--limit` means the same
+    thing everywhere. Trimming display is safe here precisely because the header
+    reports the true total -- a shortened list can never read as a smaller
+    corpus.
     """
+    if limit is not None and isinstance(outcome, Hit) and limit < len(outcome.results):
+        shown = list(outcome.results[:limit])
+        if not any(r.meta.get("total_matches") is not None for r in shown):
+            # Preserve the honest denominator when the trim would hide it.
+            shown = [replace(shown[0], meta={**shown[0].meta,
+                                             "total_matches": len(outcome.results)})] + shown[1:]
+        outcome = replace(outcome, results=shown)
     if as_json:
         print(json.dumps(outcome.to_dict(), indent=2, default=str))
     else:
@@ -28,7 +43,23 @@ def _emit(outcome, as_json: bool) -> int:
         print(f"query:    {outcome.query}")
         print(f"coverage: {outcome.coverage.summary()}")
         if isinstance(outcome, Hit):
-            print(f"results:  {len(outcome.results)}\n")
+            # The upstream TOTAL, when the source reported one.
+            #
+            # It was always carried on meta.total_matches, but only reachable via
+            # --json, nested inside results[0] rather than at the top level. The
+            # skill doc's most-repeated numeric caution is "read total_matches;
+            # 'at least 20' is almost never the honest answer" -- and following
+            # that advice meant writing a recursive JSON walker. One worker did
+            # exactly that to learn a 20-row page stood for 293 matches. A count
+            # that decides whether scale IS the claim should not be the hardest
+            # field in the tool to reach.
+            total = next((r.meta.get("total_matches") for r in outcome.results
+                          if r.meta.get("total_matches") is not None), None)
+            if total is not None and total > len(outcome.results):
+                print(f"results:  {len(outcome.results)} of {total} total_matches"
+                      f"  (this page only -- cite {total}, not {len(outcome.results)})\n")
+            else:
+                print(f"results:  {len(outcome.results)}\n")
             for i, r in enumerate(outcome.results, 1):
                 mark = " *UNIQUE*" if r.unique_to_engine and len(r.engines) else ""
                 print(f"{i:3}. {r.title[:100]}{mark}")
@@ -69,9 +100,18 @@ def _emit(outcome, as_json: bool) -> int:
             print(f"mechanism: {outcome.mechanism.value}")
             print(f"url:       {outcome.url}")
             print(f"detail:    {outcome.detail}")
-            print("\nNOT a negative finding. Access was blocked.")
-            if outcome.escalate_to_browser:
-                print("ESCALATABLE: a real browser session could plausibly pass this gate.")
+            if outcome.is_wall:
+                print("\nNOT a negative finding. Access was blocked.")
+                if outcome.escalate_to_browser:
+                    print("ESCALATABLE: a real browser session could plausibly pass this gate.")
+            else:
+                # 404/410. Nobody is walling us; the path is wrong or the id was
+                # never issued. Saying "access was blocked" here invites an
+                # overclaim about suppression -- the exact error this tool exists
+                # to prevent, arriving from inside the tool.
+                print("\nNOT a negative finding, and NOT a block -- the URL does not exist.")
+                print("Check the path (e.g. /about vs /about-us). On an enumerated id range,")
+                print("a 404 usually means that id was never issued or has been pruned.")
         elif isinstance(outcome, RateLimited):
             print(f"source:    {outcome.source}")
             # "retry after: Nones" when the source gave no interval -- say what
@@ -99,8 +139,16 @@ def main(argv=None) -> int:
                         "(sub-minute only; never waits out a real budget window)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    # Every source that returns a list takes --limit, spelled the same way.
+    # Learning the flag six times (--rows, --per-page, --limit, or nothing at
+    # all) cost a round-trip per source; the argparse error names the valid
+    # flags but only after the call has already failed.
+    def _limit(sp, default=25):
+        sp.add_argument("--limit", type=int, default=default,
+                        help="max results shown (the header still reports the true total)")
+
     n = sub.add_parser("news", help="Google News RSS (free, keyless)")
-    n.add_argument("query")
+    n.add_argument("query"); _limit(n)
 
     o = sub.add_parser("oscn", help="Oklahoma State Courts Network")
     o.add_argument("--county",
@@ -121,12 +169,13 @@ def main(argv=None) -> int:
     c.add_argument("--cursor",
                    help="next page: pass meta.next_cursor from a prior result "
                         "(v4 pages by cursor, not page number)")
+    _limit(c)
 
     pp = sub.add_parser("propublica", help="ProPublica Trump-team financial disclosures")
-    pp.add_argument("query")
+    pp.add_argument("query"); _limit(pp)
 
     w = sub.add_parser("web", help="general web via a local SearXNG container")
-    w.add_argument("query")
+    w.add_argument("query"); _limit(w)
     w.add_argument("--categories", default="general",
                    help="general, news, science, files, images…")
     w.add_argument("--page", type=int, default=1)
@@ -161,7 +210,10 @@ def main(argv=None) -> int:
 
     cr = sub.add_parser("crossref", help="scholarly records; DOI lookup is exact")
     cr.add_argument("query", help="a DOI (exact) or title words (FUZZY discovery)")
-    cr.add_argument("--rows", type=int, default=10)
+    # --limit is the portable spelling across every source; --rows is kept
+    # because it is upstream's own name and is in field commands already.
+    cr.add_argument("--limit", "--rows", type=int, default=10, dest="rows",
+                    help="max results (alias: --rows)")
 
     fr = sub.add_parser("fedreg", help="Federal Register rules/notices (real counts)")
     fr.add_argument("query")
@@ -172,12 +224,14 @@ def main(argv=None) -> int:
     fr.add_argument("--from", dest="date_from", help="published on/after YYYY-MM-DD")
     fr.add_argument("--to", dest="date_to", help="published on/before YYYY-MM-DD")
     fr.add_argument("--page", type=int, default=1)
-    fr.add_argument("--per-page", type=int, default=20)
+    fr.add_argument("--limit", "--per-page", type=int, default=20, dest="per_page",
+                    help="max results per page (alias: --per-page)")
 
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
     dc.add_argument("--site", default="claude-code")
     dc.add_argument("--fetch-top", type=int, default=0, help="also fetch N page bodies")
+    _limit(dc)
 
     b = sub.add_parser("browser", help="fetch a public-records page with a real browser")
     b.add_argument("url")
@@ -231,7 +285,7 @@ def main(argv=None) -> int:
 
     if a.cmd == "news":
         from .engines.news_rss import search
-        return _emit(search(a.query, store, limiter, use_cache), a.json)
+        return _emit(search(a.query, store, limiter, use_cache), a.json, a.limit)
 
     if a.cmd == "oscn":
         from .sources import oscn
@@ -252,16 +306,17 @@ def main(argv=None) -> int:
         from .sources import courtlistener
         return _emit(courtlistener.search(a.query, a.type, a.court, store, limiter,
                                           use_cache, cursor=a.cursor),
-                     a.json or a.format == "json")
+                     a.json or a.format == "json", a.limit)
 
     if a.cmd == "propublica":
         from .sources import propublica_disclosures
-        return _emit(propublica_disclosures.search(a.query, store, limiter, use_cache), a.json)
+        return _emit(propublica_disclosures.search(a.query, store, limiter, use_cache),
+                     a.json, a.limit)
 
     if a.cmd == "web":
         from .engines.searxng import search as web_search
         return _emit(web_search(a.query, a.categories, a.page, a.base,
-                                store, limiter, use_cache), a.json)
+                                store, limiter, use_cache), a.json, a.limit)
 
     if a.cmd == "usaspending":
         from .sources import usaspending as usa
@@ -313,7 +368,8 @@ def main(argv=None) -> int:
 
     if a.cmd == "docs":
         from .sources import docs as docs_src
-        return _emit(docs_src.search(a.query, a.site, a.fetch_top, store, limiter, use_cache), a.json)
+        return _emit(docs_src.search(a.query, a.site, a.fetch_top, store, limiter, use_cache),
+                     a.json, a.limit)
 
     if a.cmd == "browser":
         from .core import browser

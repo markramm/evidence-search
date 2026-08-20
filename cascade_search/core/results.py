@@ -220,6 +220,21 @@ class AccessBlocker(Outcome):
             Blocker.DATADOME, Blocker.JS_ONLY,
         }
 
+    @property
+    def is_wall(self) -> bool:
+        """True when something actively refused us; False when the URL is wrong.
+
+        A 404 is not a wall. Two field workers read `AccessBlocker: http-404`
+        as suppression: one nearly wrote that a trade publication was blocking
+        its own about-page (the path was simply `/about-us`), which on this beat
+        is a spicy and completely false claim; another saw it ~1 in 7 while
+        sweeping a sequential-id range, where a missing id is ordinary and is
+        itself useful signal. Both paused to re-check a healthy tool. The
+        mechanism was always in the output -- the REGISTER was what misled, so
+        the split is at render time, not in classification.
+        """
+        return self.mechanism not in {Blocker.NOT_FOUND}
+
 
 @dataclass
 class RateLimited(Outcome):
