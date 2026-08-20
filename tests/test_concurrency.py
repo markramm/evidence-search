@@ -17,23 +17,50 @@ def _db():
     return pathlib.Path(tempfile.mkdtemp()) / "t.db"
 
 
+#: A source with no policy of its own, so it resolves to DEFAULT_POLICY.
+#:
+#: This was `"brave"`, from a policy deleted in an earlier pass. Nothing failed
+#: -- it silently fell through to DEFAULT_POLICY, whose window happens to be the
+#: same 20 the assertion checks, while the comment claimed "20 per 1s" against
+#: an actual 20 per 60s. The name is now honest about the fallthrough, and
+#: _assert_probe_policy() below makes the dependency explicit so that adding a
+#: real policy under this name breaks loudly instead of quietly retargeting the
+#: test.
+PROBE = "_test_default_policy_probe"
+
+
+def _assert_probe_policy(L):
+    """Pin what this probe actually resolves to.
+
+    The race these tests exercise is in the WINDOW path. A probe that grew a
+    min_interval_s would be serialised by spacing instead, masking the race --
+    and would still pass, which is the failure mode worth preventing.
+    """
+    pol = L.policy(PROBE)
+    assert pol.windows == [(60, 20)], (
+        f"probe resolved to {pol.windows}; this test assumes DEFAULT_POLICY's "
+        "20-per-60s window")
+    return pol
+
+
 def test_reservation_is_atomic_under_parallel_workers():
     """THE original bug: N workers must not collectively exceed the window.
 
-    Brave is the probe because it has no min_interval_s -- other sources are
-    accidentally serialised by their spacing, which MASKS the race rather than
-    preventing it.
+    The probe deliberately resolves to DEFAULT_POLICY, whose min_interval_s the
+    conftest zeroes. Sources with real spacing are accidentally serialised by
+    it, which MASKS the race rather than preventing it.
     """
     db = _db()
     Store(db)
-    n_workers, limit = 40, 20          # brave: 20 per 1s
+    _assert_probe_policy(Limiter(Store(db)))
+    n_workers, limit = 40, 20          # DEFAULT_POLICY: 20 per 60s
     barrier = threading.Barrier(n_workers)
     granted, lock = [], threading.Lock()
 
     def worker(i):
         L = Limiter(Store(db))
         barrier.wait()                 # force genuine simultaneity
-        if L.reserve("brave")[0]:
+        if L.reserve(PROBE)[0]:
             with lock:
                 granted.append(i)
 
@@ -42,7 +69,7 @@ def test_reservation_is_atomic_under_parallel_workers():
     [t.join() for t in ts]
 
     assert len(granted) <= limit, (
-        f"{len(granted)} workers granted against a {limit}/s limit -- "
+        f"{len(granted)} workers granted against a {limit}-per-60s limit -- "
         "check() and record() are not atomic")
     assert granted, "reservation deadlocked: nobody got through"
 
@@ -69,11 +96,12 @@ def test_reserve_rolls_back_when_over_limit():
     db = _db()
     s = Store(db)
     L = Limiter(s)
+    _assert_probe_policy(L)
     for _ in range(20):
-        L.reserve("brave")
-    before = s.count_calls("brave", 1.0)
-    assert not L.reserve("brave")[0]
-    assert s.count_calls("brave", 1.0) == before, "refused reservation still recorded a call"
+        L.reserve(PROBE)
+    before = s.count_calls(PROBE, 60.0)
+    assert not L.reserve(PROBE)[0]
+    assert s.count_calls(PROBE, 60.0) == before, "refused reservation still recorded a call"
 
 
 @pytest.mark.real_spacing
