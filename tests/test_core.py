@@ -28,6 +28,23 @@ def test_dirty_coverage_cannot_yield_verified_absence():
         assert isinstance(verified_absence("q", bad, "x"), RateLimited)
 
 
+def test_dirty_coverage_cannot_be_constructed_directly():
+    """The same guarantee, at the type rather than the factory.
+
+    verified_absence() is the friendly path and downgrades. But the constructor
+    was reachable, and an object built that way renders as publishable and exits
+    11 while resting on engines that never answered.
+    """
+    for bad in (Coverage(queried=["a", "b"], responsive=["a"], rate_limited=["b"]),
+                Coverage(queried=["a"], responsive=[], errored={"a": "boom"}),
+                Coverage()):
+        with pytest.raises(ValueError, match="clean coverage"):
+            VerifiedAbsence(query="q", coverage=bad, searched="x")
+
+    clean = Coverage(queried=["a"], responsive=["a"])
+    assert VerifiedAbsence(query="q", coverage=clean, searched="x").coverage.is_clean
+
+
 def test_blockers_flag_browser_escalation():
     for mech in (Blocker.CLOUDFLARE, Blocker.TURNSTILE, Blocker.RECAPTCHA,
                  Blocker.DATADOME, Blocker.JS_ONLY):

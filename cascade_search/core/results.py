@@ -182,6 +182,27 @@ class VerifiedAbsence(Outcome):
     #: knows its own blind spots (fuzzy matching, page caps, coverage gaps).
     caveats: list[str] = field(default_factory=list)
 
+    def __post_init__(self):
+        """Refuse to exist on dirty coverage.
+
+        This is the one invariant the tool is named for, and it was previously
+        guarded only by verified_absence() -- so the obvious constructor
+        bypassed it in silence, producing an object that renders as publishable
+        and exits 11 while resting on engines that never answered. Convention is
+        too thin for the claim this type makes.
+
+        Callers should use verified_absence(), which downgrades to RateLimited
+        rather than raising. Reaching the constructor directly with incomplete
+        coverage is a programming error, so it is loud.
+        """
+        if not self.coverage.is_clean:
+            raise ValueError(
+                "VerifiedAbsence requires clean coverage; got "
+                f"{self.coverage.summary()}. A tooling-limited negative is not "
+                "an absence -- use verified_absence(), which downgrades to "
+                "RateLimited."
+            )
+
     @property
     def is_absolute(self) -> bool:
         """True only if every probe was exact-matched and nothing was left unsearched.
