@@ -84,8 +84,24 @@ def test_wait_covers_spacing_but_never_a_budget_window():
     L = Limiter(Store(db))
     L.wait_for_spacing = True
 
-    assert L.reserve("news_rss")[0]
-    assert L.reserve("news_rss")[0], "0.5s spacing should be absorbed by --wait"
+    # Assert that --wait ACTUALLY SLEEPS for the spacing gap, rather than
+    # asserting the second reserve happens to succeed. The latter depends on
+    # wall-clock behaviour of a real sleep against a real window boundary,
+    # which is fine on a quiet laptop and flaky on a shared CI runner. What we
+    # care about is the decision: a sub-second spacing gap is slept through.
+    slept: list[float] = []
+    import time as _time
+    orig = _time.sleep
+    _time.sleep = lambda s: slept.append(s)
+    try:
+        assert L.reserve("news_rss")[0]
+        L.reserve("news_rss")
+    finally:
+        _time.sleep = orig
+
+    assert slept, "--wait should absorb a sub-second spacing gap by sleeping"
+    assert all(s <= Limiter.MAX_SPACING_WAIT_S for s in slept), (
+        f"--wait must never sleep longer than the spacing cap; slept {slept}")
 
     # Exhaust courtlistener's 5/min budget window; --wait must still refuse.
     L2 = Limiter(Store(_db()))

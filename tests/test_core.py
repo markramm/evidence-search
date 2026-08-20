@@ -224,8 +224,15 @@ def test_unreadable_pdf_is_a_blocker_not_binary_noise(tmp_path, capsys):
     code = main(["extract", str(pdf), "--text", "--no-ocr"])
     out = capsys.readouterr().out
     assert code == 2, "an unreadable PDF must be a blocker, not silently mangled"
-    assert "Scanned PDF" in out or "text layer" in out
+    # Assert the INVARIANT, not one blocker's wording. Which blocker fires is
+    # environment-dependent -- with poppler present it is "no text layer", and
+    # without it "pdftotext not found". Both are correct refusals; pinning the
+    # string made this test fail on any machine lacking poppler (CI included)
+    # while the behaviour under test was fine.
+    assert "AccessBlocker" in out
+    assert "NOT a negative finding" in out, "a refusal must never read as an absence"
     assert "% reduction" not in out, "must not report a savings figure for a refusal"
+    assert "binary noise" not in out, "the binary must never reach the caller"
 
 
 def test_savings_reports_expansion_rather_than_negative_reduction():

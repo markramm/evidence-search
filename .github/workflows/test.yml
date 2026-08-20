@@ -18,7 +18,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[test]'
-      # The suite is offline by design -- every network path is stubbed. A test
-      # run that needs the live internet would make CI a flakiness generator and
-      # would quietly turn upstream outages into red builds.
+      # The suite is offline by design (every network path is stubbed) AND
+      # binary-free: no poppler/tesseract installed here on purpose. Tests must
+      # assert the INVARIANT rather than one environment's blocker wording --
+      # pinning "no text layer" passed locally and failed here, where the
+      # correct-but-different "pdftotext not found" blocker fires instead.
+      # Depending on the live internet or on host binaries would turn upstream
+      # outages and runner images into red builds.
       - run: python -m pytest -q
