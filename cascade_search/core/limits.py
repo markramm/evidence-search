@@ -5,6 +5,7 @@ in production. Discovering them at runtime costs a worker's dispatch cycle.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from .store import Store
@@ -120,9 +121,8 @@ class Limiter:
         n, last, reason = self.store.failure_state(source)
         if n < 2:            # one failure is a blip; two is a pattern
             return 0.0, n, reason
-        import time as _t
         wait = min(p.backoff_max_s, p.backoff_base_s * (2 ** (n - 2)))
-        remaining = (last + wait) - _t.time()
+        remaining = (last + wait) - time.time()
         return (max(0.0, remaining), n, reason)
 
     def note_failure(self, source: str, reason: str = "") -> int:
@@ -153,8 +153,7 @@ class Limiter:
         # Retry once after a SHORT spacing wait, when the caller asked for it.
         if (not allowed and self.wait_for_spacing and "min interval" in why
                 and retry is not None and retry <= self.MAX_SPACING_WAIT_S):
-            import time as _t
-            _t.sleep(retry)
+            time.sleep(retry)
             allowed, retry, why = self.store.reserve_call(
                 source, p.windows, min_interval_s=p.min_interval_s,
                 session_max=p.session_max, session_window_s=p.session_window_s)
@@ -179,8 +178,7 @@ class Limiter:
             n = self.store.count_calls(source, window_s)
             if n >= max_calls:
                 oldest = self.store.oldest_call_in_window(source, window_s)
-                import time as _t
-                retry = max(1.0, (oldest + window_s) - _t.time()) if oldest else window_s
+                retry = max(1.0, (oldest + window_s) - time.time()) if oldest else window_s
                 return False, retry, (
                     f"{source}: {n}/{max_calls} calls in {int(window_s)}s window")
 

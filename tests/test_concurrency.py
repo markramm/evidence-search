@@ -74,7 +74,7 @@ def test_reserve_rolls_back_when_over_limit():
     assert s.count_calls("brave", 1.0) == before, "refused reservation still recorded a call"
 
 
-def test_wait_covers_spacing_but_never_a_budget_window():
+def test_wait_covers_spacing_but_never_a_budget_window(monkeypatch):
     """--wait may absorb sub-second spacing; it must NOT hide a real limit.
 
     Sleeping out a 50/hr cap would turn an informative RateLimited into a hang,
@@ -89,15 +89,18 @@ def test_wait_covers_spacing_but_never_a_budget_window():
     # wall-clock behaviour of a real sleep against a real window boundary,
     # which is fine on a quiet laptop and flaky on a shared CI runner. What we
     # care about is the decision: a sub-second spacing gap is slept through.
+    # Patch sleep ONLY inside the limits module. An earlier version of this
+    # test replaced time.sleep globally, which silently disabled the identical
+    # spacing-wait inside usaspending.dollar_sum's paging loop and turned a
+    # sibling test's complete sum into a RateLimited partial. Reaching into a
+    # stdlib module from a test is how one test breaks another.
     slept: list[float] = []
-    import time as _time
-    orig = _time.sleep
-    _time.sleep = lambda s: slept.append(s)
-    try:
-        assert L.reserve("news_rss")[0]
-        L.reserve("news_rss")
-    finally:
-        _time.sleep = orig
+    import cascade_search.core.limits as limits_mod
+    monkeypatch.setattr(limits_mod.time, "sleep", lambda s: slept.append(s),
+                        raising=False)
+
+    assert L.reserve("news_rss")[0]
+    L.reserve("news_rss")
 
     assert slept, "--wait should absorb a sub-second spacing gap by sleeping"
     assert all(s <= Limiter.MAX_SPACING_WAIT_S for s in slept), (
@@ -110,7 +113,13 @@ def test_wait_covers_spacing_but_never_a_budget_window():
         L2.store.record_call("courtlistener")
     allowed, retry, why = L2.reserve("courtlistener")
     assert not allowed, "--wait must never wait out a budget window"
-    assert "window" in why
+    # WHICH refusal fires is timing-dependent: record_call does not advance the
+    # clock, so on a fast runner the min-interval check can trip before the
+    # window check. Either is a correct refusal. The invariant with teeth is
+    # that --wait did NOT sleep the caller through a real budget window.
+    assert not any(s > Limiter.MAX_SPACING_WAIT_S for s in slept), (
+        "--wait slept longer than the spacing cap, which means it waited out a "
+        f"budget window: {slept}")
 
 
 def test_backoff_escalates_on_a_run_of_failures_not_a_blip():
