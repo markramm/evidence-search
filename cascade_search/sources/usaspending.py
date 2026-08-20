@@ -191,8 +191,25 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "http"}),
                              mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
     if r.status_code == 404:
+        # A 404 here is AMBIGUOUS and must never become a publishable negative.
+        # This endpoint keys on USAspending's INTERNAL numeric award id (the one
+        # in a result's meta.record_id / the /award/<n>/ URL), not on a PIID.
+        # Passing a PIID -- `70CDCR26FR0000001`, the identifier a human actually
+        # has -- 404s even though the award plainly exists and a recipient search
+        # returns it. Reporting that as VerifiedAbsence tells a researcher the
+        # record is not there, which is the single worst thing this tool can say.
+        if not num.isdigit():
+            return AccessBlocker(
+                query=num,
+                coverage=Coverage(queried=[SOURCE], errored={SOURCE: "wrong-id-type"}),
+                mechanism=Blocker.WRONG_ID_TYPE, url=url,
+                detail=(f"{num!r} is not USAspending's internal numeric award id, and "
+                        "this endpoint accepts nothing else. THIS IS NOT AN ABSENCE -- "
+                        "the award may well exist. Look it up by name or keyword first "
+                        "(`cascade-search usaspending \"<recipient>\"`), then pass the "
+                        "numeric id from that result's meta.record_id."))
         return verified_absence(num, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                                f"usaspending award detail for id {num}")
+                                f"usaspending award detail for numeric award id {num}")
     if r.status_code >= 400:
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "status"}),
                              mechanism=Blocker.SERVER_ERROR, url=url,

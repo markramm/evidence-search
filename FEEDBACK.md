@@ -1700,3 +1700,47 @@ plain `--sum`/`--limit` combination on `usaspending` is what actually caught two
 wrong-figure findings in this task (a disputed $10.7B aggregate, an overstated $30M-plus-
 $139.3M framing that was really one $150.7M contract) — the tool did its job well once I
 knew to cross-check keyword hits against recipient-name hits by PIID.
+
+---
+
+## 2026-08-19 — conductor tick 9, absorbing five parallel workers (opus-5)
+
+**Bug found in the field, and it is the exact failure this tool exists to prevent.**
+While QC-checking a worker's claim that DHS delivery order `70CDCR26FR0000001`
+was worth $598,444,871, I ran `usaspending --detail 70CDCR26FR0000001` to verify
+independently. It returned **VerifiedAbsence** — a *publishable negative* — on an
+award that plainly exists and that `usaspending "<vendor-f>"` returns
+as its first result.
+
+The cause: `/awards/<id>/` keys on USAspending's **internal numeric award id**
+(`352043007`, the number in the `/award/<n>/` URL), not on a PIID. A PIID is the
+identifier a researcher actually has in hand — off a contract, a press release, a
+sibling worker's note — so passing one is the *expected* mistake, not an exotic
+one. The endpoint 404s, and the 404 branch rendered that as a verified absence.
+
+Severity: **highest possible for this tool.** A worker checking whether an award
+exists would have concluded it does not. The `>= 400` branch already carried a
+hint about constructed `CONT_AWD_...` strings 404ing, so the failure mode was
+half-known — it just was not wired into the 404 path.
+
+Fixed: a non-numeric id that 404s now returns `AccessBlocker` with a new
+`WRONG_ID_TYPE` mechanism and a detail line that says NOT AN ABSENCE and names
+the recovery path (look up by name, take `meta.record_id`). A numeric id that
+404s is still a real, bounded `VerifiedAbsence`. Both paths have regression tests.
+
+**Worth generalising:** any endpoint keyed on an internal surrogate id has this
+shape. `record` and the courtlistener cursor paths should be audited for the same
+"caller passed the human-facing identifier" case before 0.2.
+
+**Worked well.** The `MATCHED 2 DISTINCT RECIPIENT NAMES` warning on `--sum`
+caught a real error during the same tick: a worker reported an Acquisition
+Logistics lifetime total of $938,792,019.07/34 and guessed the variance against
+its own $915,073,700.81/33 figure was "a contract added between pulls." It was
+not — the bare-name query spans `ACQUISITION LOGISTICS LLC` (33 awards) *plus*
+`ACQUISITION LOGISTICS SUPPORT GROUP` (1 award, $23,718,318.26), and the two sum
+to the larger figure exactly. The warning is what made that diagnosable in one
+call instead of three. Keep it; consider making it louder in `--json`.
+
+**Minor:** exit codes are correct (2 / 1 / 0 verified directly) — an earlier note
+in this log suggesting otherwise was a shell artifact from piping into `head`,
+which reports the pipe's status, not the CLI's. Not a tool defect.

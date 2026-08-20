@@ -3,7 +3,27 @@ name = "cascade-search"
 version = "0.1.0"
 description = "Federated research client for the cascade investigation pipeline: typed outcomes, coverage metadata, structured government sources, and archive-on-retrieval."
 requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "Mark Ramm"}]
+readme = "README.md"
+keywords = ["research", "osint", "foia", "court-records", "federal-contracting", "search"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
 dependencies = ["httpx>=0.27", "beautifulsoup4>=4.12", "lxml>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/markramm/cascade-search"
+Issues = "https://github.com/markramm/cascade-search/issues"
+
+[project.optional-dependencies]
+# PDF text extraction and OCR shell out to system binaries, not Python
+# packages: `brew install poppler tesseract` (pdftotext, pdftoppm, tesseract).
+test = ["pytest>=8.0"]
 
 [project.scripts]
 cascade-search = "cascade_search.cli:main"

@@ -39,9 +39,14 @@ errored, a verified absence cannot be constructed.** It downgrades to
 ## Install
 
 ```bash
-cd /Users/markr/cascade-search
+git clone https://github.com/markramm/cascade-search.git
+cd cascade-search
 python3 -m venv .venv && ./.venv/bin/pip install -e .
 ```
+
+Retrieved documents are archived to `~/.cascade-search/archive` by default;
+set `CASCADE_ARCHIVE` to point it at your own corpus. The call ledger and
+cache live in `~/.cascade-search/store.db`.
 
 ## Use
 
@@ -380,4 +385,14 @@ Not yet built: async job-queue consumption, cross-source federated merge
 (Phase 3b — ranking one result set across `web`/`news`/`courtlistener`
 together), local semantic layer, MCP shim (Phase 2).
 
-Spec: `cascade-research/notes/spec-cascade-search-federated-research-tool.md`
+## Contributing
+
+Field reports are the most valuable contribution here. `FEEDBACK.md` is a
+running log of friction found by agents actually using the tool on real
+research tasks — most of the bug fixes in the history came from it rather
+than from synthetic tests. Bug reports that name the *task you were doing*
+when the tool failed you are worth more than ones that only name the symptom.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

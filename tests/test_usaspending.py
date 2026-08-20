@@ -342,3 +342,40 @@ def test_sum_is_quiet_when_the_entity_resolved_cleanly():
     """Do not cry wolf -- a clean single match must produce no caveat."""
     assert usa._entity_caveat("Lifeline Training", ["LIFELINE TRAINING, LTD"], 1) is None
     assert usa._name_matches("Lifeline Training", ["LIFELINE TRAINING, LTD"]) is True
+
+
+def _force_404(monkeypatch):
+    import httpx
+    class _R:
+        status_code = 404
+        def json(self): return {}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _R())
+
+
+def test_piid_to_detail_is_a_blocker_not_an_absence(monkeypatch):
+    """A PIID passed to --detail must never read as a publishable negative.
+
+    /awards/<id>/ keys on USAspending's INTERNAL numeric id. A PIID like
+    70CDCR26FR0000001 -- the identifier a researcher actually has in hand --
+    404s there even though the award exists and a recipient search returns it.
+    Rendering that 404 as VerifiedAbsence tells the researcher the record is not
+    there, which is the worst thing this tool can say.
+    """
+    from cascade_search.core.results import AccessBlocker, Blocker
+    _force_404(monkeypatch)
+    store, limiter = _kit()
+
+    out = usa.detail("70CDCR26FR0000001", store, limiter)
+    assert isinstance(out, AccessBlocker), type(out)
+    assert out.mechanism is Blocker.WRONG_ID_TYPE
+    assert "NOT AN ABSENCE" in out.detail
+
+
+def test_numeric_id_that_404s_is_a_real_absence(monkeypatch):
+    """The narrow fix must not blunt the genuine negative it sits next to."""
+    _force_404(monkeypatch)
+    store, limiter = _kit()
+
+    out = usa.detail("999999999999", store, limiter)
+    assert isinstance(out, VerifiedAbsence), type(out)
+    assert "numeric award id" in out.searched

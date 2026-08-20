@@ -18,7 +18,7 @@ from pathlib import Path
 #: different KB than the install instructions implied.
 DEFAULT_ARCHIVE = Path(
     os.environ.get("CASCADE_ARCHIVE")
-    or Path.home() / "tcp-kb-internal/cascade-research/documents/sources/files")
+    or Path.home() / ".cascade-search" / "archive")
 MANIFEST = "MANIFEST-cascade-search.txt"
 
 

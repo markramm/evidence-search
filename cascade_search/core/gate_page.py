@@ -3,6 +3,17 @@ from __future__ import annotations
 
 import html
 
+
+def _safe_url(u: str) -> str:
+    """Only http(s) survives into an href.
+
+    html.escape stops an attacker breaking OUT of the attribute, but a
+    `javascript:` or `data:` value needs no quotes to be dangerous. Gate URLs
+    come from our own source clients today; this keeps that assumption from
+    becoming load-bearing if a future source echoes back a supplied URL.
+    """
+    return u if u.lower().startswith(("http://", "https://")) else "#"
+
 CSS = """
 *,*::before,*::after{box-sizing:border-box}
 :root{
@@ -203,7 +214,7 @@ def _card(g: dict) -> str:
   <div class="steps">
     <div class="step">
       <h3>1 · Pass the challenge</h3>
-      <a class="btn" href="{e(g['url'])}" target="_blank" rel="noopener">Open the search</a>
+      <a class="btn" href="{e(_safe_url(g['url']))}" target="_blank" rel="noopener">Open the search</a>
       <p class="hint">Opens in a new tab. Solve it, and let the results load.</p>
     </div>
     <div class="step act">

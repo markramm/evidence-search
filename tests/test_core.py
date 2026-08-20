@@ -453,3 +453,27 @@ def test_grep_with_zero_matches_does_not_read_as_success(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "NO MATCHES" in out
     assert "IN THIS DOCUMENT ONLY" in out, "must bound the absence to the document"
+
+
+def test_host_allowlist_boundary_is_the_dot():
+    """An attacker-controlled label must never be read as part of an allowed host.
+
+    `host.endswith("oscn.net")` is true for `evil-oscn.net`, which is a domain
+    anyone can register. The allow-list is the tool's ethical boundary -- it is
+    what keeps the browser tier on public records -- so the suffix match has to
+    land on a real label boundary.
+    """
+    from cascade_search.core.browser import host_allowed
+
+    for url in ("https://oscn.net/x", "https://www.oscn.net/x",
+                "https://evil.oscn.net/x",      # true subdomain of an allowed org
+                "https://OSCN.NET/x",           # case-insensitive
+                "https://oscn.net./x"):         # trailing-dot FQDN
+        assert host_allowed(url)[0] is True, url
+
+    for url in ("https://evil-oscn.net/x",      # attacker-registrable
+                "https://myoscn.net/x",
+                "https://notsam.gov/x",
+                "https://sam.gov.attacker.com/x",  # allowed host as a PREFIX
+                "https://", ""):
+        assert host_allowed(url)[0] is False, url

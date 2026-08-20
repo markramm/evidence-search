@@ -45,12 +45,21 @@ _HUMAN_GATE = re.compile(
 
 
 def host_allowed(url: str) -> tuple[bool, str]:
-    host = (urlsplit(url).hostname or "").lower()
+    """Exact host, or a true subdomain of an allowed host.
+
+    The boundary is the DOT: `oscn.net` permits `www.oscn.net` but must never
+    permit `evil-oscn.net`. A bare `host.endswith(allowed)` gets that wrong --
+    it reads the attacker-controlled label as if it were part of the allowed
+    domain. Matching on "." + allowed is what makes the suffix a real label
+    boundary rather than a string coincidence.
+    """
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    if not host:
+        return False, ""
     if host in ALLOWED_HOSTS:
         return True, ALLOWED_HOSTS[host]
-    base = ".".join(host.split(".")[-2:])
     for allowed, why in ALLOWED_HOSTS.items():
-        if allowed.endswith(base) and host.endswith(allowed):
+        if host.endswith("." + allowed):
             return True, why
     return False, ""
 

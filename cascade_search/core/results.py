@@ -5,7 +5,7 @@ An empty list cannot tell you whether you searched properly and found nothing,
 or whether the door was shut in your face. This module makes that distinction
 structural rather than a judgment call a tired worker makes at 2am.
 
-See spec P2/P3 in cascade-research/notes/spec-cascade-search-federated-research-tool.md
+Consumers branch on outcome type, never on emptiness.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ class Blocker(str, Enum):
     JS_ONLY = "js-only-spa"                       # SAM.gov entity detail, SBA DSBS
     NOT_FOUND = "http-404"
     SERVER_ERROR = "http-5xx"
+    WRONG_ID_TYPE = "wrong-identifier-type"       # caller-side: right corpus, wrong key
 
 
 class GateType(str, Enum):
