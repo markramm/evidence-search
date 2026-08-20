@@ -42,10 +42,65 @@ def test_url_normalization_strips_tracking():
 
 
 def test_blocker_signatures():
-    assert detect_blocker(200, "<html>OSCN Turnstile</html>") is Blocker.TURNSTILE
+    # A real OSCN wall, not the bare vendor name: the widget must be mounted.
+    # `"<html>OSCN Turnstile</html>"` used to satisfy this and no longer does --
+    # it is indistinguishable from a page that merely mentions the vendor.
+    assert detect_blocker(200,
+        '<html><body><div class="cf-turnstile"></div></body></html>') is Blocker.TURNSTILE
     assert detect_blocker(200, "cf-browser-verification") is Blocker.CLOUDFLARE
     assert detect_blocker(403, "x") is Blocker.FORBIDDEN
     assert detect_blocker(200, "<html><body>" + "text " * 300 + "</body></html>") is None
+
+
+# A served page that merely REFERENCES a challenge vendor is not a blocked page.
+# These are the shapes that made detect_blocker cry wolf: a captcha script in a
+# site-wide header, a privacy policy naming its vendors, and an ordinary English
+# noun that happens to collide with a product name.
+
+_REAL_PAGE = ("<p>" + "Docket entries for the requested case. " * 40 + "</p>")
+
+
+def test_captcha_script_tag_in_head_is_not_a_block():
+    """The canonical false positive: a gov page whose form posts through
+    reCAPTCHA, serving its records perfectly well."""
+    body = ('<html><head><script src="https://www.google.com/recaptcha/api.js">'
+            "</script></head><body>" + _REAL_PAGE + "</body></html>")
+    assert detect_blocker(200, body) is None
+
+
+def test_vendor_named_in_prose_is_not_a_block():
+    body = ("<html><body><h1>Privacy</h1><p>We use Cloudflare Turnstile and "
+            "DataDome to protect this site.</p>" + _REAL_PAGE + "</body></html>")
+    assert detect_blocker(200, body) is None
+
+
+def test_turnstile_the_english_noun_is_not_a_block():
+    """Transit and physical-security records are in scope for this corpus."""
+    body = ("<html><body><h1>Station access</h1><p>The turnstile count for "
+            "fiscal 2024 follows.</p>" + _REAL_PAGE + "</body></html>")
+    assert detect_blocker(200, body) is None
+
+
+def test_real_challenge_pages_still_detected():
+    """The fix must not cost us the true positives observed in production."""
+    assert detect_blocker(200,
+        '<html><body><div class="cf-turnstile" data-sitekey="0x4"></div>'
+        "</body></html>") is Blocker.TURNSTILE
+    assert detect_blocker(200,
+        '<html><body><script src="https://challenges.cloudflare.com/turnstile/v0/api.js">'
+        "</script></body></html>") is Blocker.TURNSTILE
+    assert detect_blocker(200,
+        '<html><body><div class="g-recaptcha" data-sitekey="6Ld"></div>'
+        "</body></html>") is Blocker.RECAPTCHA
+    assert detect_blocker(200,
+        "<html><body>Please enable JS and disable any ad blocker"
+        "<script src='https://ct.datadome.co/c.js'></script></body></html>"
+    ) is Blocker.DATADOME
+
+
+def test_status_blockers_fire_regardless_of_page_content():
+    assert detect_blocker(403, "<html><body>" + _REAL_PAGE + "</body></html>") is Blocker.FORBIDDEN
+    assert detect_blocker(503, "<html><body>" + _REAL_PAGE + "</body></html>") is Blocker.SERVER_ERROR
 
 
 def test_courtlistener_concurrent_windows():

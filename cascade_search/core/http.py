@@ -23,19 +23,49 @@ _SPA_SHELL = re.compile(
     r'|src=["\'][^"\']*(bundle|runtime|polyfills|main)[.-][^"\']*\.js',
     re.I)
 
+# Challenge signatures must match the challenge being MOUNTED, not merely named.
+#
+# These once matched bare words anywhere in the first 8KB, which is where a
+# site-wide <head> lives: a `<script src=".../recaptcha/api.js">` on a court
+# search form made a 200 carrying full results report as AccessBlocker, and
+# fetch() discards the body on a blocker, so the results were unrecoverable. A
+# privacy policy naming its vendors did the same. So did the English noun
+# "turnstile" -- transit records are in scope for this corpus.
+#
+# Same discipline as _SPA_SHELL below: require evidence of the mechanism, not a
+# mention of it. Widget containers, the vendor's own challenge host, and the
+# interstitial's own copy -- never the vendor name alone.
 _SIGNATURES = [
-    (re.compile(r"turnstile", re.I), Blocker.TURNSTILE),
-    (re.compile(r"cf-browser-verification|managed challenge|challenge-platform", re.I), Blocker.CLOUDFLARE),
-    (re.compile(r"recaptcha|g-recaptcha", re.I), Blocker.RECAPTCHA),
-    (re.compile(r"datadome", re.I), Blocker.DATADOME),
+    (re.compile(r'class=["\'][^"\']*cf-turnstile'
+                r'|challenges\.cloudflare\.com'
+                r'|data-sitekey=["\'][^"\']*["\'][^>]*turnstile', re.I), Blocker.TURNSTILE),
+    (re.compile(r"cf-browser-verification|managed challenge|challenge-platform"
+                r"|checking your browser before accessing", re.I), Blocker.CLOUDFLARE),
+    (re.compile(r'class=["\'][^"\']*g-recaptcha'
+                r'|www\.google\.com/recaptcha/api2/'
+                r'|grecaptcha\.(?:render|execute|enterprise)', re.I), Blocker.RECAPTCHA),
+    (re.compile(r"datadome|geo\.captcha-delivery\.com", re.I), Blocker.DATADOME),
 ]
+
+#: Text that survives tag-stripping. A challenge interstitial is nearly all
+#: widget and nearly no prose; a served record page is the reverse.
+_CHALLENGE_PROSE_MAX = 1200
+
+
+def _visible_len(body: str) -> int:
+    """Length of the human-readable text, with tags and script bodies removed."""
+    stripped = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", body)
+    return len(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", stripped)).strip())
 
 
 def detect_blocker(status: int, body: str) -> Blocker | None:
     head = body[:8000]
-    for pattern, mech in _SIGNATURES:
-        if pattern.search(head):
-            return mech
+    # A challenge REPLACES the content. If the page also carries substantive
+    # prose, the widget is furniture on a page that served us -- not a wall.
+    if _visible_len(body) <= _CHALLENGE_PROSE_MAX:
+        for pattern, mech in _SIGNATURES:
+            if pattern.search(head):
+                return mech
     if status == 403:
         return Blocker.FORBIDDEN
     if status == 404:
