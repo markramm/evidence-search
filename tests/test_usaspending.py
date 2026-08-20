@@ -187,6 +187,53 @@ def test_detail_surfaces_psc_and_naics(monkeypatch):
     assert "DE-ESCALATION" in m["description"]
 
 
+def test_detail_names_absent_codes_instead_of_dropping_the_line(monkeypatch):
+    """Silence is ambiguous where the codes ARE the evidence.
+
+    A worker comparing two awards got a PSC line on one and nothing on the
+    other, and could not tell whether the award has no PSC or whether --detail
+    failed to print it. One is a finding, the other is a bug. They nearly wrote
+    "no PSC assigned" on the strength of a blank. Award 307695512 really does
+    have no PSC -- so say that, rather than leaving a gap to be interpreted.
+    """
+    import httpx
+    class R:
+        status_code = 200
+        def json(self):
+            return {"piid": "HSCGG710PPAR228",
+                    "recipient": {"recipient_name": "BOBIT BUSINESS MEDIA INC."},
+                    "latest_transaction_contract_data": {
+                        "naics": "561920",
+                        "naics_description": "CONVENTION AND TRADE SHOW ORGANIZERS"}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    s, L = _kit()
+    snip = usa.detail("307695512", store=s, limiter=L).results[0].snippet
+    assert "PSC: (none in record)" in snip
+    assert "561920" in snip
+
+
+def test_detail_renders_the_awards_own_words(monkeypatch):
+    """`description` was in meta but never printed, so it read as missing.
+
+    It is where "INVESTIGATIVE CASE MANAGEMENT (ICM) OPERATIONS AND
+    MAINTENANCE" actually lives -- the field that says what a contract IS. A
+    worker dropped to raw curl for it during the most load-bearing check of
+    their task.
+    """
+    import httpx
+    class R:
+        status_code = 200
+        def json(self):
+            return {"piid": "X", "recipient": {"recipient_name": "N"},
+                    "description": "INVESTIGATIVE CASE MANAGEMENT O&M",
+                    "latest_transaction_contract_data": {}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    s, L = _kit()
+    snip = usa.detail("1", store=s, limiter=L).results[0].snippet
+    assert "INVESTIGATIVE CASE MANAGEMENT" in snip
+    assert "PSC: (none in record)" in snip and "NAICS: (none in record)" in snip
+
+
 def test_detail_accepts_a_prefixed_or_bare_id(monkeypatch):
     """A constructed CONT_AWD_... string 404s; the numeric id is what works."""
     import httpx

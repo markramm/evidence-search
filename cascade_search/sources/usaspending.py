@@ -211,12 +211,30 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                results=[Result(
                    url=f"https://www.usaspending.gov/award/{num}",
                    title=f"{(rec.get('recipient_name') or '?')} — {d.get('piid') or num}",
-                   snippet=" | ".join(x for x in (
-                       f"PSC {c.get('product_or_service_code')}: "
-                       f"{c.get('product_or_service_description')}"
-                       if c.get("product_or_service_code") else None,
-                       f"NAICS {c.get('naics')}: {c.get('naics_description')}"
-                       if c.get("naics") else None) if x),
+                   # Absent fields are NAMED, never omitted.
+                   #
+                   # Dropping the line when a code is missing makes silence
+                   # ambiguous exactly where the codes are the load-bearing
+                   # evidence: a worker comparing two awards saw one PSC line
+                   # and one none, and could not tell whether the award has no
+                   # PSC or whether --detail failed to print it. Those mean
+                   # different things -- one is a finding, the other is a bug --
+                   # and they nearly wrote "no PSC assigned" on the strength of
+                   # a blank. An explicit "(none in record)" is a fact; a
+                   # missing line is a question.
+                   snippet=" | ".join((
+                       (f"PSC {c['product_or_service_code']}: "
+                        f"{c.get('product_or_service_description') or '?'}"
+                        if c.get("product_or_service_code")
+                        else "PSC: (none in record)"),
+                       (f"NAICS {c['naics']}: {c.get('naics_description') or '?'}"
+                        if c.get("naics") else "NAICS: (none in record)"),
+                       # The award's own words. Already fetched and stored; a
+                       # worker had to drop to raw curl for it because it was
+                       # in meta but never rendered.
+                       (f"DESC: {d['description']}" if d.get("description")
+                        else "DESC: (none in record)"),
+                   )),
                    source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
                    meta={"record_id": f"{SOURCE}:detail:{num}", "piid": d.get("piid"),
                          "psc": c.get("product_or_service_code"),
