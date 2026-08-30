@@ -31,33 +31,32 @@ outgoing:
   pool_maxsize: 20
 
 # ---------------------------------------------------------------------------
-# Engine roster, added 2026-08-30.
+# Engine roster, added 2026-08-30, revised same day after live measurement.
 #
-# WHY: SearXNG's default roster has only FOUR engines that actually serve
-# general web search -- brave, google cse, duckduckgo, startpage. On 2026-08-28
-# through 08-30 all four were simultaneously refusing us (brave + google cse
-# "too many requests"; duckduckgo + startpage CAPTCHA), which is a TOTAL
-# general-web outage. It read as a 95%-healthy "78/82 responsive" because the
-# other 78 engines are dictionaries, translators and Wikipedia mirrors.
+# THE PROBLEM: SearXNG's default roster has only FOUR engines that serve general
+# web search -- brave, google cse, duckduckgo, startpage. All four are durably
+# blocked for this instance (brave/google cse "too many requests"; duckduckgo/
+# startpage CAPTCHA). That is a TOTAL general-web outage which reports as a
+# healthy-looking "78/82 responsive", because the other 78 engines are
+# dictionaries, translators and Wikipedia mirrors.
 #
-# Three research sessions each diagnosed it as a transient rate limit and
-# advised "retry". It was not transient: there was no fallback engine left.
+# MEASURED 2026-08-30, one query each, after a clean restart to clear ban state:
+#   mwmbl       58 results   OK          <- the workhorse
+#   marginalia  68 results   works       <- independent crawler, non-commercial index
+#   crowdview    0 results   OK          <- responds, thin index; harmless to keep
+#   mojeek       0 results   403         <- blocks this network at the HTTP level,
+#                                           confirmed with curl + browser UA. Not
+#                                           a SearXNG config issue. DISABLED.
+#   qwant        0 results   CAPTCHA     <- DISABLED
+#   yep          0 results   access denied <- DISABLED
 #
-# These additions are independent crawlers / metasearchers that do not sit
-# behind the same CAPTCHA and rate-limit infrastructure as the big four, so a
-# simultaneous outage no longer takes general search to zero. Mojeek in
-# particular runs its OWN index rather than reselling Bing/Google, which makes
-# it a genuinely independent fallback rather than a correlated one.
+# Keep only what actually returns results. A dead engine is worse than absent:
+# it inflates the denominator in coverage reporting and slows every query by the
+# request timeout.
 engines:
-  - name: mojeek
+  - name: mwmbl
     disabled: false
   - name: marginalia
     disabled: false
-  - name: mwmbl
-    disabled: false
-  - name: qwant
-    disabled: false
   - name: crowdview
-    disabled: false
-  - name: yep
     disabled: false
