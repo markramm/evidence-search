@@ -29,3 +29,35 @@ outgoing:
   max_request_timeout: 12.0
   pool_connections: 100
   pool_maxsize: 20
+
+# ---------------------------------------------------------------------------
+# Engine roster, added 2026-08-30.
+#
+# WHY: SearXNG's default roster has only FOUR engines that actually serve
+# general web search -- brave, google cse, duckduckgo, startpage. On 2026-08-28
+# through 08-30 all four were simultaneously refusing us (brave + google cse
+# "too many requests"; duckduckgo + startpage CAPTCHA), which is a TOTAL
+# general-web outage. It read as a 95%-healthy "78/82 responsive" because the
+# other 78 engines are dictionaries, translators and Wikipedia mirrors.
+#
+# Three research sessions each diagnosed it as a transient rate limit and
+# advised "retry". It was not transient: there was no fallback engine left.
+#
+# These additions are independent crawlers / metasearchers that do not sit
+# behind the same CAPTCHA and rate-limit infrastructure as the big four, so a
+# simultaneous outage no longer takes general search to zero. Mojeek in
+# particular runs its OWN index rather than reselling Bing/Google, which makes
+# it a genuinely independent fallback rather than a correlated one.
+engines:
+  - name: mojeek
+    disabled: false
+  - name: marginalia
+    disabled: false
+  - name: mwmbl
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: crowdview
+    disabled: false
+  - name: yep
+    disabled: false
