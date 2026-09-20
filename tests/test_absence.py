@@ -116,3 +116,70 @@ def test_soft_block_detection_does_not_eat_real_documents():
     assert detect_blocker(200, real) is None
     assert detect_blocker(202, real) is None, "202 with prose was served, not gated"
     assert detect_blocker(200, "<html><body>Not found.</body></html>") is None
+def test_unpriceable_awards_are_not_an_absence():
+    """Rows we cannot price are a parse failure, not an empty corpus.
+
+    `dollar_sum` counted only rows whose `Award Amount` was numeric, then
+    reported "no priced rows" as a VerifiedAbsence at exit 11 -- which a shell
+    caller reads as publishable. Feeding two real awards whose amounts arrived
+    as strings ("5,000,000", a shape this module already defends against in
+    _parse_counts) certified a $7.5M vendor as having no awards.
+
+    The awards existed. Only our reading of them failed.
+    """
+    import evidence_search.sources.usaspending as us
+    from evidence_search.core.results import AccessBlocker, VerifiedAbsence
+
+    def _rows(path, payload):
+        return {"results": [
+            {"Award ID": "W1", "Recipient Name": "ACME", "Award Amount": "5,000,000"},
+            {"Award ID": "W2", "Recipient Name": "ACME", "Award Amount": "2,500,000"},
+        ], "page_metadata": {"hasNext": False}}, None
+
+    orig, us._post = us._post, _rows
+    try:
+        out = us.dollar_sum("ACME DEFENSE LLC")
+    finally:
+        us._post = orig
+    assert not isinstance(out, VerifiedAbsence), "awards exist; this is not an absence"
+    assert isinstance(out, AccessBlocker)
+
+
+def test_unread_pages_cannot_certify_absence():
+    """hasNext means the API told us there was more and we did not look."""
+    import evidence_search.sources.usaspending as us
+    from evidence_search.core.results import VerifiedAbsence
+
+    def _empty_more(path, payload):
+        return {"results": [], "page_metadata": {"hasNext": True}}, None
+
+    orig, us._post = us._post, _empty_more
+    try:
+        out = us.dollar_sum("ACME")
+    finally:
+        us._post = orig
+    assert not isinstance(out, VerifiedAbsence)
+
+
+def test_a_real_usaspending_absence_still_certifies_and_is_auditable():
+    """The fixes must not make a true negative unpublishable.
+
+    A genuinely empty result still yields VerifiedAbsence -- and now carries
+    probes and the subaward caveat, so `claim()` states its own scope instead
+    of the bare "Not found" it used to produce.
+    """
+    import evidence_search.sources.usaspending as us
+    from evidence_search.core.results import VerifiedAbsence
+
+    def _empty(path, payload):
+        return {"results": [], "page_metadata": {"hasNext": False}}, None
+
+    orig, us._post = us._post, _empty
+    try:
+        out = us.dollar_sum("NONEXISTENT VENDOR")
+    finally:
+        us._post = orig
+    assert isinstance(out, VerifiedAbsence)
+    assert out.probes, "a certified negative must record what was asked"
+    assert "subawards" in out.not_searched
+    assert out.claim() != "Not found"
