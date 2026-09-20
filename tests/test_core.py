@@ -622,3 +622,47 @@ def test_prose_gate_and_signature_scan_read_the_same_slice():
     near = ('<html><body><div class="cf-turnstile"></div>'
             + "<p>Checking your browser.</p></body></html>")
     assert detect_blocker(200, near) is Blocker.TURNSTILE
+
+
+def test_user_allowlist_extends_without_weakening_the_boundary(tmp_path, monkeypatch):
+    """Operators may add hosts; nobody may widen the matching rule.
+
+    The allow-list was a hardcoded set for a month, and agents filed 46 reports
+    naming registries they could not reach -- while the error told them to "add
+    it to ALLOWED_HOSTS deliberately" with no route to do it. Making it
+    configurable is only safe if the dot boundary still holds for config-
+    supplied hosts, which is the property this locks down: `evil-sos.example.gov`
+    must stay refused even though `sos.example.gov` was just allowed.
+    """
+    import json
+    from evidence_search.core import browser
+
+    cfg = tmp_path / "hosts.json"
+    cfg.write_text(json.dumps({
+        "sos.example.gov": "Example SOS -- public business registry",
+        "noreason.gov": "",              # reason required
+    }))
+    monkeypatch.setenv("EVIDENCE_ALLOWED_HOSTS", str(cfg))
+
+    assert browser.host_allowed("https://sos.example.gov/x")[0] is True
+    assert browser.host_allowed("https://sub.sos.example.gov/x")[0] is True
+    # The boundary is still the DOT, for configured hosts too.
+    assert browser.host_allowed("https://evil-sos.example.gov/x")[0] is False
+    assert browser.host_allowed("https://sos.example.gov.attacker.com/x")[0] is False
+    # A host with no stated reason is not an allow-list entry.
+    assert browser.host_allowed("https://noreason.gov/x")[0] is False
+    # The shipped baseline is never reduced by a config file.
+    assert browser.host_allowed("https://oscn.net/x")[0] is True
+
+
+def test_broken_allowlist_config_fails_closed(tmp_path, monkeypatch):
+    """A malformed config must not widen or narrow the ethical boundary."""
+    from evidence_search.core import browser
+
+    cfg = tmp_path / "hosts.json"
+    cfg.write_text("{ not json")
+    monkeypatch.setenv("EVIDENCE_ALLOWED_HOSTS", str(cfg))
+
+    assert browser.load_user_hosts() == {}
+    assert browser.host_allowed("https://oscn.net/x")[0] is True
+    assert browser.host_allowed("https://anything-else.com/x")[0] is False
