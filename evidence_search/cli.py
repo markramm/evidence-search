@@ -350,6 +350,7 @@ def main(argv=None) -> int:
     rec.add_argument("--fields", help="comma-separated fields to return")
 
     sub.add_parser("limits", help="show per-source rate policy and current usage")
+    sub.add_parser("hosts", help="show the browser-tier public-records allow-list")
 
     # Global flags must PRECEDE the subcommand, and argparse's bare
     # "unrecognized arguments: --json" gives no hint which way to move it.
@@ -720,6 +721,27 @@ def main(argv=None) -> int:
                 print(f"  cacheable: {r['cacheable']}   index: {r['index_origin']}")
                 if r["note"]:
                     print(f"  note:      {r['note']}")
+        return 0
+    if a.cmd == "hosts":
+        # A worker who hits `host-not-allowed` should be able to SEE the
+        # boundary rather than guess at it. Asked for in the field twice.
+        from .core.browser import ALLOWED_HOSTS, load_user_hosts
+        user = load_user_hosts()
+        if a.json:
+            print(json.dumps({"shipped": ALLOWED_HOSTS, "user": user}, indent=2))
+        else:
+            print("== Browser-tier allow-list (public records only) ==\n")
+            for host, why in sorted(ALLOWED_HOSTS.items()):
+                print(f"  {host:<32} {why}")
+            if user:
+                print("\n  -- local additions --")
+                for host, why in sorted(user.items()):
+                    print(f"  {host:<32} {why}")
+            else:
+                print("\n  No local additions. To add one (public records only --"
+                      "\n  never a paywall, an auth boundary, or personal data):"
+                      "\n    ~/.evidence-search/allowed_hosts.json"
+                      '\n    {"sos.example.gov": "State SOS -- public business registry"}')
         return 0
     # Unreachable in practice -- argparse rejects unknown commands first.
     return EXIT_USAGE
