@@ -89,10 +89,11 @@ def run_source(
     key = cache_key(source, query, **(cache_params or {}))
 
     if use_cache:
-        entry = store.get_entry(key)
+        entry = store.get_entry(key, with_meta=True)
         if entry is not None:
             return replay_cached(query, entry[0], entry[1], source=source,
-                                 searched=searched, index_origin=index_origin)
+                                 searched=searched, index_origin=index_origin,
+                                 meta=entry[2])
 
     allowed, retry, why = limiter.reserve(source)
     if not allowed:
@@ -171,15 +172,23 @@ def run_source(
 
     # The source's own sentinel for "nothing here" -- distinct from a parser
     # that found no rows, which may mean the page shape changed.
+    def _absence_meta(n: int) -> dict:
+        """The scope of a negative, persisted so a replay can restate it."""
+        from dataclasses import asdict as _asdict
+        return {"probes": [_asdict(p) for p in _probe(n)],
+                "not_searched": list(not_searched or []),
+                "caveats": list(caveats or [])}
+
     if absent_when is not None and absent_when(body):
         if use_cache:
-            store.put(key, source, [], ttl_s=ttl_s)
+            store.put(key, source, [], ttl_s=ttl_s, meta=_absence_meta(0))
         return verified_absence(query, cov, searched, probes=_probe(0),
                                 not_searched=not_searched, caveats=caveats)
 
     if use_cache:
         try:
-            store.put(key, source, [r.__dict__ for r in results], ttl_s=ttl_s)
+            store.put(key, source, [r.__dict__ for r in results], ttl_s=ttl_s,
+                      meta=None if results else _absence_meta(0))
         except CachePoisoned as e:
             # Refusing to cache is right, but the caller still asked a question.
             # Serve this run's results and let the next call re-fetch.
