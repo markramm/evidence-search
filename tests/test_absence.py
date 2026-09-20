@@ -71,3 +71,48 @@ def test_a_probeless_absence_is_still_valid_but_visibly_weaker():
     v = verified_absence("x", _clean(), "some corpus")
     assert isinstance(v, VerifiedAbsence)
     assert v.is_absolute is False
+
+
+# --- false absences manufactured by the tool itself ---------------------------
+# Both of these shipped green on main with 209 passing tests. Neither is a
+# "declared dirt" case, which is what the Coverage guard catches -- in both the
+# source built a CLEAN coverage over a failure it had not noticed. That is the
+# gap: the invariant is enforced on what a source REPORTS, so a source that
+# fails to report is enforced on nothing.
+
+def test_soft_block_is_not_a_document_that_was_read():
+    """An AWS WAF challenge must never flow downstream as content.
+
+    CourtListener began answering non-browser clients with HTTP 202, an empty
+    body and `x-amzn-waf-action: challenge`. It names no vendor in the markup,
+    so every signature pattern missed it and the empty body reached `extract`,
+    which printed "the document was read, the terms are not in it" over a fetch
+    that read nothing. Reported 2026-08-28 and again 2026-09-17 -- the second
+    reporter could only tell because they happened to have a successful
+    54,024-token fetch of the same URL earlier in scrollback.
+
+    A negative produced this way is indistinguishable from a real zero-match,
+    which makes it the exact failure this package exists to prevent.
+    """
+    from evidence_search.core.http import detect_blocker
+    from evidence_search.core.results import AccessBlocker, Blocker
+
+    assert detect_blocker(202, "", {"x-amzn-waf-action": "challenge"}) is Blocker.AWS_WAF
+    assert detect_blocker(202, "<html><body></body></html>") is Blocker.AWS_WAF
+    # A JS challenge is exactly what the browser tier exists for.
+    assert AccessBlocker(query="q", mechanism=Blocker.AWS_WAF).escalate_to_browser
+
+
+def test_soft_block_detection_does_not_eat_real_documents():
+    """The other half: a served page must stay served.
+
+    Size alone cannot decide this -- a legitimately short page is ordinary, and
+    202 is a normal status for some APIs. Detection keys on the PAIR (challenge
+    shape, no prose), so a 202 carrying real text is content.
+    """
+    from evidence_search.core.http import detect_blocker
+
+    real = "<html><body>" + "opinion text " * 500 + "</body></html>"
+    assert detect_blocker(200, real) is None
+    assert detect_blocker(202, real) is None, "202 with prose was served, not gated"
+    assert detect_blocker(200, "<html><body>Not found.</body></html>") is None

@@ -57,6 +57,13 @@ _SIGNATURES = [
 #: error, because the body then flows downstream as though it were content.
 _CHALLENGE_PROSE_MAX = 3000
 
+#: Below this much visible text, a challenge-shaped response carries no content.
+#: Deliberately small: the question is "did we get a document or a stub", and a
+#: real record page clears this by orders of magnitude. Anything larger starts
+#: making judgements about whether a served page is long ENOUGH, which is a
+#: different and much less defensible claim.
+_SOFT_BLOCK_PROSE_MIN = 200
+
 
 def _visible_len(body: str) -> int:
     """Length of the human-readable text, with tags and script bodies removed."""
@@ -64,11 +71,35 @@ def _visible_len(body: str) -> int:
     return len(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", stripped)).strip())
 
 
-def detect_blocker(status: int, body: str) -> Blocker | None:
+def detect_blocker(status: int, body: str, headers: dict | None = None) -> Blocker | None:
     # The signature scan is bounded, so measure prose over the SAME slice --
     # judging a page by its whole body while matching only its first 8KB made
     # large pages likelier to be skipped exactly where the scan is already blind.
     head = body[:8000]
+
+    # A soft block: the wall answers with a SHAPE, not a signature.
+    #
+    # CourtListener turned on an AWS WAF JS-challenge that returns HTTP 202 with
+    # a near-empty body and `x-amzn-waf-action: challenge`. It names no vendor in
+    # the markup, so every _SIGNATURES pattern misses it, and 202 is a success
+    # status -- so the body flowed downstream as content and `extract` printed
+    # "the document was read, the terms are not in it" over a fetch that read
+    # nothing. Reported 2026-08-28 and again 2026-09-17; the second reporter
+    # noted the only tell was a `raw ~1 tok` line they happened to have a
+    # successful `raw ~54,024 tok` fetch above in scrollback to compare against.
+    # That is a false negative manufactured by the tool, which is the single
+    # failure this package exists to prevent.
+    #
+    # Detection is on the pair (challenge-ish response, no content), never on
+    # size alone: a legitimately tiny page is common and must stay a Hit.
+    hdrs = {k.lower(): v for k, v in (headers or {}).items()}
+    waf_action = hdrs.get("x-amzn-waf-action", "")
+    if waf_action:
+        return Blocker.AWS_WAF
+    if status == 202 and _visible_len(head) < _SOFT_BLOCK_PROSE_MIN:
+        # 202 Accepted for a GET of a document is not a normal way to serve a
+        # record; paired with no prose it is a challenge handoff.
+        return Blocker.AWS_WAF
 
     # A challenge REPLACES the content. If the page also carries substantive
     # prose, the widget is furniture on a page that served us -- not a wall.
@@ -150,7 +181,10 @@ def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
                                  detail="HTTP 429")
 
     text = "" if binary else r.text
-    mech = detect_blocker(r.status_code, text if not binary else "")
+    # Headers are part of the evidence. The AWS WAF challenge announces itself
+    # ONLY in `x-amzn-waf-action` -- the body it serves is empty and anonymous --
+    # so discarding headers here is what let a soft block read as a document.
+    mech = detect_blocker(r.status_code, text if not binary else "", dict(r.headers))
     if mech:
         # Name a known machine-readable route rather than letting a worker
         # rediscover it. One found the loc.gov JSON endpoint by hand after the
@@ -158,6 +192,12 @@ def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
         from urllib.parse import urlsplit as _us
         hint = _JSON_ESCAPE_HATCH.get((_us(url).hostname or "").lower(), "")
         detail = f"HTTP {r.status_code}"
+        if mech is Blocker.AWS_WAF:
+            # The worker who hit this had the right instinct and still spent
+            # several calls getting to it. Say the next move.
+            detail += (" -- soft block: challenge response carried no document. "
+                       "The session may be gated site-wide, not just this URL. "
+                       "RETRY WITH --browser.")
         if hint and "fo=json" not in url:
             detail += f". TRY: {hint}"
         return None, AccessBlocker(query=query, mechanism=mech, url=url,
