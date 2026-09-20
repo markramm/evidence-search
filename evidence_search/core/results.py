@@ -343,7 +343,7 @@ def verified_absence(query: str, coverage: Coverage, searched: str,
 
 
 def replay_cached(query: str, rows, fetched_at: float, *, source: str,
-                  searched: str, index_origin: str = "n/a"):
+                  searched: str, index_origin: str = "n/a", meta: dict | None = None):
     """Rebuild an outcome from cache, disclosing that it IS from cache.
 
     Every source previously synthesised a clean Coverage at read time, which
@@ -359,4 +359,14 @@ def replay_cached(query: str, rows, fetched_at: float, *, source: str,
         return Hit(query=query, coverage=cov, results=[Result(**r) for r in rows])
     mins = int(age // 60)
     when = f"{mins}m ago" if mins < 60 else f"{mins // 60}h ago"
-    return verified_absence(query, cov, f"{searched} [cached, established {when}]")
+    # An absence's SCOPE is part of the claim, not decoration. Replaying without
+    # it produced claim() == "Not found" for a negative that, on the cache MISS
+    # minutes earlier, had named its unsearched corpora and its caveats. Same
+    # question, same exit 11, materially weaker sentence -- and the caveat is
+    # exactly what the README says keeps a published claim defensible.
+    m = meta or {}
+    return verified_absence(
+        query, cov, f"{searched} [cached, established {when}]",
+        probes=[Probe(**p) for p in m.get("probes", [])],
+        not_searched=m.get("not_searched") or [],
+        caveats=m.get("caveats") or [])

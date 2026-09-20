@@ -198,11 +198,15 @@ class Store:
             return None
         return json.loads(payload)
 
-    def get_entry(self, key: str):
+    def get_entry(self, key: str, with_meta: bool = False):
         """Return (payload, fetched_at) or None.
 
         A cached VerifiedAbsence is a claim about the world at a point in time.
         Replaying it without that timestamp presents a stale negative as fresh.
+
+        `with_meta` returns (payload, fetched_at, meta) instead. Rows written
+        before the sidecar existed, or without one, yield an empty dict -- so an
+        existing store keeps working and simply replays the weaker claim.
         """
         row = self.conn.execute(
             "SELECT payload, expires_at, fetched_at FROM cache WHERE key=?", (key,)).fetchone()
@@ -212,10 +216,16 @@ class Store:
         if expires and time.time() > expires:
             self.conn.execute("DELETE FROM cache WHERE key=?", (key,))
             return None
-        return json.loads(payload), fetched_at
+        data = json.loads(payload)
+        meta: dict = {}
+        if isinstance(data, dict) and "__rows__" in data:
+            data, meta = data["__rows__"], data.get("__meta__") or {}
+        if with_meta:
+            return data, fetched_at, meta
+        return data, fetched_at
 
     def put(self, key: str, source: str, payload, ttl_s: int | None = 86400,
-            is_metadata: bool = False) -> bool:
+            is_metadata: bool = False, meta: dict | None = None) -> bool:
         """Store a response, unless the source's policy forbids it.
 
         Returns True if written, False if policy refused. Callers that care
@@ -243,9 +253,16 @@ class Store:
                 f"refusing to cache {len(payload)} {source} rows that collapse to a "
                 "single placeholder identity -- this is a parse failure, not a result set")
         now = time.time()
+        body = json.dumps(payload)
+        if meta:
+            # An absence's SCOPE travels with it or the replay is weaker than
+            # the original. Wrapped rather than schema-changed so an existing
+            # store keeps reading: get_entry unwraps, and a row written by an
+            # older version is still a bare list.
+            body = json.dumps({"__rows__": payload, "__meta__": meta})
         self.conn.execute(
             "INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",
-            (key, source, json.dumps(payload), now, now + ttl_s if ttl_s else None))
+            (key, source, body, now, now + ttl_s if ttl_s else None))
         return True
 
     # ---- failure backoff --------------------------------------------------

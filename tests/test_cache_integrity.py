@@ -113,3 +113,53 @@ def test_cacheable_does_not_disable_metadata_caching(monkeypatch):
     assert s.put("roster", "searxng", ["searxng:google"], is_metadata=True) is True
     assert s.get("roster") == ["searxng:google"]
     assert s.put("results", "searxng", [{"url": "https://ex.gov/a"}]) is False
+
+
+def test_cached_absence_keeps_its_scope(tmp_path, monkeypatch):
+    """A replayed negative must make the SAME claim, not a weaker one.
+
+    The cache stored only result rows, so a replay rebuilt the outcome without
+    probes, not_searched or caveats: claim() degraded from a scoped sentence to
+    the bare string "Not found" while still exiting 11. Same question minutes
+    apart, same "publishable" signal, materially weaker claim -- and the scope
+    caveat is exactly what the README's own worked example says keeps a
+    published absence defensible against a lawyer.
+
+    Staleness disclosure must survive too: a cached claim is a claim about the
+    world when the search ran.
+    """
+    from evidence_search.core.store import Store
+    import evidence_search.core.http as http_mod
+    from evidence_search.sources import oscn
+
+    store = Store(tmp_path / "s.db")
+    monkeypatch.setattr(http_mod, "fetch",
+                        lambda url, **kw: ("<html>Found No Records</html>", None))
+
+    miss = oscn.search("caddo", lname="frazier", store=store)
+    hit = oscn.search("caddo", lname="frazier", store=store)
+
+    assert miss.claim() == hit.claim(), "the cached negative makes a weaker claim"
+    assert hit.probes and hit.caveats and hit.not_searched
+    assert "[cached" in hit.searched, "a replayed absence must disclose its age"
+
+
+def test_legacy_cache_rows_still_read(tmp_path):
+    """Rows written before the scope sidecar existed must keep working.
+
+    The sidecar wraps the payload, so an existing store would otherwise read
+    its own history as a malformed object. Old rows simply replay the weaker
+    claim they were written with.
+    """
+    import json
+    import time
+    from evidence_search.core.store import Store, cache_key
+
+    store = Store(tmp_path / "s.db")
+    key = cache_key("legacy", "q")
+    store.conn.execute("INSERT OR REPLACE INTO cache VALUES (?,?,?,?,?)",
+                       (key, "legacy", json.dumps([]), time.time(), time.time() + 9999))
+
+    assert store.get_entry(key) == ([], pytest.approx(time.time(), abs=5))
+    rows, _at, meta = store.get_entry(key, with_meta=True)
+    assert rows == [] and meta == {}
