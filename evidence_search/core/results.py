@@ -27,6 +27,7 @@ class Blocker(str, Enum):
     FORBIDDEN = "http-403"                        # dea.gov, justice.gov, courtlistener.com/recap
     AUTH_WALL = "auth-required"                   # CourtListener dockets endpoint
     JS_ONLY = "js-only-spa"                       # SAM.gov entity detail, SBA DSBS
+    AWS_WAF = "aws-waf-challenge"                 # CourtListener, site-wide from 2026-08-28
     NOT_FOUND = "http-404"
     SERVER_ERROR = "http-5xx"
     WRONG_ID_TYPE = "wrong-identifier-type"       # caller-side: right corpus, wrong key
@@ -267,7 +268,7 @@ class AccessBlocker(Outcome):
         # Mechanisms a real browser can plausibly get past (spec 3a).
         self.escalate_to_browser = self.mechanism in {
             Blocker.CLOUDFLARE, Blocker.TURNSTILE, Blocker.RECAPTCHA,
-            Blocker.DATADOME, Blocker.JS_ONLY,
+            Blocker.DATADOME, Blocker.JS_ONLY, Blocker.AWS_WAF,
         }
 
     @property
