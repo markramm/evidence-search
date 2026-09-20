@@ -34,7 +34,7 @@ from urllib.parse import quote
 from typing import Any
 
 from ..core.limits import Limiter
-from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, RateLimited,
+from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
                             Result, replay_cached, verified_absence)
 from ..core.source import run_source
 from ..core.store import Store, cache_key
@@ -378,6 +378,8 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     types = award_types or CONTRACT_TYPES
     total = 0.0
     n = 0
+    seen_rows = 0      # award rows returned, priced or not
+    unpriced = 0       # award rows whose amount we could not read
     page = 1
     more = False
     recipients: set[str] = set()
@@ -413,11 +415,15 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                                  mechanism=Blocker.SERVER_ERROR,
                                  url=f"{API}/search/spending_by_award/", detail=detail)
         rows = data.get("results") or []
+        seen_rows += len(rows)
         for r in rows:
             v = r.get("Award Amount")
             if isinstance(v, (int, float)):
                 total += v
                 n += 1
+            else:
+                # An award row we could not price. NOT the same as no award.
+                unpriced += 1
             if r.get("Recipient Name"):
                 recipients.add(r["Recipient Name"])
         more = bool((data.get("page_metadata") or {}).get("hasNext"))
@@ -427,7 +433,43 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
 
     cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"])
     if not n:
-        return verified_absence(query, cov, f"usaspending dollar sum ({query})")
+        # `n` counts rows we could PRICE. Reporting "no priced rows" as an
+        # absence conflated two different facts: the recipient has no awards,
+        # and the recipient has awards we failed to parse. The second is a
+        # tooling failure wearing the costume of a publishable negative -- and
+        # it arrived at exit 11, which a shell caller reads as "publishable."
+        #
+        # Verified: feeding two real awards whose `Award Amount` came back as
+        # strings ("5,000,000" -- a shape this module already defends against
+        # in _parse_counts) produced `VerifiedAbsence` with claim() == "Not
+        # found" for a vendor holding $7.5M in awards.
+        if seen_rows:
+            return AccessBlocker(
+                query=query,
+                coverage=Coverage(queried=[SOURCE], errored={SOURCE: "unparseable-amounts"}),
+                mechanism=Blocker.SERVER_ERROR,
+                url=f"{API}/search/spending_by_award/",
+                detail=(f"{seen_rows} award row(s) returned, {unpriced} with an "
+                        "unreadable `Award Amount` -- the payload shape may have "
+                        "changed. This is NOT an absence: the awards exist."))
+        if more:
+            # Page 1 was empty but the API said more pages follow. Certifying
+            # absence without reading them asserts something we did not check.
+            return AccessBlocker(
+                query=query,
+                coverage=Coverage(queried=[SOURCE], errored={SOURCE: "unread-pages"}),
+                mechanism=Blocker.SERVER_ERROR,
+                url=f"{API}/search/spending_by_award/",
+                detail=("page 1 returned no rows but the API reports hasNext -- "
+                        "pages went unread, so absence cannot be certified."))
+        return verified_absence(
+            query, cov, f"usaspending dollar sum ({query})",
+            probes=[Probe(source=SOURCE, endpoint=f"{API}/search/spending_by_award/",
+                          query=query, params={"types": ",".join(types)},
+                          corpus="USAspending prime awards",
+                          result_count=0, exact_match_supported=False, at=time.time())],
+            not_searched=["subawards", "pass-through recipients"],
+            caveats=["recipient_search_text is a fuzzy SEARCH, not an entity resolver"])
 
     # recipient_search_text is a SEARCH, not an entity resolver. A parent-company
     # name matches subsidiaries' records, so two --sum calls that each look
