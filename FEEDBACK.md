@@ -65,8 +65,18 @@ evidence.
 
 ### Open items, most valuable first (as of 2026-08-19, post-triage)
 
-Everything else in this file is marked `[fixed]` or `[wontfix]` inline. These
-are what is left, and each is here because a worker's argument for it was good:
+> **Staleness warning (2026-09-19).** The line below -- "everything else in this
+> file is marked `[fixed]` or `[wontfix]`" -- was true on 2026-08-19 and false
+> for a month after it: new entries accumulated beneath it with no triage
+> marker, and the same correctness bug was reported twice, weeks apart, because
+> nothing marked the first report as known.
+>
+> Treat this list as the 2026-08-19 open set, not the current one. The
+> 2026-09-19 triage pass at the end of this file carries what is open now.
+
+Everything else in this file **as of 2026-08-19** is marked `[fixed]` or
+`[wontfix]` inline. These are what was left, and each is here because a
+worker's argument for it was good:
 
 1. **`extract` display cap should scale to POST-extraction size.** Truncating a
    survivor that extraction already reduced 98% works against the tool's own
@@ -322,6 +332,9 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 `RateLimited`. Nothing to report there, which is itself the point.
 
 ## 2026-08-19 · foia-records-<person-h>-cbp-position-tenure-separation-date · agent:claude-sonnet-5-parallel-tick1-c
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Commands:** `cascade-search --wait web '"<person-h>" CBP FOIA'`, several follow-up `--wait web`/`--wait news` variants, `courtlistener "<person-h>" --type r`, `propublica "<person-h-surname>"`, `extract https://www.cbp.gov/site-policy-notices/foia/records`
 **Expected:** either a hit connecting a named person to a federal LE role, or a clean VerifiedAbsence/AccessBlocker split for a low-traffic, low-search-volume subject.
 **Got:** mostly worked as documented. One recurring friction: intermittent `RateLimited` on `brave` even when `cascade-search limits` immediately after showed `brave usage: 0/20 per 1s` — i.e. the limits output didn't explain why the prior call was rate-limited. Simple retry after ~15s cleared it. Plausibly another concurrent worker (this is a multi-agent parallel-tick session) burning the shared brave/searxng budget between my `limits` check and the next call — if so this is expected/correct behavior, but the `limits` snapshot reads as "budget available" right after a `RateLimited` response, which is momentarily confusing for a solo user trying to self-diagnose vs. a shared-ledger race. A "last rate-limit event" timestamp or brief note in the RateLimited output ("shared ledger, another caller likely consumed budget between calls") would have made the diagnosis immediate instead of inferred.
@@ -330,6 +343,9 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Severity:** annoyed (rate-limit diagnosis friction only; no blocked work — retry resolved it in under 20s).
 
 ## 2026-08-19 · verify-what-our-rescue-is-actually-performing-under-legal-services-bridge-2-0-the-uscri-parallel-provider-question-and-subaward-records · agent:claude-sonnet-5-parallel-tick1-b
+
+**[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
+
 **Commands attempted:** `cascade-search docs "USCRI unaccompanied children legal services cooperative agreement" --site federalregister.gov`; also `cascade-search limits`.
 **What happened:** the task needed federal-procurement-database verification (USAspending awards/subawards/transactions, Federal Register full-text search, FPDS-NG). None of these are `cascade-search` first-class sources — the closest fit, `docs`, is scoped to *vendor documentation* (`claude-code`/`claude-api` sites only per its own error message: "unknown docs site 'federalregister.gov'; known: claude-code, claude-api") and returned a `VerifiedAbsence` that was actually just "wrong tool for this corpus," not a real negative about federalregister.gov content. I nearly wrote that up as a publishable negative before re-reading the coverage line and realizing it meant "I don't know this site," not "this site has nothing."
 **Worked around it:** dropped to raw `curl` against USAspending's public JSON API (`api.usaspending.gov/api/v2/awards/`, `/transactions/`, `/subawards/` via POST) and the Federal Register's own documented-ungated JSON API (`federalregister.gov/api/v1/documents.json`) directly — both worked fine unauthenticated, no rate limits hit, no CAPTCHA. Also hit a genuine SAM.gov/FPDS-NG session-gate (`406 Not Acceptable` from `sam.gov/api/prod/sgs/v1/search/` without an authenticated session) that I documented as an AccessBlocker by hand, since there's no cascade-search client for SAM.gov/FPDS-NG at all.
@@ -338,6 +354,8 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Severity:** annoyed, not blocked — the `docs --site` error message was actually good (named its own allowlist), which is what stopped me from mis-writing the VerifiedAbsence. But the absence of a procurement-data client on a research beat this procurement-heavy is a real coverage gap, not just a one-off.
 
 ## 2026-08-19 · industry-scale-count-the-use-of-force-training-expert-witness-market-via-courtlistener-... · agent:claude-sonnet-5-parallel-tick1-d
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
 **Commands:** `cascade-search limits`; `cascade-search courtlistener "<vendor-b>" --type r`; `courtlistener '"<vendor-b-full>"' --type r`; `courtlistener "<vendor-c>" --type r`; `courtlistener '"<person-b>"' --type r`; `courtlistener '"<vendor-b-full>"' --type o`; `courtlistener "<vendor-c>" --type o`; `courtlistener "<person-c>" --type o`; `--wait` variants of most of the above; `extract https://www.<vendor-c-domain>/about.html --grep ...`; `extract https://www.<vendor-b-domain>/about/ --grep ...`; several `WebSearch` calls.
 
@@ -352,6 +370,9 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Severity:** annoyed, not blocked. Worked around the count-discarding gap by explicitly labeling every number's tier/confidence in the writeup; worked around the `--wait` gap by manual retry.
 
 ## 2026-08-19 · reporting-leads-victim-voice-for-the-uac-legal-services-collapse · claude-sonnet-5-parallel-tick1-a
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Command:** `cascade-search extract /path/to/clsepa-v-hhs-complaint-2025-03-26.pdf --grep "Plaintiff" --grep "declares" ...` and later `--text`
 **Expected:** matching passages (grep mode) or clean chrome-stripped text (--text mode) from a local court-filing PDF already archived in the KB.
 **Got:** grep mode returned PDF *object-stream* noise — `/D [34 0 R /XYZ 84 588 0] /S /GoTo >> endobj 717 0 obj <<...` — instead of the document's actual paragraph text, even though the matched keyword ("Plaintiff") does appear literally in that noise (as part of PDF outline/bookmark titles) as well as in the real body text. `--text` mode was worse: it dumped raw PDF binary structure (xref tables, XMP metadata streams, font dictionaries) with a NEGATIVE reported reduction (-224.2%, i.e. the "extracted" output was over 3x the raw token estimate), never reaching the actual page-content operators.
@@ -362,6 +383,8 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Severity:** slowed (a few minutes; had a working fallback immediately available in `pdftotext`)
 
 ## 2026-08-19 · separate-the-two-vehicles-training-vs-expert-witness · claude-opus-4-8-parallel-tick1-e
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
 Synthesis-heavy task (argue a structural claim from committed artifacts, not lookup). Reporting
 specifically on whether the tool supports SYNTHESIS, since that was asked.
@@ -510,6 +533,9 @@ but which cost the most time.
 **Severity:** slowed overall — no wrong output produced, but reaching a defensible "FOIA-only" conclusion took four search angles plus outside FAR-process knowledge rather than one clean negative-finding call, because neither `fedreg` nor `usaspending` covers procurement-file *attachments*, which is where a J&A actually lives if it's public at all.
 
 ## 2026-08-19 · find-the-named-story (<vendor-b>/<person-c> human-story task) · agent:claude-sonnet-5-parallel-tick2-b
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Task:** find a named, tier-1 plaintiff/decedent story from the 155-quoted-phrase CourtListener docket set behind the <vendor-b>/<person-c> credential, following up on the prior worker's aggregate-scale RECAP census.
 
 **Worked well — the quoted-phrase discipline from the skill doc was exactly right and I didn't have to rediscover it.** `courtlistener '"<decedent>" "<vendor-b>"' --type r` went straight to the one relevant docket on the first call because I quoted both phrases from the start; no tokenizer-noise detour this pass.
@@ -620,6 +646,9 @@ This was a "MARK ACTION" ticket: assignee had already been hand-set to `mark-com
 **Observation, not a complaint — the org profile file itself is where most of the real synthesis already lived.** By the time I read `organizations/<vendor-a>-profile.md` in full, nearly everything I would have wanted to say in a parent-task synthesis was already stated there, per-section, by the workers who wrote it (each section timestamped and self-correcting against the master memo). The parent task's own "Work Log" ended up being a pointer-and-triage document — what's closed, what's live, what's genuinely untouched — rather than new analysis, because the analysis had already happened in the org profile. Not a tool problem, just worth naming for whoever designs the next parent-task synthesis prompt: if the org profile is well-maintained, the parent task's marginal value is triage (which sibling to dispatch next), not restating findings.
 
 ## 2026-08-19 · S1 keystone rewrite — verifying Du Bois 1900 Paris Exposition facts · agent:claude-sonnet-5-parallel-tick3-d
+
+**[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
+
 **Task:** a draft-revision ticket (rewrite THE WITNESSES keystone), so most of the work was reading corpus, not searching. The one place I genuinely needed the open web was verifying new claims about Du Bois's 1900 Paris Exposition data portraits — this material did not exist anywhere in the KB and I was about to make it the piece's cold-open artifact, so it needed independent verification before I'd trust it in a keystone.
 
 **Worked well — `web` gave a clean, high-precision first pass.** `cascade-search web "Du Bois 1900 Paris Exposition data visualization charts Library of Congress" --wait` returned the LOC's own resource guide and item record at #1-3, Public Domain Review and the "Exhibit of American Negroes" Wikipedia page right behind — i.e. tier-1 (LOC) and reasonable tier-2 sources both surfaced on the first query, no query reformulation needed. Coverage line (`79/82 responsive`) made it easy to trust the completeness of that pass without extra work.
@@ -639,6 +668,9 @@ The typed outcome did its job — I knew immediately this was a tooling block, n
 **Net:** clean, fast, no wasted calls. Two `web`/`extract` calls got me from zero corpus coverage to three independently-corroborated facts (collaborators, chart count, reception/Grand Prize) I was comfortable citing in a keystone piece. This is a small, low-drama use case relative to today's other entries, but it's the kind of "does this actually save time on a real verification need" test the tool should keep passing.
 
 ## 2026-08-19 · Burke Law Group $150M ORR withdrawal (task orr-withdrew-the-burke-law-group-...) · agent:claude-opus-4-8-parallel-tick3-a
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Task:** find why a $150M ORR single-source cooperative agreement to a Houston law firm was withdrawn 11 days after it was announced, what replaced it, and who the firm is. `fedreg` + `usaspending` + `courtlistener` + `extract`, plus WebSearch.
 
 **Worked well 1 — `fedreg` answered the central question outright, and its two-result precision was itself the finding.** `cascade-search --wait fedreg "Burke Law Group"` returned exactly the two notices as results #1 and #2 (both `*UNIQUE*`), and — this is the part that mattered — nothing else Burke-related in the whole corpus. "There is no re-announcement of the $150M" is a claim I could only make because the corpus is defined and the result set was clean. Results #3-20 were obvious noise (Medicare OPPS, gas pipelines, marine mammals) matching on "Burke"/"Law"/"Group" separately, which is fine and self-evidently ignorable. This is the tool doing exactly what it's for.
@@ -802,6 +834,8 @@ entry `[fixed]` with a pointer to this one.
 
 ## 2026-08-19 · brief-write-detention-executive-branch-artifact task · claude-sonnet-5
 
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Command:** `$CS fedreg "detention bed mandate" --from 2003-01-01 --to 2005-12-31 --wait`
 **Expected:** Either a Hit pointing at something plausible, or a clear signal that the Federal Register isn't where this document type lives.
 **Got:** `Hit`, exit 0, 11 results — all completely unrelated (endangered-species critical-habitat rules, hours-of-service trucking rules, ADA accessibility guidelines). None mentioned detention or immigration. The tool returned a confident-looking `Hit` for a query that had zero real matches in the corpus it searched.
@@ -817,6 +851,8 @@ entry `[fixed]` with a pointer to this one.
 **Severity:** annoyed (fedreg) / worked-well (web + extract combo)
 
 ## 2026-08-19 · fact-check-du-bois-paris-exposition task · claude-sonnet-5
+
+**[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
 
 **Command:** `$CS extract "https://www.loc.gov/pictures/item/2005679642/" --text --wait`
 **Expected:** Either a `Hit` with the LOC item page content, or an `AccessBlocker` naming the mechanism so I know to route around it (per skill doc, this host was flagged in advance as a likely Cloudflare block).
@@ -1429,6 +1465,8 @@ fixing first — it sits on a first-class source and it nearly let a mischaracte
 
 ## 2026-08-19 · ledger-lead-corroborate-cumberland-county-me · claude-sonnet-5
 
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
+
 **Task:** corroborate a single-tier-2-sourced daily-capture ledger drop (Cumberland County ME
 3-1 vote to drop ICE from the jail's USMS contract) with a second, ideally tier-1, source.
 
@@ -1482,6 +1520,8 @@ citing an uncitable redirect URL and pushed me to `web` for a citable link, whic
 right nudge.
 
 ## 2026-08-19 · ledger-pattern-characterize-eyes-on-ice-as-a-source · claude-opus-4-8-parallel-tick8-b
+
+**[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
 Source-characterization task: decide whether a detention-beat Substack ("Eyes on ICE")
 deserves lead-source or citation-source status. The decisive evidence came from
@@ -1838,3 +1878,149 @@ an error shared by both paths: if USAspending's own data is wrong, both my
 recompute and the tool inherit it. What it does establish is that
 cascade-search is not introducing arithmetic, paging, or attribution errors of
 its own on the source that carries most of its load-bearing numbers.
+
+---
+
+## 2026-09-19 · TRIAGE PASS + three false-absence fixes · claude-opus-5[1m]
+
+Not a field report. A maintenance pass on this file and on what it had been
+saying, unheeded, for a month.
+
+### What the log was doing
+
+After the 2026-08-19 build day, field reports kept arriving but almost none of
+them turned into code: most commits in the following month appended to this
+file, and no test was written in response to any report logged after the build
+weekend. Every `[fixed]`/`[wontfix]`/`[tracked]` marker sat in the seed era.
+
+The recurring themes were not new information. Dozens of entries re-reported
+web-tier rate limiting and browser allow-list gaps -- unfixed root causes, each
+re-derived at real cost. The clearest case: the CourtListener AWS WAF soft block
+was reported **with a correct root cause and a written spec**, and reported
+again weeks later by a worker who redid the whole diagnosis from scratch,
+because nothing marked it known.
+
+The thesis in CONTRIBUTING -- field reports beat synthetic tests -- is
+*correct*, and the seed-era triage proves it. But a log nobody triages is an
+archive, not an engine.
+
+### Three false absences, all fixed, all with regression tests
+
+Each is the tool manufacturing the exact failure it exists to prevent. None was
+caught by the green suite, because all three built a *clean* `Coverage` over a
+failure the source never noticed -- and the `__post_init__` guard can only catch
+dirt that was **declared**.
+
+1. **AWS WAF soft block read as a document read.** [fixed] `detect_blocker`
+   ignored response headers entirely, so `x-amzn-waf-action: challenge` with a
+   202 and an empty body flowed downstream as content and `extract` printed
+   "the document was read, the terms are not in it." Now typed `AWS_WAF`,
+   browser-escalatable, with the retry named in the detail. Detection keys on
+   (challenge shape, no prose), never size alone, so a small real page stays a
+   Hit.
+
+2. **`usaspending.dollar_sum` certified absence over unparseable amounts.**
+   [fixed] It counted only rows whose `Award Amount` was numeric, then reported
+   "no priced rows" as `VerifiedAbsence` at **exit 11** -- which a shell caller
+   reads as publishable. Real awards with string amounts ("5,000,000", a shape
+   this module already defends against elsewhere) certified a vendor as having
+   none. Now an `AccessBlocker`. The zero-rows-but-`hasNext` case is fixed too.
+   A genuine absence now also carries probes and the subaward caveat instead of
+   the bare string "Not found".
+
+3. **Cached absences silently lost their scope.** [fixed] The cache stored only
+   result rows, so a replay rebuilt the outcome without `probes`,
+   `not_searched` or `caveats`: `claim()` degraded from a scoped sentence to
+   "Not found" while still exiting 11. Scope now persists in a sidecar; old
+   cache rows still read.
+
+### The structural fix
+
+`tests/test_every_source_absence.py` sweeps **every** source entry point against
+transport failure, rate limiting, and a malformed success payload, asserting
+that none yields a `VerifiedAbsence`. Adding a source means adding one line to
+`ENTRY_POINTS`, and that line is what makes the guarantee cover you.
+
+Two entry points are `xfail`, honestly: `oscn.search` and `docs.search` scrape
+HTML, and a scraper counting rows cannot distinguish "the page served no
+results" from "this is not the page I know." **Tracked, not fixed.**
+
+### Allow-list: the recurring root cause
+
+`ALLOWED_HOSTS` was a hardcoded set with no override, so every registry required
+a commit and a release -- while the error message told workers to "add it to
+ALLOWED_HOSTS deliberately" and gave them no way to. Now extendable via
+`~/.evidence-search/allowed_hosts.json` (or `$EVIDENCE_ALLOWED_HOSTS`), **a
+stated reason required per host**. The dot boundary still holds for
+config-supplied hosts, a broken config fails closed to the baseline, and the
+shipped list can never be reduced by a config file. `evidence-search hosts`
+prints the current boundary.
+
+### Still open
+
+- **The `web`/SearXNG rate-limiting cluster.** Partly root-caused 2026-08-30
+  (daemon on a deleted settings path; four default engines durably blocked).
+  Not addressed here.
+- **Read timeouts labelled `RateLimited`** (08-19 open item #3). Still true.
+- **`N/M responsive` can mask a total outage** -- a high responsive count
+  alongside zero results.
+- **HTML scrapers cannot detect a malformed page** (the two xfails above).
+
+---
+
+## 2026-09-20 · federal criminal docket watch (multi-defendant case) · claude-opus-5
+
+**Task:** answer a live question -- has the magistrate ruled on a defendant's
+pending request, and are there docket entries newer than the last recorded
+check.
+
+**Commands:** `courtlistener '"<case phrase>"' --type r`; same `--type rd`; same
+with `--json --limit 30`; `courtlistener --help`; `extract <docket-page-url>` with
+three different `--grep` patterns and `--text`; same URL `?page=2`.
+
+**Worked well -- and it caught a real error I had already committed.** Earlier
+I had checked the same docket by probing
+`storage.courtlistener.com/recap/<court>.<docket-id>/...N.0.pdf` for a range of
+entry numbers, got 404s across the board, and recorded "all return HTTP 404 on
+the RECAP mirror." `extract` against the **docket page** showed one of those
+entries exists -- an order that materially changed the finding. Another entry
+was a **"(Text-Only) ORDER"**, a class of entry that has no PDF at all and that
+the bucket-probe method can *never* detect.
+
+**Generalizable rule this suggests for SKILL.md** (the `mirror-not-a-register`
+note currently stops one level short): *the docket page is the register; the PDF
+bucket is the mirror.* A 404 at `storage.courtlistener.com/.../N.0.pdf` means no
+PDF was ever fetched for that entry -- often because none exists -- and says
+nothing about whether the entry does. Probing the bucket is not a docket check.
+
+**Friction 1 -- `--type r` gives no `total_matches`; `--type rd` does. Severity:
+slowed, near-miss on a count.** SKILL.md's counting guidance shows the
+`results: 20 of 293 total_matches` header. On `--type r` that header is absent
+(`results: 16`, nothing more) and `meta.total_matches` is not in the JSON. On
+`--type rd` both appear. Same quoted phrase, different type. I nearly reported
+"16" as a corpus total.
+
+**Friction 2 -- the top-level `asked` block is missing on `courtlistener`.
+Severity: annoyed.** SKILL.md says `--json` carries `asked` at the top level and
+to check it before writing up an absence. Top-level keys were
+`['query','coverage','results','outcome']`. On a `VerifiedAbsence` that
+instruction would be unfollowable.
+
+**Friction 3 -- `--type rd` results have empty `title` and blank metadata line.
+Severity: slowed.** Every row rendered as a bare `*UNIQUE*` with an empty title
+and a ` | | ` metadata line; snippets were empty in `--json`. The URLs carry the
+doc number, so it was recoverable by regex, but the list is unreadable as
+printed.
+
+**Friction 4 -- `--version` is not supported. Severity: trivial.** It exits 2
+with the usage block. A version would make these entries reproducible.
+
+**Corroborating the open `--docket` request.** My first `--grep` pattern matched
+160 times, because `ORDER` appears in every conditions-of-release entry in a
+many-defendant case. The signal I needed was two lines of page metadata
+(`Last Updated` / `Date of Last Known Filing`), which answer "is this view
+current?" -- usually the real question on a docket watch.
+
+**Also useful, unprompted:** the empty-result message on `extract` -- "This is an
+absence IN THIS DOCUMENT ONLY" -- stopped me from over-reading a zero, and
+`--grep` on the docket page hit 97.8-99.9% reduction on a ~184k-token page.
