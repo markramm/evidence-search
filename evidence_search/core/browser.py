@@ -42,12 +42,18 @@ ALLOWED_HOSTS = {
     "www.nebraska.gov":      "Nebraska SOS -- public business registry",
     "sos.nebraska.gov":      "Nebraska SOS",
     "www.sos.ok.gov":        "Oklahoma SOS -- public business registry",
+    "search.sunbiz.org":     "Florida Division of Corporations -- public business registry",
+    "sunbiz.org":            "Florida Division of Corporations",
+    "sosbes.sos.ky.gov":     "Kentucky SOS -- public business registry (ASP.NET postback)",
+    "sos.ky.gov":            "Kentucky Secretary of State",
     "sam.gov":               "SAM.gov -- federal contractor registry",
     "dsbs.sba.gov":          "SBA Dynamic Small Business Search",
     "web.sba.gov":           "SBA",
     "www.courtlistener.com": "CourtListener -- public court records",
     "storage.courtlistener.com": "CourtListener document storage",
     "projects.propublica.org": "ProPublica public data projects",
+    "schuylkillcountypa.gov": "Schuylkill County PA -- Recorder of Deeds / Assessment, public real-property records",
+    "berkspa.gov":            "Berks County PA -- Assessment / property records (propertyrecords.berkspa.gov), public real-property records",
 }
 
 # Signals that a human gate is on screen and no amount of waiting will clear it.
