@@ -201,3 +201,110 @@ def test_malformed_success_payload_is_never_an_absence(label, call, monkeypatch)
             "sentinel for its real empty page. Tracked, not fixed here.")
     assert not isinstance(out, VerifiedAbsence), (
         f"{label} certified an absence over an unreadable payload: {out}")
+
+
+# --- Issue #17: an award ID must be counted in the group it belongs to ------
+#
+# `usaspending "70CMSW26D00000016" --keywords --count` exited 11 with a
+# VerifiedAbsence. The award exists: it is an IDV (usaspending award 362519505),
+# and `--all-types` finds it. The count had searched contracts only, and its
+# `not_searched` did not say so, so the negative read as complete. Same
+# invariant as the rest of this file: never certify an absence over a search
+# that was not the whole of what the caller asked about.
+
+
+def _count_post(monkeypatch, hits_by_group: dict[str, int]):
+    """Fake the count endpoint: each group reports its count only if asked for.
+
+    Records every body posted, so a test can check what was actually searched.
+    """
+    import evidence_search.sources.usaspending as us
+    posted: list[dict] = []
+
+    def _post(path, body):
+        posted.append(body)
+        asked = set(body["filters"]["award_type_codes"])
+        res = {g: (hits_by_group.get(g, 0) if asked & set(codes) else 0)
+               for g, codes in us.AWARD_GROUPS.items()}
+        return {"results": res}, None
+
+    monkeypatch.setattr(us, "_post", _post)
+    return posted
+
+
+def test_idv_piid_count_is_not_an_absence(monkeypatch):
+    """The live #17 case: an IDV's PIID counted over contracts only.
+
+    The 9th character of a uniform PIID is the instrument type, and `D` is an
+    indefinite-delivery vehicle -- an IDV, which lives in a different award
+    group from contracts. Counting it among contracts alone and reporting zero
+    certified that an award that exists does not.
+    """
+    import evidence_search.sources.usaspending as us
+    _count_post(monkeypatch, {"idvs": 1})
+
+    out = us.counts("70CMSW26D00000016", by_recipient=False,
+                    award_types=us.CONTRACT_TYPES, use_cache=False)
+    assert not isinstance(out, VerifiedAbsence), (
+        f"an IDV PIID was certified absent from a contracts-only count: {out}")
+    assert out.results[0].meta["total_awards"] == 1
+
+
+def test_count_names_the_award_groups_it_did_not_search(monkeypatch):
+    """A default count is contracts only. Its absence must say so.
+
+    Without this, `not_searched` listed only the reporting threshold and
+    classified spending, and a zero over contracts read as a zero over every
+    federal award.
+    """
+    import evidence_search.sources.usaspending as us
+    _count_post(monkeypatch, {})
+
+    out = us.counts("NO SUCH VENDOR", award_types=us.CONTRACT_TYPES,
+                    use_cache=False)
+    assert isinstance(out, VerifiedAbsence), type(out)
+    excluded = " ".join(out.not_searched)
+    for group in ("idvs", "grants", "loans", "direct_payments", "other_assistance"):
+        assert group in excluded, f"{group} not named in not_searched: {out.not_searched}"
+    assert "contracts" not in excluded.replace("--all-types", "")
+
+    full = us.counts("NO SUCH VENDOR", award_types=us.ALL_AWARD_TYPES,
+                     use_cache=False)
+    assert isinstance(full, VerifiedAbsence), type(full)
+    assert not any("award-type groups" in s for s in full.not_searched), (
+        "a count over every group must not claim to have skipped one")
+
+
+@pytest.mark.parametrize("piid", ["70CMSW26R00000016", "70CMSW26Q00000016"])
+@pytest.mark.parametrize("entry", ["counts", "search", "dollar_sum"])
+def test_solicitation_number_is_never_an_absence(monkeypatch, piid, entry):
+    """R and Q in the 9th position mark a solicitation, not an award.
+
+    USAspending holds awards. A solicitation number is not in it by definition,
+    so "not found" there says nothing about whether the procurement exists --
+    the answer is on SAM.gov. The source must say so without spending a ledger
+    slot on a question it knows the corpus cannot answer.
+    """
+    import evidence_search.sources.usaspending as us
+    from evidence_search.core.results import AccessBlocker, Blocker
+    posted = _count_post(monkeypatch, {})
+
+    kw = {} if entry == "dollar_sum" else {"use_cache": False}
+    out = getattr(us, entry)(piid, by_recipient=False, **kw)
+    assert isinstance(out, AccessBlocker), type(out)
+    assert out.mechanism is Blocker.WRONG_ID_TYPE
+    assert "SAM.gov" in out.detail and "solicitation" in out.detail.lower()
+    assert not posted, "a solicitation number should not reach the API"
+
+
+@pytest.mark.parametrize("query", ["70CDCR26FR0000001", "ACME DEFENSE LLC",
+                                   "70CMSW26DO", "LOCKHEEDMARTIN"])
+def test_non_solicitation_queries_still_reach_the_api(monkeypatch, query):
+    """The PIID check must not swallow award IDs or ordinary names."""
+    import evidence_search.sources.usaspending as us
+    posted = _count_post(monkeypatch, {"contracts": 2})
+
+    out = us.counts(query, by_recipient=False, award_types=us.CONTRACT_TYPES,
+                    use_cache=False)
+    assert posted, f"{query!r} never reached the API"
+    assert not isinstance(out, VerifiedAbsence)

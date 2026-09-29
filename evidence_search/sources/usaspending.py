@@ -29,6 +29,7 @@ anything:
 from __future__ import annotations
 
 import json
+import re
 import time
 from urllib.parse import quote
 from typing import Any
@@ -71,6 +72,47 @@ AWARD_GROUPS = {
 
 #: Valid ONLY on the count endpoint, which accepts a mixed list.
 ALL_AWARD_TYPES = [c for codes in AWARD_GROUPS.values() for c in codes]
+
+#: A uniform PIID (FAR 4.1603): a 6-character agency code, a 2-digit fiscal
+#: year, ONE LETTER naming the instrument type, then a serial. Legacy DoD PIIDs
+#: carry the same fields separated by dashes (W912DY-10-D-0001).
+#:
+#: The 9th character decides which corpus the identifier can be in at all, and
+#: getting it wrong produced a false absence (#17): `70CMSW26D00000016` counted
+#: over contracts only returned zero and exited 11, while the award exists --
+#: as an IDV, a different award group. Nothing in the output said IDVs had not
+#: been searched.
+_PIID = re.compile(r"^[A-Z0-9]{6}\d{2}([A-Z])[A-Z0-9]{4,9}$")
+#: A = blanket purchase agreement, B = basic ordering agreement,
+#: D = indefinite-delivery vehicle. All three are IDVs on USAspending.
+_IDV_INSTRUMENTS = {"A", "B", "D"}
+#: Q = request for quotations, R = request for proposals. A solicitation is not
+#: an award, so USAspending cannot hold it; its absence there proves nothing.
+_SOLICITATION_INSTRUMENTS = {"Q", "R"}
+
+
+def _piid_instrument(query: str) -> str | None:
+    """The instrument-type letter if `query` is shaped like a PIID, else None."""
+    m = _PIID.match((query or "").strip().upper().replace("-", ""))
+    return m.group(1) if m else None
+
+
+def _solicitation_blocker(query: str, url: str) -> AccessBlocker | None:
+    """Refuse a solicitation number before spending a ledger slot on it."""
+    inst = _piid_instrument(query)
+    if inst not in _SOLICITATION_INSTRUMENTS:
+        return None
+    return AccessBlocker(
+        query=query,
+        coverage=Coverage(queried=[SOURCE], errored={SOURCE: "solicitation-number"}),
+        mechanism=Blocker.WRONG_ID_TYPE, url=url,
+        detail=(f"{query!r} is a solicitation number, not an award ID: the 9th "
+                f"character {inst!r} marks a request for "
+                f"{'quotations' if inst == 'Q' else 'proposals'}. USAspending holds "
+                "awards only, so THIS IS NOT AN ABSENCE -- search for the "
+                "solicitation on SAM.gov (sam.gov/opp), and for any award it "
+                "produced by the awardee's name here."))
+
 
 FIELDS = ["Award ID", "Recipient Name", "Awarding Agency", "Awarding Sub Agency",
           "Award Amount", "Total Outlays", "Start Date", "End Date",
@@ -182,11 +224,29 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
            date_from: str | None = None, date_to: str | None = None,
            store: Store | None = None, limiter: Limiter | None = None,
            use_cache: bool = True):
-    """Real totals by award type. The countable primitive this beat needs."""
-    types = award_types or ALL_AWARD_TYPES
+    """Real totals by award type. The countable primitive this beat needs.
+
+    A count over fewer than every award group NAMES the groups it skipped in
+    `not_searched`: a zero over contracts is not a zero over federal awards,
+    and without the list the negative read as complete (#17).
+    """
+    url = f"{API}/search/spending_by_award_count/"
+    blocked = _solicitation_blocker(query, url)
+    if blocked:
+        return blocked
+    types = list(award_types or ALL_AWARD_TYPES)
+    routed: list[str] = []
+    inst = _piid_instrument(query)
+    if inst in _IDV_INSTRUMENTS and not set(types) & set(IDV_TYPES):
+        # The count endpoint accepts a mixed list, so widening is free -- and
+        # widening can only find more, never manufacture an absence.
+        types += IDV_TYPES
+        routed.append(f"{query!r} is shaped like an IDV PIID (instrument type "
+                      f"{inst!r}), so IDVs were counted as well as the groups asked for.")
+    excluded = [g for g, codes in AWARD_GROUPS.items() if not set(types) & set(codes)]
     mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
     return run_source(
-        query, source=SOURCE, url=f"{API}/search/spending_by_award_count/",
+        query, source=SOURCE, url=url,
         searched=f"usaspending award counts ({mode})",
         parse=lambda d: _parse_counts(d, query, by_recipient),
         transport=_post_transport(
@@ -196,12 +256,15 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
         exact_match_supported=False,
         corpus=("USAspending award counts from FY2008. Unlike a web tier this "
                 "IS a measurement -- the endpoint counts the matching awards."),
-        caveats=([] if by_recipient else
+        caveats=routed + ([] if by_recipient else
                  ["KEYWORD counts records CONTAINING the words, not awards TO a "
                   "vendor. A count from a keyword search is not a count of "
                   "anything in particular."]),
         not_searched=["awards below the reporting threshold",
-                      "classified and otherwise unreported spending"],
+                      "classified and otherwise unreported spending"]
+                     + ([f"award-type groups not counted: {', '.join(excluded)} "
+                         "(pass --all-types to count every group)"]
+                        if excluded else []),
         cache_params={"mode": "count", "recipient": by_recipient,
                       "types": ",".join(types),
                       "date_from": date_from, "date_to": date_to},
@@ -373,6 +436,9 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
     caught it by cross-checking against --count, which respected the same bounds.
     A wrong total that says complete is worse than no total.
     """
+    blocked = _solicitation_blocker(query, f"{API}/search/spending_by_award/")
+    if blocked:
+        return blocked
     store = store or Store()
     limiter = limiter or Limiter(store)
     types = award_types or CONTRACT_TYPES
@@ -545,6 +611,9 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
            page: int = 1, store: Store | None = None, limiter: Limiter | None = None,
            use_cache: bool = True):
     """List awards. Carries the real total from the count endpoint alongside."""
+    blocked = _solicitation_blocker(query, f"{API}/search/spending_by_award/")
+    if blocked:
+        return blocked
     store = store or Store()
     types = award_types or CONTRACT_TYPES
 
