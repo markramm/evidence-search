@@ -6,3 +6,6 @@ __pycache__/
 deploy/.searxng/
 deploy/searxng/settings.local.yml
 .coverage
+# Raw field reports: may name subjects, tasks and local paths. Never published;
+# redact before copying anything into the tracked FEEDBACK.md or an issue.
+FEEDBACK.local.md

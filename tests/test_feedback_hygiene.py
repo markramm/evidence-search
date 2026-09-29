@@ -69,3 +69,25 @@ def test_feedback_does_not_claim_a_triage_it_has_not_done():
     assert claim not in text, (
         "FEEDBACK.md asserts a complete triage. That sentence was true on "
         "2026-08-19 and false for the month after. Date or qualify it.")
+
+
+def test_feedback_is_redacted_of_local_paths():
+    """The tracked log is public. Raw notes belong in FEEDBACK.local.md.
+
+    Agents write field reports mid-task, and a mid-task report naturally
+    carries the reporter's working paths -- which name the machine, the user,
+    and often the investigation. That is what the gitignored FEEDBACK.local.md
+    is for; the public file takes the redacted version.
+    """
+    text = FEEDBACK.read_text()
+    leaks = [line.strip()[:80] for line in text.splitlines()
+             if re.search(r"/Users/|/home/[a-z]", line)]
+    assert not leaks, (
+        "FEEDBACK.md is public and carries local paths. Redact them (the raw "
+        "entry can live in the gitignored FEEDBACK.local.md):\n" + "\n".join(leaks[:5]))
+
+
+def test_raw_feedback_file_is_never_tracked():
+    """FEEDBACK.local.md exists to hold what must not be published."""
+    ignore = (FEEDBACK.parent / ".gitignore").read_text().splitlines()
+    assert "FEEDBACK.local.md" in [l.strip() for l in ignore]

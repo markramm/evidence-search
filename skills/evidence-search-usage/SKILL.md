@@ -260,8 +260,21 @@ primary evidence for what gets fixed next.
 
 Invoke the `hallway-agent-testing` skill — it carries the method (what counts as
 friction, how to write it so it is actionable, how to report a command
-faithfully). Log to `FEEDBACK.md` in the evidence-search repo, or open an
-issue using the "False negative" or "New source request" template.
+faithfully).
+
+**Where it goes — two files, because the repo is public.** Write the raw entry
+to `FEEDBACK.local.md` in the evidence-search checkout. It is gitignored, so it
+can name the task, the subject, the ticket and the local path — whatever makes
+the report useful to you and the maintainer. Nothing in it is ever published.
+
+`FEEDBACK.md` (tracked, public) and GitHub issues take **redacted** entries
+only. Before copying anything there, replace people, investigations, vendors,
+committees and places with stable placeholders (`<person-a>`, `<vendor-a>`,
+`<pac-a>`, `<county-a>`), describe the task by its kind ("a federal-court
+docket watch"), and remove local paths, KB ids, ticket and draft names. Public
+identifiers that ARE the bug — a PIID, an API endpoint, a public government
+domain — stay. For a "False negative" or "New source request" issue, use the
+templates, redacted the same way.
 
 The short version: report anything you had to look up or guess, anything
 surprising, every error verbatim with its command, **where the results
