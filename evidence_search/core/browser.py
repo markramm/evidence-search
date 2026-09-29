@@ -54,6 +54,7 @@ ALLOWED_HOSTS = {
     "projects.propublica.org": "ProPublica public data projects",
     "schuylkillcountypa.gov": "Schuylkill County PA -- Recorder of Deeds / Assessment, public real-property records",
     "berkspa.gov":            "Berks County PA -- Assessment / property records (propertyrecords.berkspa.gov), public real-property records",
+    "www.gao.gov":            "U.S. Government Accountability Office -- published audit reports (legislative-branch public records; direct fetch returns 403)",
 }
 
 # Signals that a human gate is on screen and no amount of waiting will clear it.

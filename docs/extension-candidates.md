@@ -11,7 +11,7 @@ source did not exist, we record what we did instead.
 
 Any new source below should declare `corpus`, `not_searched`, `caveats` and
 `exact_match_supported` up front, as the source-plugin design note proposes
-(`docs/source-plugin-design.md`, commit b0969f3). Candidate 2 shows why: an incomplete
+(`docs/source-plugin-design.md`). Candidate 2 shows why: an incomplete
 `not_searched` let a correct search certify a false negative.
 
 The investigations are unpublished, so they are described here by **shape**, not subject:
@@ -32,7 +32,7 @@ Legend. **Access**: keyless / free-key / bulk / paid / scrape (browser tier). **
 day, M ~2-4 days, L a week or more. "VA worth" means how publishable a `VerifiedAbsence` from the
 source would be, and under what scope.
 
-### 1. FEC campaign finance, bulk first (**NEW**, not in #1-#6; not listed in #7)
+### 1. FEC campaign finance, bulk first (#16)
 
 - **Adds:** itemized committee → committee and committee → candidate transactions, with *both* sides
   of each transaction (the giver's Schedule B and the recipient's Schedule A), committee IDs,
@@ -62,9 +62,12 @@ source would be, and under what scope.
   queries must warn on multiple committee IDs, the same double-count trap as the usaspending
   recipient warning.
 
-### 2. usaspending: IDV-aware counts, child awards under a vehicle, PIID-shape routing (**NEW** bug + extension on an existing source)
+### 2. usaspending: IDV-aware counts, child awards under a vehicle, PIID-shape routing (#17, fixed in #21 for (a) and (b))
 
-- **A false `VerifiedAbsence` found in use.** `usaspending "70CMSW26D00000016" --keywords --count`
+- **Status: (a) and (b) fixed in #21** (2026-09-29): a count that skips award groups names them in
+  `not_searched`, and a PIID routes by its 9th character (a solicitation number is a blocker, never an
+  absence). (c)-(e) and IDV routing for plain *searches* remain follow-ons.
+- **A false `VerifiedAbsence` found in use** (before #21). `usaspending "70CMSW26D00000016" --keywords --count`
   → **VerifiedAbsence (exit 11)** for an IDIQ that exists (award 362519505). The same query with
   `--all-types` → Hit, `idvs: 1`. `count()` defaults to `CONTRACT_TYPES = ["A","B","C","D"]`, and
   the absence's `not_searched` lists only "awards below the reporting threshold" and "classified
@@ -110,7 +113,7 @@ source would be, and under what scope.
 - **Others:** procurement reporters everywhere; local newsrooms watching facilities in their county.
 - **Effort:** M (per #2). **Priority raised** by this analysis: it is the missing half of candidate 2.
 
-### 4. CourtListener docket-watch mode (**NEW** issue; corroborates several FEEDBACK requests for `--docket`)
+### 4. CourtListener docket-watch mode (#18; corroborates several FEEDBACK requests for `--docket`)
 
 - **Adds:** `courtlistener --docket <court>:<number>` returns entries since a date, the page's
   "Last Updated" and "Date of Last Known Filing" fields, deadlines stated in entries (e.g., "Answer
@@ -164,7 +167,7 @@ source would be, and under what scope.
   quoted phrases, per #1), bounded to 2001 onward.
 - **Effort:** M (per #1). No change in priority, but here is a second concrete consumer.
 
-### 7. Congressional financial disclosures + lobbying (LDA): re-probe access (**NEW** issue; LDA is Tier 5 in #7)
+### 7. Congressional financial disclosures + lobbying (LDA): re-probe access (#19; LDA is Tier 5 in #7)
 
 - **Adds:** candidate and member financial disclosures (House Clerk; Senate eFD), and LD-1/LD-2
   filings that name a bill number.
@@ -173,7 +176,10 @@ source would be, and under what scope.
   "interactive/blocked", so **re-probe it before trusting that tier.** `propublica` covers
   executive-branch appointees only. Candidates in thin battleground races have no disclosure
   source in the tool.
-- **Access:** *unverified*. House Clerk disclosures are reported to offer annual bulk downloads;
+- **Access:** **LDA verified keyless (2026-09-29):** `https://lda.gov/api/v1/filings/?client_name=<name>&filing_year=<yyyy>`
+  returns JSON (`lda.senate.gov` answers with a 301 to it); a registrant's 2008 Q1/Q2 LD-2s naming a bill
+  were retrieved that way. So LDA is not Tier 5, and the probe half of #19 is done for LDA. Disclosures
+  are still *unverified*: House Clerk disclosures are reported to offer annual bulk downloads;
   Senate eFD is reported to sit behind a terms-acceptance page (browser tier). Probe both and
   record the shapes, as #5 did for ICIJ.
 - **VA worth:** for LDA, "no LD-2 in <years> names H.R. N" is a strong, scoped negative. It
@@ -181,7 +187,7 @@ source would be, and under what scope.
 - **Others:** high. Every Hill and influence reporter.
 - **Effort:** S to probe; M-L to build.
 
-### 8. State data-broker registries (**NEW** issue)
+### 8. State data-broker registries (#20)
 
 - **Adds:** the registries that CA, VT, TX and OR maintain of registered data brokers. Joined to an
   open opt-out list, they show which listed brokers are registered, which are not, and which
@@ -195,14 +201,14 @@ source would be, and under what scope.
   *into* brokers. This is the regulator's list *of* them.
 - **Effort:** S per state once probed; M for four.
 
-### 9. Browser allow-list: gao.gov (config, small)
+### 9. Browser allow-list: gao.gov (config, small; added with this PR)
 
 - `extract https://www.gao.gov/products/<report> --ids` → **AccessBlocker (12), http-403**.
   `--browser` was refused: "Host www.gao.gov is not on the public-records allow-list." GAO reports
   are legislative-branch public records, the same tier as the courts and registries already
   allowed. Two earlier passes on the same beat hit the same 403. The FEC request (fec.gov,
   api.open.fec.gov) is already in FEEDBACK 2026-08-28.
-- **Effort:** S. It is a default-list decision for the maintainer.
+- **Done:** the maintainer approved it; `www.gao.gov` is added to `ALLOWED_HOSTS` in this PR.
 
 ### 10. Lower for these stories (no change to existing issues)
 
@@ -217,81 +223,18 @@ source would be, and under what scope.
 
 | Rank | Candidate | Issue | Access | Stories | VA worth | Others | Effort |
 |---|---|---|---|---|---|---|---|
-| 1 | FEC (bulk first) | **new** | bulk keyless (verified) + free-key API | B, D, A | high, if scoped | very high | M |
-| 2 | usaspending IDV / PIID routing / agency | **new** (bug) | keyless | A, C | restores existing negatives | high | S-M |
+| 1 | FEC (bulk first) | #16 | bulk keyless (verified) + free-key API | B, D, A | high, if scoped | very high | M |
+| 2 | usaspending IDV / PIID routing / agency | #17 (a, b fixed in #21) | keyless | A, C | restores existing negatives | high | S-M |
 | 3 | SAM.gov | #2 (strengthened) | keyless + browser | A, C, F | high | high | M |
-| 4 | CourtListener docket watch | **new** | keyless | C, A | high with timestamp | very high | M |
+| 4 | CourtListener docket watch | #18 | keyless | C, A | high with timestamp | very high | M |
 | 5 | Nonprofit 990 / Schedule I | #4 (strengthened) | keyless lookup; bulk for Sched. I | D, B, E | low by name; moderate by EIN | very high | M-L |
 | 6 | SEC EDGAR | #1 (strengthened) | keyless | A, F | strong from 2001 | high | M |
-| 7 | Cong. disclosures + LDA | **new** (re-probe) | unverified | B | strong for LDA | high | S probe, M-L build |
-| 8 | State data-broker registries | **new** | unverified | E | good with DBA variants | very high | S-M |
-| 9 | gao.gov allow-list | config | browser | A | n/a | moderate | S |
+| 7 | Cong. disclosures + LDA | #19 | LDA keyless (verified); disclosures unverified | B | strong for LDA | high | S probe, M-L build |
+| 8 | State data-broker registries | #20 | unverified | E | good with DBA variants | very high | S-M |
+| 9 | gao.gov allow-list | done in this PR | browser | A | n/a | moderate | S |
 
 ---
 
 ## Filed issues (2026-09-29)
 
-Approved and filed: #16 FEC (bulk first), #17 usaspending IDV false absence (bug), #18 CourtListener docket-watch, #19 LDA + congressional disclosures re-probe, #20 state data-broker registries. Drafts kept below for reference.
-
-### Draft: FEC campaign-finance source, bulk first
-
-> **Tier 3 (bulk, keyless, verified 2026-09-29), with an optional Tier 2 API path.**
->
-> **The research question:** did committee X give to committee Y, when, and does each side's report
-> agree? Answered live in minutes from `pas2` + `oth` bulk files (6 cycles, 9-36 MB each) after
-> `DEMO_KEY` returned 429 / `Retry-After: 34289` on its first call.
->
-> **Produces:**
-> - `evidence-search fec --from-committee C… --to-committee C… --cycles 2006-2014` returns rows
->   with the date, amount, report type, image number and transaction ID, from *both* filers where
->   both reported.
-> - `evidence-search fec --committee <name>` resolves to committee IDs and warns when several
->   match (same-surname candidates in different states are common).
-> - Refund rows (line 16 / negative amounts) are netted and shown, not dropped.
->
-> **Absence semantics:** a `VerifiedAbsence` names the cycles indexed and the bulk-file date. It
-> lists in `not_searched`: unitemized receipts, transactions reported by one side only, and
-> unprocessed recent reports.
->
-> **Build on the same local indexer as #3 / #5.** Refs #7.
-
-### Draft: usaspending certifies a false absence for an IDV PIID
-
-> `usaspending "70CMSW26D00000016" --keywords --count` → `VerifiedAbsence` (exit 11). The award
-> exists as an IDV (usaspending award 362519505). `--all-types` → Hit, `idvs: 1`.
->
-> **Cause:** `count()` defaults to `CONTRACT_TYPES` (A-D), and `not_searched` does not name the
-> award groups excluded, so the negative reads as complete.
->
-> **Fix:**
-> 1. `not_searched` lists the excluded groups whenever `types` is not every group.
-> 2. A query shaped like a PIID routes by its 9th character: `D` → include IDVs; `R`/`Q` →
->    "solicitation number, not an award ID; see SAM.gov", never an absence.
-> 3. Add a regression test for the IDV case to `tests/test_every_source_absence.py`.
->
-> **Follow-ons (separate PR):** `--idv <PIID>` child-award listing; `--agency`; a reporting-lag
-> note on date-bounded queries.
-
-### Draft: CourtListener docket-watch mode
-
-> `courtlistener --docket <court>:<number> [--since DATE]` returns docket entries with full text
-> (not the ~200-character grep excerpt), the page's `Last Updated` / `Date of Last Known Filing`,
-> deadlines found in entry text ("Answer due … by"), and cases linked by "notice of related case".
-> A bare docket number matches across districts (14 dockets for one number on 2026-09-29), so
-> `<court>` is required. Absence semantics: "no entry matching X as of <Last Updated>", and never
-> without the timestamp, because RECAP is a mirror. Refs the `--docket` requests in FEEDBACK.md.
-
-### Draft: re-probe LDA and congressional financial disclosures
-
-> #7 lists LDA as Tier 5 (interactive/blocked). Recent work cited LDA filing UUIDs, which suggests
-> a structured path. Probe and record access shapes (as #5 did for ICIJ) for: LDA filings search;
-> House Clerk financial disclosures; Senate eFD. Only then scope a client. The key negative is "no
-> LD-2 in <years> names H.R. N", which protects claims that a bill was not lobbied.
-
-### Draft: state data-broker registries
-
-> Probe access for the CA, VT, TX and OR data-broker registries and record their shapes. Then
-> build `evidence-search brokers '<name>' [--state XX]`, which returns the registration status and
-> date, with DBA/variant handling. A `VerifiedAbsence` must state the registry snapshot date and
-> the variants tried. This is the regulator's list *of* brokers, which EPIC #7's rule against wiring
-> into brokers themselves does not cover. Refs #7.
+Approved and filed: [#16](https://github.com/markramm/evidence-search/issues/16) FEC (bulk first); [#17](https://github.com/markramm/evidence-search/issues/17) usaspending IDV false absence (bug; fixed in #21); [#18](https://github.com/markramm/evidence-search/issues/18) CourtListener docket-watch; [#19](https://github.com/markramm/evidence-search/issues/19) LDA + congressional disclosures; [#20](https://github.com/markramm/evidence-search/issues/20) state data-broker registries.
