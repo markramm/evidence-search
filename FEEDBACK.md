@@ -18,6 +18,19 @@ now `evidence-search`. The commands are left exactly as they were run, because
 a field report that has been tidied up is no longer a record of what happened —
 substitute the new name when reproducing one.
 
+## This file is public and redacted; raw notes go in `FEEDBACK.local.md`
+
+Write your raw entry to `FEEDBACK.local.md` in your checkout. It is gitignored:
+it can name the task, the subject, the ticket and your local paths, and it is
+never published. What goes in **this** file (or in a GitHub issue) is the
+redacted version: people, investigations, vendors, committees and places
+become stable placeholders (`<person-a>`, `<vendor-a>`, `<pac-a>`,
+`<county-a>`); the task is described by its kind ("a federal-court docket
+watch"), not its ticket name; no local paths, KB ids, ticket or draft names.
+Public identifiers that ARE the bug -- a PIID, an API endpoint, a public
+government domain -- stay. Redaction is the one edit allowed to someone else's
+entry; every entry here was redacted on 2026-09-29.
+
 ## A note on the placeholders
 
 Entries logged before this repo went public named real investigative subjects,
@@ -37,7 +50,7 @@ part — "a PIID passed to `--detail`" is the bug; whose PIID it was is not.
 ## Format
 
 ```markdown
-## YYYY-MM-DD · <task-id or context> · <model>
+## YYYY-MM-DD · <kind of task, redacted> · <model>
 **Command:** the exact command
 **Expected:** what you thought would happen
 **Got:** what happened
@@ -107,7 +120,7 @@ format, and because the failure modes are the ones worth watching for.
 
 ### ProPublica returned 35 identical placeholder rows
 
-**Command:** `cascade-search propublica "Blue Owl"`
+**Command:** `cascade-search propublica "<org-g>"`
 **Expected:** appointee names and disclosure detail
 **Got:** 35 rows, every one titled `(unnamed appointee)`, all sharing one URL
 **Friction:** looked like a broad successful hit. Nothing in the output said the
@@ -158,14 +171,14 @@ up on something it should have retried.
 ---
 
 ## 2026-08-19 · eval-1-blocked-is-not-absence · claude-opus-5
-**Command:** `cascade-search --wait oscn --county oklahoma --lname <surname> --year 2013`
+**Command:** `cascade-search --wait oscn --county <county-d> --lname <surname> --year 2013`
 **Expected:** docket rows for a common surname in the state's largest county, or a clean absence
 **Got:** `AwaitingHuman`, exit 4, `coverage: 0/2 responsive | ERRORED: oscn, oscn:browser`, captcha gate token `9fe41fafed61`. Retried once, same wall, new token `a749a449f759`.
 **Friction:** Minimal on the core job — this is the tool working exactly as advertised. The typed outcome plus the `0/2 responsive` coverage line made it immediately unambiguous that I had been blocked rather than found nothing. With a plain WebSearch I would have had an empty page and a real temptation to write it up as "no records found." That is the failure the tool exists to prevent, and it prevented it. Worth saying plainly: the single most useful thing here was that exit 4 is not exit 1.
 **Had to figure out:**
-  1. `oscn --help` does not say which county names are valid, or what format they take. I guessed `oklahoma` from the pattern in the SKILL examples (`<county-b>`). It worked, but I had no way to confirm in advance that `oklahoma` was the right token for Oklahoma County rather than, say, `oklahoma-county` or a FIPS code — and a wrong county string would presumably also produce a result I might misread. A `--county` value list, or an error that distinguishes "unknown county" from "county fine, blocked," would remove that doubt.
-  2. Nothing in the blocked output tells me whether a gate for this exact URL is ALREADY queued. I had to run `gate list` separately to discover `ebace2555278` — a gate on the byte-identical Oklahoma/<surname>/2013 URL from a concurrent run. My two runs then added two more. Three gates for one query is noise for whoever clears them.
-**Surprising:** Retrying created a SECOND gate token rather than returning the existing one. Gates look content-addressable in principle (same URL, same capture instruction), so dedupe — or at least "a gate for this URL is already queued as X" — seems like it would be strictly better than accumulating duplicates. `gate list` currently shows 8 gates of which at least 5 are same-URL duplicates (three Tulsa/<surname-2>/2015, two Oklahoma/<surname>/2013).
+  1. `oscn --help` does not say which county names are valid, or what format they take. I guessed `<county-d>` from the pattern in the SKILL examples (`<county-b>`). It worked, but I had no way to confirm in advance that `<county-d>` was the right token for <county-d> County rather than, say, `<county-d>-county` or a FIPS code — and a wrong county string would presumably also produce a result I might misread. A `--county` value list, or an error that distinguishes "unknown county" from "county fine, blocked," would remove that doubt.
+  2. Nothing in the blocked output tells me whether a gate for this exact URL is ALREADY queued. I had to run `gate list` separately to discover `ebace2555278` — a gate on the byte-identical <county-d>/<surname>/2013 URL from a concurrent run. My two runs then added two more. Three gates for one query is noise for whoever clears them.
+**Surprising:** Retrying created a SECOND gate token rather than returning the existing one. Gates look content-addressable in principle (same URL, same capture instruction), so dedupe — or at least "a gate for this URL is already queued as X" — seems like it would be strictly better than accumulating duplicates. `gate list` currently shows 8 gates of which at least 5 are same-URL duplicates (three <county-e>/<surname-2>/2015, two <county-d>/<surname>/2013).
 **Also surprising, smaller:** `$CS limits` showed oscn at `5/30 per 3600s` already consumed before I ran anything, which was genuinely useful context — I could see the concurrent run's footprint. But the oscn note says "Turnstile after ~10 fetches/session" and I hit Turnstile at what the ledger showed as fetch 6. Either the ~10 estimate is optimistic, or session-scoped and ledger-scoped counts are different things and the note does not say which.
 **Would have helped:**
   - A one-line hint in the blocked output when an equivalent gate is already pending.
@@ -249,7 +262,7 @@ instead of stopping at the crow book, and it turned out to be the most
 interesting fact in the whole search: the name may be a test fixture, not a
 person. Consensus ranking would have buried it and I'd have missed it.
 
-## 2026-08-19 · eval-2 general-web · claude-opus-5 (investigation-search skill)
+## 2026-08-19 · eval-2 general-web · claude-opus-5 (research-search skill)
 
 Task: find recent reporting on ICE warehouse detention facilities and their contractors,
 return 3-4 strongest sources with URLs. Ran ~11 cascade-search calls, no WebSearch fallback
@@ -273,7 +286,7 @@ publisher URL, or emit both. Also a `publisher:` field instead of gluing it into
 `[fixed 81dc1a1 — redirect URLs are marked non-citable and the publisher is surfaced from the feed rather than glued into the title. The redirect is NOT resolved: following it per-result spends a fetch apiece and Google rate-limits the hop. `news` is a "what exists" scan by design; `web` is the citation path.]`
 
 **2. `extract --ids` silently over-filters and reports a misleading reduction number.**
-**Command:** `cascade-search extract https://www.projectsaltbox.com/p/work-on-313-million-contract-to-convert --ids`
+**Command:** `cascade-search extract https://<outlet-f-domain>/p/<post-slug> --ids`
 **Expected:** the contract dollar figures and contract/modification IDs from an article whose
 literal headline is "$313 Million Contract".
 **Got:**
@@ -323,7 +336,7 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
   "Where the ICE Detention Standards are silent, the ACA Jail Standards must be followed") that
   I could quote with confidence because it's DOM traversal and not a model paraphrase. Roughly
   170k raw tokens of source read for about 9k. That's the feature.
-- `*UNIQUE*` markers were genuinely predictive on this beat. Project Salt Box — a small
+- `*UNIQUE*` markers were genuinely predictive on this beat. <outlet-f> — a small
   Substack doing the best USASpending.gov modification-record reporting on this story, better
   than the majors on procurement mechanics — was UNIQUE-flagged and would have been buried by
   consensus ranking. Two of my four headline sources came from UNIQUE hits.
@@ -331,7 +344,7 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **5. Small thing:** `--wait` worked as documented across sequential calls; zero spurious
 `RateLimited`. Nothing to report there, which is itself the point.
 
-## 2026-08-19 · foia-records-<person-h>-cbp-position-tenure-separation-date · agent:claude-sonnet-5-parallel-tick1-c
+## 2026-08-19 · FOIA records task (a federal employee's tenure) · agent:claude-sonnet-5-parallel-tick1-c
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
@@ -342,18 +355,18 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 **Worked well:** `extract --grep`/plain `extract` on the CBP FOIA-process page was excellent for pulling the one operative fact (SecureRelease-only intake, effective date, routing table) out of a page that was otherwise mostly nav chrome — did not need to eyeball the raw page at all.
 **Severity:** annoyed (rate-limit diagnosis friction only; no blocked work — retry resolved it in under 20s).
 
-## 2026-08-19 · verify-what-our-rescue-is-actually-performing-under-legal-services-bridge-2-0-the-uscri-parallel-provider-question-and-subaward-records · agent:claude-sonnet-5-parallel-tick1-b
+## 2026-08-19 · subaward-records verification task (legal-services provider) · agent:claude-sonnet-5-parallel-tick1-b
 
 **[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
 
-**Commands attempted:** `cascade-search docs "USCRI unaccompanied children legal services cooperative agreement" --site federalregister.gov`; also `cascade-search limits`.
+**Commands attempted:** `cascade-search docs "<org-b> legal services cooperative agreement" --site federalregister.gov`; also `cascade-search limits`.
 **What happened:** the task needed federal-procurement-database verification (USAspending awards/subawards/transactions, Federal Register full-text search, FPDS-NG). None of these are `cascade-search` first-class sources — the closest fit, `docs`, is scoped to *vendor documentation* (`claude-code`/`claude-api` sites only per its own error message: "unknown docs site 'federalregister.gov'; known: claude-code, claude-api") and returned a `VerifiedAbsence` that was actually just "wrong tool for this corpus," not a real negative about federalregister.gov content. I nearly wrote that up as a publishable negative before re-reading the coverage line and realizing it meant "I don't know this site," not "this site has nothing."
 **Worked around it:** dropped to raw `curl` against USAspending's public JSON API (`api.usaspending.gov/api/v2/awards/`, `/transactions/`, `/subawards/` via POST) and the Federal Register's own documented-ungated JSON API (`federalregister.gov/api/v1/documents.json`) directly — both worked fine unauthenticated, no rate limits hit, no CAPTCHA. Also hit a genuine SAM.gov/FPDS-NG session-gate (`406 Not Acceptable` from `sam.gov/api/prod/sgs/v1/search/` without an authenticated session) that I documented as an AccessBlocker by hand, since there's no cascade-search client for SAM.gov/FPDS-NG at all.
 **Gap worth flagging:** this is the second-largest procurement/contracts beat in the corpus (federal contract awards, subawards, FPDS ceilings) and cascade-search has no dedicated USAspending or Federal Register client, only the generic `docs` command whose site allowlist is vendor-docs-only. A `cascade-search usaspending` (award/transaction/subaward lookups by PIID/FAIN/recipient) and a `cascade-search fedreg` (full-text search, the API is already confirmed ungated per a prior pass's method notes) would both be straightforward wins on this beat — same shape as the existing `oscn`/`courtlistener`/`propublica` clients, same typed-outcome benefit (right now a raw `curl` against USAspending gives no `Hit`/`VerifiedAbsence`/`AccessBlocker` distinction; I had to reason about "reporting lag vs. true absence" entirely by hand).
 **Worked well once I dropped to curl:** USAspending's API is fast, unauthenticated, and well-structured — `spending_by_award` (POST, recipient_search_text + award_type_codes + time_period), `/awards/{id}/`, `/transactions/` (POST, award_id, sorted by action_date), `/subawards/` (POST, award_id) all returned clean JSON with no friction. If a client gets built, that's the shape to mirror.
 **Severity:** annoyed, not blocked — the `docs --site` error message was actually good (named its own allowlist), which is what stopped me from mis-writing the VerifiedAbsence. But the absence of a procurement-data client on a research beat this procurement-heavy is a real coverage gap, not just a one-off.
 
-## 2026-08-19 · industry-scale-count-the-use-of-force-training-expert-witness-market-via-courtlistener-... · agent:claude-sonnet-5-parallel-tick1-d
+## 2026-08-19 · CourtListener industry-scale count task · agent:claude-sonnet-5-parallel-tick1-d
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
@@ -369,20 +382,20 @@ I know `--json` exists from the skill doc but it wasn't obvious it was the pagin
 
 **Severity:** annoyed, not blocked. Worked around the count-discarding gap by explicitly labeling every number's tier/confidence in the writeup; worked around the `--wait` gap by manual retry.
 
-## 2026-08-19 · reporting-leads-victim-voice-for-the-uac-legal-services-collapse · claude-sonnet-5-parallel-tick1-a
+## 2026-08-19 · reporting-leads task (affected-party voices) · claude-sonnet-5-parallel-tick1-a
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
-**Command:** `cascade-search extract /path/to/clsepa-v-hhs-complaint-2025-03-26.pdf --grep "Plaintiff" --grep "declares" ...` and later `--text`
-**Expected:** matching passages (grep mode) or clean chrome-stripped text (--text mode) from a local court-filing PDF already archived in the KB.
+**Command:** `cascade-search extract <local-court-complaint>.pdf --grep "Plaintiff" --grep "declares" ...` and later `--text`
+**Expected:** matching passages (grep mode) or clean chrome-stripped text (--text mode) from a local court-filing PDF already archived in the research notes.
 **Got:** grep mode returned PDF *object-stream* noise — `/D [34 0 R /XYZ 84 588 0] /S /GoTo >> endobj 717 0 obj <<...` — instead of the document's actual paragraph text, even though the matched keyword ("Plaintiff") does appear literally in that noise (as part of PDF outline/bookmark titles) as well as in the real body text. `--text` mode was worse: it dumped raw PDF binary structure (xref tables, XMP metadata streams, font dictionaries) with a NEGATIVE reported reduction (-224.2%, i.e. the "extracted" output was over 3x the raw token estimate), never reaching the actual page-content operators.
 **Friction:** could not tell from the tool's own output whether this was a "this PDF doesn't have an extractable text layer" case or a general extractor bug — there's no signal distinguishing "here is real matched content" from "here is PDF-syntax noise that happens to contain your grep string." I burned a few minutes reading extracted "text" before recognizing it was PDF structure, not body content. This specific document is a court complaint with a normal text layer (confirmed below) — not a scanned/OCR case where a failure would be expected.
 **Had to figure out:** dropped to plain `pdftotext -layout` (Homebrew poppler, already on PATH) instead, which extracted cleanly (2,143 lines, real paragraph text, correct plaintiff-organization list with sworn caseload figures) on the same file. So the PDF is fine; cascade-search's extractor specifically mishandled it. I didn't dig into why (Aspose-produced PDF per its metadata — /Producer "Aspose.PDF for .NET 24.2.0 ... modified using iText Core" — possibly an object-stream/cross-reference-stream structure the extractor's parser doesn't walk correctly), just worked around it.
 **Would have helped:** (1) a sanity check in the tool itself — if extracted text ratio vs. raw is negative or the output is mostly non-printable/PDF-syntax tokens, warn rather than silently return it as if it were prose; (2) grep mode specifically matching within already-extracted text rather than raw bytes, so PDF-structure false-positives on common words like "Plaintiff" (which legitimately appears in bookmark titles) don't leak through as if they were body-text hits.
-**Where it saved real work elsewhere in this task:** `extract --grep` on live news articles (AZ Mirror, LA Times, NPR) worked exactly as advertised — 96-98% token reduction, clean quote-bearing passages, correctly attributed to speakers. The problem was specific to this locally-archived PDF, not the tool generally. `web` search coverage lines and the Hit/RateLimited typed-outcome distinction were both clear and useful — caught one genuine rate-limit (WaPo, on `extract`) that I correctly did NOT write up as a verified absence.
+**Where it saved real work elsewhere in this task:** `extract --grep` on live news articles (a state news site, a national daily, NPR) worked exactly as advertised — 96-98% token reduction, clean quote-bearing passages, correctly attributed to speakers. The problem was specific to this locally-archived PDF, not the tool generally. `web` search coverage lines and the Hit/RateLimited typed-outcome distinction were both clear and useful — caught one genuine rate-limit (WaPo, on `extract`) that I correctly did NOT write up as a verified absence.
 **Severity:** slowed (a few minutes; had a working fallback immediately available in `pdftotext`)
 
-## 2026-08-19 · separate-the-two-vehicles-training-vs-expert-witness · claude-opus-4-8-parallel-tick1-e
+## 2026-08-19 · synthesis task (separating two contract vehicles) · claude-opus-4-8-parallel-tick1-e
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
@@ -397,21 +410,20 @@ codes — has no cascade-search client at all, and I had to hand-roll USAspendin
 ### Where it saved me real work (positive signal, be specific)
 
 - **The browser tier is the standout feature and it is undersold in the skill doc.**
-  `extract https://www.seakexperts.com/... --grep "<vendor-b>|<vendor-c>|..."` sailed straight
+  `extract https://www.<org-h-domain>/... --grep "<vendor-b>|<vendor-c>|..."` sailed straight
   through a Cloudflare wall that had just returned me a bare "Just a moment..." interstitial
   on `curl`. I did not ask for escalation, did not know it had happened, and got clean text.
   That silently turned a dead end into the census evidence for half my argument. **Suggestion:
   say in the output when the browser tier was used.** I only inferred it because I'd watched
   plain curl fail on the same URL 60 seconds earlier.
-- `web` coverage lines let me trust a thin result set. `"Critical Appraisal of the Scientific
-  Rigor" "<vendor-b>" Police Quarterly 2025` returned 18 results on
+- `web` coverage lines let me trust a thin result set. `"<article-title>" "<vendor-b>" <journal-a> 2025` returned 18 results on
   `79/82 responsive | RATE-LIMITED: brave | ERRORED: duckduckgo, startpage` — I could tell that
-  was a real hit on a near-complete sweep, not luck. That query closed a gap ("Seth Stoughton
+  was a real hit on a near-complete sweep, not luck. That query closed a gap ("<person-n>
   could not be located") that two prior passes had logged as unresolved.
-- `*UNIQUE*` earned its keep. The Justia hit on the Tovar Daubert order was UNIQUE, and it was
+- `*UNIQUE*` earned its keep. The Justia hit on the <case-b> Daubert order was UNIQUE, and it was
   the thread that led to the single most important document in the whole task. Consensus
   ranking would have buried a district-court docket page.
-- `extract --grep` on the Stoughton CV: 164K tokens of PDF down to a 60-line list of retention
+- `extract --grep` on the <person-n> CV: 164K tokens of PDF down to a 60-line list of retention
   lines. That is genuinely a synthesis tool, not just a token-saver — the *shape* of the
   grep output (57 "Retained by plaintiff" vs 11 "Retained by defendant") WAS the finding.
   I did not have to read the CV to see the asymmetry; the extraction surfaced it.
@@ -421,9 +433,9 @@ codes — has no cascade-search client at all, and I had to hand-roll USAspendin
 **1. `extract --grep` works on PDFs; `extract --text` and bare `extract` do not. BLOCKED me briefly.**
 Same URL, three behaviours:
 ```
-$CS extract .../stoughton_seth.pdf --grep "<vendor-b>|expert|..."
+$CS extract .../<person-n>.pdf --grep "<vendor-b>|expert|..."
   -> raw ~164,707 tok -> extracted ~3 tok (100.0% reduction)     # THREE TOKENS. Silent no-op.
-$CS extract .../stoughton_seth.pdf --text
+$CS extract .../<person-n>.pdf --text
   -> raw ~164,707 tok -> extracted ~452,468 tok (-174.7% reduction)  # dumped raw PDF binary
      %PDF-1.7 / stream / x���n�F�]���O�0����"֒��(V,el��...
 ```
@@ -438,18 +450,18 @@ minutes and worked perfectly, so the fix is presumably just shelling out to pdft
 
 **2. `courtlistener` OR-tokenizes unquoted phrases and gives no hint that it did.**
 `$CS courtlistener "<vendor-b-full>" --type o` returned 20 results, every one
-`*UNIQUE*`, topped by **Planetary Science Institute**, **Rey-Cruz v. Forensic Science
-Institute**, and **Weizmann Institute of Science**. Zero relevant. The shell quotes are
+`*UNIQUE*`, topped by **an unrelated planetary-research institute**, **an unrelated forensic-lab
+case**, and **a foreign research institute**. Zero relevant. The shell quotes are
 consumed by the shell, so the API sees bare tokens. I had to figure out that
 `'"<vendor-b>"'` (nested quotes) was the correct form. **A three-word query returning
-Weizmann Institute should trip a "did you mean an exact phrase?" hint**, or the client should
+an unrelated foreign research institute should trip a "did you mean an exact phrase?" hint**, or the client should
 phrase-quote multi-word queries by default.
 
 **3. I abandoned the `courtlistener` client entirely for the task's key document.**
 Once I had the docket, I wanted the actual order text. The client gives me search results,
 not documents. I went to `curl https://www.courtlistener.com/api/rest/v4/search/?q=...&type=r`
 directly, read `recap_documents[].filepath_local`, and pulled
-`storage.courtlistener.com/recap/gov.uscourts.cand.376399/gov.uscourts.cand.376399.89.0.pdf`.
+`storage.courtlistener.com/recap/<court>.<docket-id>/<court>.<docket-id>.89.0.pdf`.
 That 37-page order is the best evidence in my writeup. **Feature request: `$CS courtlistener
 --docket <id> --fetch-documents`, or at minimum surface `filepath_local` / `is_available`
 in the result rows.** The RECAP PDF endpoint is ungated and free — the client is one hop
@@ -474,9 +486,9 @@ enormously from the typed-outcome treatment. Strongest single feature request in
 
 **5. Crossref is the workaround for the entire academic-publisher wall, and it should be a source.**
 SAGE (`journals.sagepub.com`) is Cloudflare-managed-challenge on both the DOI landing page and
-the `/doi/full/` variant. The browser tier did NOT pass it (unlike SEAK). Justia was also
+the `/doi/full/` variant. The browser tier did NOT pass it (unlike <org-h>). Justia was also
 `cloudflare-managed-challenge`. But `curl api.crossref.org/works/<doi>` returned the full
-verbatim abstract, author list with affiliations (including `von.kliem@<vendor-b-domain>`,
+verbatim abstract, author list with affiliations (including `<person-o>@<vendor-b-domain>`,
 which was itself a finding), journal, volume, issue, and pagination — for free, no key, no
 wall. I verified two tier-1 citations that way, one of which closed a two-pass-old gap.
 **`$CS crossref <doi-or-title>` would be maybe 30 lines and would defuse most paywalled-journal
@@ -500,8 +512,8 @@ from anything currently offered.
 Minor: I twice wanted to know what a *previous* worker had already searched this tick so I
 wouldn't burn shared CourtListener budget re-running it. `$CS limits` shows usage numbers but
 not what was queried. A recent-query log against the shared ledger would have saved me two
-calls and, more usefully, told me a sibling had already covered the USMS award stream — I only
-found that out by reading a KB file afterwards.
+calls and, more usefully, told me a sibling had already covered another agency's award stream — I only
+found that out by reading the research notes afterwards.
 
 **Severity:** slowed (PDF extract, courtlistener quoting/documents), annoyed (no query log),
 and one genuine capability gap (no procurement client, no crossref) that I fully worked around
@@ -517,14 +529,14 @@ but which cost the most time.
 **Note on the quoting warning:** the new CLI help text (`QUOTE phrases when counting`) is well-placed — I hit the exact case it describes. Unquoted returns 51,622, quoted returns 155. I would not have caught that on my own before writing the number down.
 **Severity:** slowed (two fields-missing detours; no wrong output, and the core fix materially improved the finding).
 
-## 2026-08-19 · FOIA-J&A task, Our Rescue/Burke Law Group contracts · agent:claude-sonnet-5-parallel-tick2-c
+## 2026-08-19 · FOIA J&A task (nonprofit and law-firm awards) · agent:claude-sonnet-5-parallel-tick2-c
 **Task:** determine whether an HHS FAR 6.302-2 urgency J&A is publicly available or genuinely FOIA-only, and draft the request if not. Explicitly asked to stress-test `fedreg` and `usaspending`, both hours old at the time.
 
-**Worked well — `fedreg --type notice` gave a trustworthy negative.** `$CS --wait fedreg "Our Rescue" --type notice` returned 20 real results with a real corpus behind them, and none matched — which let me write "no FR notice exists for this J&A" as a claim I could stand behind, rather than "I didn't find one." That distinction is the entire point of the tool and it held up under an actual use case (deciding to file a FOIA request rather than keep hunting).
+**Worked well — `fedreg --type notice` gave a trustworthy negative.** `$CS --wait fedreg "<org-a>" --type notice` returned 20 real results with a real corpus behind them, and none matched — which let me write "no FR notice exists for this J&A" as a claim I could stand behind, rather than "I didn't find one." That distinction is the entire point of the tool and it held up under an actual use case (deciding to file a FOIA request rather than keep hunting).
 
-**Worked well — `usaspending "Our Rescue" --count` was exact and fast.** One call, one award, matched the KB's prior finding. No friction; this is the easy case (recipient-name match, not keyword).
+**Worked well — `usaspending "<org-a>" --count` was exact and fast.** One call, one award, matched the research notes' prior finding. No friction; this is the easy case (recipient-name match, not keyword).
 
-**Friction 1 — `fedreg` phrase matching is not exact, and this matters for a J&A search specifically. Severity: annoyed, borderline slowed.** `fedreg "Our Rescue" --type notice` did NOT restrict to documents containing that phrase — it returned 20 unrelated agency-information-collection notices (NOAA, FAA, FCC Unified Agenda, arms sales) with no visible connection to "Our Rescue" in the title or snippet shown. I could not tell from the output alone whether this was a true zero (tokenized on "our" as a stopword-adjacent term, similar to the courtlistener unquoted-phrase problem documented elsewhere in this log) or a real ranked-but-irrelevant result set. I had to reason from FAR-authority knowledge (urgency J&As for *contracts*, unlike cooperative-agreement single-source-intent notices, don't require FR pre-publication) to conclude the emptiness was structurally expected rather than a tool miss — the tool itself gave me no signal either way. **Would have helped:** either (a) `fedreg` support a quoted-phrase mode with the same "quote it or your count is off by orders of magnitude" warning that `courtlistener` now carries, or (b) the output flag when zero of the returned rows contain the literal query string, so a worker doesn't have to eyeball 20 titles to notice none of them are about the subject at all.
+**Friction 1 — `fedreg` phrase matching is not exact, and this matters for a J&A search specifically. Severity: annoyed, borderline slowed.** `fedreg "<org-a>" --type notice` did NOT restrict to documents containing that phrase — it returned 20 unrelated agency-information-collection notices (NOAA, FAA, FCC Unified Agenda, arms sales) with no visible connection to "<org-a>" in the title or snippet shown. I could not tell from the output alone whether this was a true zero (tokenized on the name's first word as a stopword-adjacent term, similar to the courtlistener unquoted-phrase problem documented elsewhere in this log) or a real ranked-but-irrelevant result set. I had to reason from FAR-authority knowledge (urgency J&As for *contracts*, unlike cooperative-agreement single-source-intent notices, don't require FR pre-publication) to conclude the emptiness was structurally expected rather than a tool miss — the tool itself gave me no signal either way. **Would have helped:** either (a) `fedreg` support a quoted-phrase mode with the same "quote it or your count is off by orders of magnitude" warning that `courtlistener` now carries, or (b) the output flag when zero of the returned rows contain the literal query string, so a worker doesn't have to eyeball 20 titles to notice none of them are about the subject at all.
 
 **Friction 2 — no client for procurement-file attachments (GovTribe/HigherGov/SAM.gov contract-file documents). Severity: slowed, worked around.** The actual J&A, if posted anywhere short of FOIA, would live as a PDF attachment on a procurement aggregator or SAM.gov itself — `usaspending` and `fedreg` structurally cannot see this (neither indexes contract-file attachments). I fell back to `web`, which found the right aggregator listing pages via snippet text, but `extract` on GovTribe hit `AccessBlocker` (Cloudflare managed challenge) and `extract` on HigherGov returned 0 usable tokens (JS-rendered contract page, no matching text in the DOM). Neither is a `cascade-search` bug — both are genuinely hard targets — but it means "is there a J&A attachment on this specific award" is currently unanswerable by any typed-outcome path; I had to reason from the *absence of any hit* across three different search angles plus a same-office aggregator precedent (GovTribe does host J&As for *other* HHS/OMAS awards) to reach a defensible "genuinely FOIA-only" conclusion, rather than getting there from one tool call.
 
@@ -532,7 +544,7 @@ but which cost the most time.
 
 **Severity:** slowed overall — no wrong output produced, but reaching a defensible "FOIA-only" conclusion took four search angles plus outside FAR-process knowledge rather than one clean negative-finding call, because neither `fedreg` nor `usaspending` covers procurement-file *attachments*, which is where a J&A actually lives if it's public at all.
 
-## 2026-08-19 · find-the-named-story (<vendor-b>/<person-c> human-story task) · agent:claude-sonnet-5-parallel-tick2-b
+## 2026-08-19 · named-story sourcing task (<vendor-b>/<person-c>) · agent:claude-sonnet-5-parallel-tick2-b
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
@@ -542,7 +554,7 @@ but which cost the most time.
 
 **Worked well — `meta.party` and `meta.recap_documents[].description` on a docket-search hit were exactly what closed this task.** The `--json courtlistener` hit for "Estate of <decedent> v. <municipality>" returned `party: ["<next-of-kin-1>", "<next-of-kin-2>", "Estate of <decedent>", "<decedent>, Jr.", ...]` and a `recap_documents` entry titled "TRIAL BRIEF Re: Defense Expert <person-i> and His Reliance on Unreliable Principles of <person-c> and <vendor-b-full>" in the same call. That single JSON response gave me the decedent's family names AND the exact document that ties the doctrine to the case, with no second query needed. This directly contradicts the "client drops recap_documents" friction logged earlier today by agent:claude-opus-5 on a different query shape — worth noting the field IS present on at least some `--json courtlistener` responses (mine used a two-phrase AND query, theirs used a single quoted phrase on `--type r` alone), so the drop may be query-shape- or code-path-dependent rather than universal. Flagging so maintainers can check whether it's actually two different call sites.
 
-**Friction 1 — `extract` on Justia case-law pages hard-403s (Cloudflare), and there's no fallback path to the same case text. Severity: slowed.** `extract https://law.justia.com/cases/federal/district-courts/california/casdce/3:2013cv02240/424366/56/ --text` returned `AccessBlocker` (cloudflare-managed-challenge, HTTP 403) with no escalation success this pass (the skill doc says browser-passable blocks escalate automatically; this one apparently didn't clear, or the escalation happened invisibly and still failed). I worked around it by using `web` + secondary journalism (Courthouse News, San Diego Reader) instead of the court's own posted opinion text, which was a fine substitute here but wouldn't be for a case with no press coverage.
+**Friction 1 — `extract` on Justia case-law pages hard-403s (Cloudflare), and there's no fallback path to the same case text. Severity: slowed.** `extract https://law.justia.com/cases/federal/district-courts/<state>/<court>/<case-no>/<id>/56/ --text` returned `AccessBlocker` (cloudflare-managed-challenge, HTTP 403) with no escalation success this pass (the skill doc says browser-passable blocks escalate automatically; this one apparently didn't clear, or the escalation happened invisibly and still failed). I worked around it by using `web` + secondary journalism (a legal newswire, a local weekly) instead of the court's own posted opinion text, which was a fine substitute here but wouldn't be for a case with no press coverage.
 
 **Friction 2 — CourtListener RECAP document *text* is PACER-paywalled even when the document metadata/description is free via search. Severity: slowed, expected but worth naming.** The pivotal document in this task (ECF 172, the trial brief naming <person-i>/<person-c>/<vendor-b>) was fully identifiable by its `recap_documents[].description` field, but `extract`-ing the docket entry URL only returns the same metadata, not the brief's actual argument text — that requires a PACER purchase. Not a tool bug (RECAP genuinely doesn't have the document unless someone already bought and uploaded it), but worth flagging as a standing limit on this task type: a docket search can find *that* a challenge was filed and *who* filed it, but not *what it argued*, without a human with PACER access.
 
@@ -559,7 +571,7 @@ but which cost the most time.
 
 **Friction 2 — `extract` on `usaspending.gov/award/{id}` pages returns effectively nothing. Severity: slowed, worked around.** `extract "https://www.usaspending.gov/award/360657558" --ids` reported "729 raw tok -> 4 tok extracted (99.5% reduction)" — that number *looks* like a success (a good reduction ratio) but the 4 tokens extracted were useless; the page is a client-rendered React SPA with no server-rendered payload for `extract`'s DOM/regex approach to find. I worked around it with a direct `curl` to `api.usaspending.gov/api/v2/awards/{id}/`, which is public, unauthenticated, and returned the full structured contract record (solicitation ID, competition type, offers received, funding/awarding office, place of performance) that neither the `usaspending` client nor `extract` surfaced. **Would have helped:** either have the `usaspending` client's award-detail path hit the v2 API directly (it clearly already talks to this API for search), or have `extract` flag "near-zero extraction on a URL with substantial page byte size" as a distinct signal rather than reporting a deceptively good-looking reduction percentage on a near-empty result.
 
-**Friction 3 — no client at all for SAM.gov solicitation/opportunity lookups. Severity: slowed, worked around, but this was the actual finding.** The USAspending record for the on-point award named a `solicitation_identifier` (`70B03C26Q00000152`). That solicitation turned out to be a **public SAM.gov notice** whose full narrative description named the CBP station, unit, and course scope I was tasked with finding — i.e., SAM.gov solicitation text is sometimes a full substitute for a FOIA request, and there's no `cascade-search` path to it at all. I found and read it entirely via direct `curl` to `sam.gov/api/prod/sgs/v1/search/` (keyword/ID search) and `sam.gov/api/prod/opps/v2/opportunities/{id}` (full detail with the notice body) — both unauthenticated, both returned clean JSON, no captcha/Cloudflare encountered. This is the second time in this KB's recent history this exact unauthenticated-SAM.gov-API pattern has been the load-bearing access path (see the 2026-08-19 GSA-eLibrary/SAM.gov entity-snapshot document in cascade-research for the first). **This reads like a real gap, not a one-off**: a `cascade-search samgov` client (search by keyword/solicitation number, fetch opportunity detail/description) would directly answer "is this contract action public or FOIA-only" — exactly the question this task existed to resolve — in one typed call instead of three manually-reconstructed API calls.
+**Friction 3 — no client at all for SAM.gov solicitation/opportunity lookups. Severity: slowed, worked around, but this was the actual finding.** The USAspending record for the on-point award named a `solicitation_identifier` (`70B03C26Q00000152`). That solicitation turned out to be a **public SAM.gov notice** whose full narrative description named the CBP station, unit, and course scope I was tasked with finding — i.e., SAM.gov solicitation text is sometimes a full substitute for a FOIA request, and there's no `cascade-search` path to it at all. I found and read it entirely via direct `curl` to `sam.gov/api/prod/sgs/v1/search/` (keyword/ID search) and `sam.gov/api/prod/opps/v2/opportunities/{id}` (full detail with the notice body) — both unauthenticated, both returned clean JSON, no captcha/Cloudflare encountered. This is the second time in this research's recent history this exact unauthenticated-SAM.gov-API pattern has been the load-bearing access path (an earlier GSA-eLibrary/SAM.gov entity-snapshot note was the first). **This reads like a real gap, not a one-off**: a `cascade-search samgov` client (search by keyword/solicitation number, fetch opportunity detail/description) would directly answer "is this contract action public or FOIA-only" — exactly the question this task existed to resolve — in one typed call instead of three manually-reconstructed API calls.
 
 **Friction 4 — the SOW attachment itself (the actual PDF) is behind a SAM.gov login even though the notice metadata is public. Severity: annoyed, correctly identified as a real boundary not a tool failure.** I could read the full solicitation narrative (which happened to contain most of what I needed) but not the numbered attachment ("Attachment 1 - Statement of Work") — SAM.gov's attachment-download endpoints 404'd on every unauthenticated path I tried. This is a genuine SAM.gov design boundary (free account required, not FOIA-gated) rather than a cascade-search gap, but worth noting for scoping any future `samgov` client: attachment download would need either an authenticated session or should be explicitly out of scope.
 
@@ -570,39 +582,39 @@ but which cost the most time.
 
 **Worked well — `usaspending "<vendor-a>" --limit 60` and `--count` matched exactly and fast.** One `--count` call confirmed 52 awards; one `--limit 60` (`--json`) call returned all 52 with clean `meta` fields (award_id, agency, sub_agency, amount, dates, description) — enough to reconstruct the entire by-sub-agency and by-year table without a second tool. This was the core of the task and it worked on the first try.
 
-**Worked well — `VerifiedAbsence` on a recipient-name check gave me a real negative I could put in the KB.** `usaspending "<vendor-a> of NE LLC" --count` returned `VerifiedAbsence` in exit code 1, which let me write "this DBA has never itself been an award recipient" as a citable finding rather than "I didn't see it."
+**Worked well — `VerifiedAbsence` on a recipient-name check gave me a real negative I could put in the research notes.** `usaspending "<vendor-a-dba> LLC" --count` returned `VerifiedAbsence` in exit code 1, which let me write "this DBA has never itself been an award recipient" as a citable finding rather than "I didn't see it."
 
 **Friction 1 — `--all-types` is broken for anything but `--count`. Severity: slowed, worked around.** `usaspending "<vendor-a>" --all-types --count` correctly reports `contracts: 52 | direct_payments: 3 | idvs: 2 | loans: 9`. But `usaspending "<vendor-a>" --all-types` (no `--count`, default or `--limit 70`) fails every time with `outcome: AccessBlocker`, `mechanism: http-5xx`, `detail: "HTTP 422: 'award_type_codes' must only contain types from one group."` — i.e. the flag mixes contract/loan/IDV/direct-payment type codes into one upstream request when listing, but must be issuing separate per-group requests when counting (since count works). This means `--all-types` can tell you a non-contract award *exists* but can never show you *which one* — you have to already suspect the gap and go around the tool to see it. I worked around it with a direct multi-group `curl` to `api.usaspending.gov/api/v2/search/spending_by_award/`, segmenting award_type_codes into contracts/loans/direct_payments/idvs myself. **Would have helped:** either fix the listing path to issue the same segmented per-group requests the count path apparently already does, or have the CLI's own help text say "`--all-types` supports `--count` only, not listing" so I don't find out via a raw HTTP 422.
 
-**Friction 2 — the false-positive is dangerous, not just missing. Severity: slowed, this is the actual finding worth flagging.** Once I reconstructed the all-types listing myself, all 14 non-contract "hits" turned out to be *wrong-entity name collisions* — unrelated SBA COVID-era PPP/EIDL borrowers named "<VENDOR-A>" (Raleigh NC and Gilbert AZ — different UEI, different state, nothing to do with the training vendor in question), "BUILD <VENDOR-A>," "TEAM <VENDOR-A>," "TECHNICALLY <VENDOR-A>," "B<VENDOR-A>." The skill doc's guidance ("default matches recipient NAME — precise") describes the *contract* search correctly, but the loan/direct-payment/grant recipient-name matching is evidently much fuzzier than that promise — two of the four exact-string "<VENDOR-A>" hits weren't even the same UEI. If I hadn't individually pulled each award's recipient-location record to check, I'd have reported "14 additional non-federal-training awards" as a real finding about this vendor, when the true number is zero. **Would have helped:** a caveat in the tool's docs (parallel to the existing keyword-vs-recipient-name warning) that recipient-name matching on the *assistance* award types (loans/grants/direct payments) is looser than on contracts, and/or surfacing `recipient_uei`/`recipient_hash` in the `meta` block so a worker can eyeball entity-identity without a follow-up fetch per hit.
+**Friction 2 — the false-positive is dangerous, not just missing. Severity: slowed, this is the actual finding worth flagging.** Once I reconstructed the all-types listing myself, all 14 non-contract "hits" turned out to be *wrong-entity name collisions* — unrelated SBA COVID-era PPP/EIDL borrowers named "<VENDOR-A>" (two cities in other states — different UEI, different state, nothing to do with the training vendor in question), "BUILD <VENDOR-A>," "TEAM <VENDOR-A>," "TECHNICALLY <VENDOR-A>," "B<VENDOR-A>." The skill doc's guidance ("default matches recipient NAME — precise") describes the *contract* search correctly, but the loan/direct-payment/grant recipient-name matching is evidently much fuzzier than that promise — two of the four exact-string "<VENDOR-A>" hits weren't even the same UEI. If I hadn't individually pulled each award's recipient-location record to check, I'd have reported "14 additional non-federal-training awards" as a real finding about this vendor, when the true number is zero. **Would have helped:** a caveat in the tool's docs (parallel to the existing keyword-vs-recipient-name warning) that recipient-name matching on the *assistance* award types (loans/grants/direct payments) is looser than on contracts, and/or surfacing `recipient_uei`/`recipient_hash` in the `meta` block so a worker can eyeball entity-identity without a follow-up fetch per hit.
 
 **Friction 3 — `extract --text` silently truncates at ~4000 characters, mid-JSON, no truncation notice. Severity: slowed, real risk of silent data loss.** `extract "https://api.usaspending.gov/api/v2/awards/{id}/" --text` (the same page type the tick2-d entry above used as its workaround target) returned output that looked complete — a normal "raw ~N tok -> extracted ~M tok" reduction line — but every one of 7 award records I pulled this way cut off at exactly 4001-4002 characters, mid-field, invalidating the JSON. This happened silently: no warning, no "(truncated)" marker, nothing to distinguish it from a genuinely short document. I only caught it because I tried to `json.loads()` the output and got a parse error on all seven files at almost the identical byte offset. Anyone trusting the extracted text directly (e.g. reading it as prose rather than parsing it) would never notice a mid-record cutoff. I worked around it with direct `curl` (same as tick2-d's independent workaround for the plain award page — this is the *raw API endpoint* version of that same detour, and it also has its own tool-side problem). **Would have helped:** either raise `--text`'s cap for machine-readable content types (JSON in particular, where truncation actively corrupts rather than just shortens), or explicitly flag truncation in the output the way the OCR path already flags itself ("source: OCR ... NOT verbatim").
 
 **Corroborating tick2-d's finding from earlier today:** `extract` on `usaspending.gov/award/{id}` (the React SPA page, not the API) also returned near-zero useful content for me (`raw ~729 tok -> extracted ~4 tok`), same as their report. Direct `curl` to `api.usaspending.gov/api/v2/awards/{id}/` was the right workaround both times — worth promoting to a documented pattern (or building into the `usaspending`/`record` client directly) since two independent workers hit the identical wall and found the identical fix within the same day.
 
-**Severity:** slowed overall (no wrong output shipped — every figure in the final KB write-up was individually verified against a working access path — but three separate detours: all-types HTTP 422, a false-positive that took real cross-checking to defuse, and a silent truncation bug that could have corrupted every one of the 8 flagged-award records if I hadn't tried to parse them as JSON).
+**Severity:** slowed overall (no wrong output shipped — every figure in the final write-up was individually verified against a working access path — but three separate detours: all-types HTTP 422, a false-positive that took real cross-checking to defuse, and a silent truncation bug that could have corrupted every one of the 8 flagged-award records if I hadn't tried to parse them as JSON).
 
 ## 2026-08-19 · <county-a> ESAC vendor-attribution FOIA (synthesis-heavy task) · agent:claude-opus-4-8-parallel-tick2-e
-**Task:** determine who <county-a> actually paid with federal equitable-sharing "Training and Education" money — a question the ESAC/ISP forms structurally cannot answer, so the job was finding *which corpus could*, not running a lookup. I was asked specifically to report on whether the tool supports **synthesis** rather than just lookup.
+**Task:** determine who <county-a> actually paid with federal equitable-sharing "Training and Education" money — a question the ESAC/state-police forms structurally cannot answer, so the job was finding *which corpus could*, not running a lookup. I was asked specifically to report on whether the tool supports **synthesis** rather than just lookup.
 
-**On synthesis specifically — the honest answer is that it supported the two ends and not the middle, and the middle is where the finding came from.** The tool was excellent at *bounding* (proving the federal corpus can't answer this) and at *verifying* (checking my claims against FAR and ILCS text). But the actual discovery — that <county-a> publishes a payee-level Claims Paid Report nobody in three prior passes had found — came from a `web` search whose top-10 I read for *structure* rather than for an answer: result #2 was a PDF agenda packet whose snippet mentioned "3,118 payments." Nothing in the tool surfaced that as significant; it ranked 2nd because of keyword overlap, not because it was the corpus-shaped answer. That's fine — but it means the synthesis step was entirely mine, and the tool's contribution was not burying the lead. Worth knowing that's the current ceiling.
+**On synthesis specifically — the honest answer is that it supported the two ends and not the middle, and the middle is where the finding came from.** The tool was excellent at *bounding* (proving the federal corpus can't answer this) and at *verifying* (checking my claims against FAR and state-statute text). But the actual discovery — that <county-a> publishes a payee-level Claims Paid Report nobody in three prior passes had found — came from a `web` search whose top-10 I read for *structure* rather than for an answer: result #2 was a PDF agenda packet whose snippet mentioned "3,118 payments." Nothing in the tool surfaced that as significant; it ranked 2nd because of keyword overlap, not because it was the corpus-shaped answer. That's fine — but it means the synthesis step was entirely mine, and the tool's contribution was not burying the lead. Worth knowing that's the current ceiling.
 
-**Worked well — `usaspending --count` + `--limit` turned "we couldn't find it" into a structural argument.** 52 awards / $3,298,091.75, zero mentioning Illinois or any county. The value wasn't the absence; it was that a *countable* corpus let me say **why** the absence is meaningless — a county spending federal equitable-sharing money isn't a federal contracting party, so USAspending couldn't show this payment even if it happened. A fuzzy source could not have supported that sentence. This is the single best thing the tool did for me.
+**Worked well — `usaspending --count` + `--limit` turned "we couldn't find it" into a structural argument.** 52 awards / $3,298,091.75, zero mentioning <state-a> or any county. The value wasn't the absence; it was that a *countable* corpus let me say **why** the absence is meaningless — a county spending federal equitable-sharing money isn't a federal contracting party, so USAspending couldn't show this payment even if it happened. A fuzzy source could not have supported that sentence. This is the single best thing the tool did for me.
 
-**Worked well — `extract --grep` against FAR Part 5 and 5 ILCS 140 as a fact-checker.** 140,170 → 3,272 tok and 166,469 → 1,423 tok, and in one case it **corrected me**: I had started to write that the ~$24,500 award clustering sat under the simplified acquisition threshold. It doesn't — the SAT was $150,000 in 2010-11; $25,000 is the FAR 5.101(a)(1) *public-synopsis* threshold. Pulling the regulation text cheaply enough that verifying was reflexive rather than a chore is what caught it. Same for 5 ILCS 140 (5 business days / 50 free pages / $0.15 cap) — all three went into a FOIA draft as verified rather than remembered.
+**Worked well — `extract --grep` against FAR Part 5 and <state-a>'s FOIA statute as a fact-checker.** 140,170 → 3,272 tok and 166,469 → 1,423 tok, and in one case it **corrected me**: I had started to write that the ~$24,500 award clustering sat under the simplified acquisition threshold. It doesn't — the SAT was $150,000 in 2010-11; $25,000 is the FAR 5.101(a)(1) *public-synopsis* threshold. Pulling the regulation text cheaply enough that verifying was reflexive rather than a chore is what caught it. Same for the state FOIA statute (5 business days / 50 free pages / $0.15 cap) — all three went into a FOIA draft as verified rather than remembered.
 
 **Friction 1 — `extract` on a large REMOTE PDF silently returns nothing while reporting "100.0% reduction". Severity: slowed; would have been *blocked* if I'd trusted it. This is the one I'd fix.**
 Same file, same pattern, two paths:
 ```
-$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf" --grep "VENDOR"
-== Extract == https://www.kanecountyil.gov/...
+$ cascade-search extract "https://www.<county-a-domain>/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf" --grep "VENDOR"
+== Extract == https://www.<county-a-domain>/...
 raw ~3,630,887 tok -> extracted ~3 tok (100.0% reduction)
 EXIT=0
 ```
 ```
-$ curl -sL -o kane2019.pdf "https://www.kanecountyil.gov/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf"
-$ cascade-search extract kane2019.pdf --grep "VENDOR"
-== Extract == kane2019.pdf
+$ curl -sL -o packet2019.pdf "https://www.<county-a-domain>/Lists/Events/Attachments/5069/AG%20PKT%20-%2019-05%20COB.pdf"
+$ cascade-search extract packet2019.pdf --grep "VENDOR"
+== Extract == packet2019.pdf
 source:   PDF text layer (1,046,318 chars, exact)
 raw ~261,579 tok -> extracted ~527 tok (99.8% reduction)
 [6 matching passages]
@@ -620,36 +632,36 @@ cascade-search: error: unrecognized arguments: --json
 It's a global pre-subcommand flag (`cascade-search --json --wait usaspending ...`). SKILL.md shows it once, as `$CS --json web "query" | jq ...`, in a list where every *other* line puts flags after the subcommand — so the one correct example reads like the odd one out rather than the rule. **Would have helped:** one line in the commands block — "`--json` and `--wait` are global; they go before the subcommand." Cheap fix, and I lost a call to it.
 `[fixed 00ca941 — global flags are accepted in EITHER order now, so the command you ran works as typed. Better than documenting the rule: an ordering constraint that costs a call to discover is worth removing rather than explaining.]`
 
-**Friction 3 — no `--json` on `extract`, so structured docs have to be re-parsed by hand. Severity: annoyed, worked around.** These claims reports are genuine tables (VENDOR | NATURE OF CLAIM | DEPT | FUND | AMOUNT | DATE). `--tables` exists and is the obvious fit, but on a 400-page packet where table rows are interleaved with narrative I couldn't get it to give me rows I could trust, so I fell back to `pdftotext -layout` + my own parser. **Would have helped:** `extract --tables --json` emitting row arrays, even best-effort with a confidence flag. Not a blocker — but "the corpus is tabular and the tool reads it as prose" is the recurring shape of this beat's documents (ESAC extracts, ISP XLSX, county claims registers).
+**Friction 3 — no `--json` on `extract`, so structured docs have to be re-parsed by hand. Severity: annoyed, worked around.** These claims reports are genuine tables (VENDOR | NATURE OF CLAIM | DEPT | FUND | AMOUNT | DATE). `--tables` exists and is the obvious fit, but on a 400-page packet where table rows are interleaved with narrative I couldn't get it to give me rows I could trust, so I fell back to `pdftotext -layout` + my own parser. **Would have helped:** `extract --tables --json` emitting row arrays, even best-effort with a confidence flag. Not a blocker — but "the corpus is tabular and the tool reads it as prose" is the recurring shape of this beat's documents (ESAC extracts, state-police XLSX, county claims registers).
 
-**A note on `web` that is a compliment and a caveat.** `web "<county-a> Illinois vendor payments checkbook transparency accounts payable disbursements"` is what cracked this task — the county's own agenda-packet PDFs surfaced at #2 and #4, and the `*UNIQUE*` markers were right that these were single-engine finds. But the top hit for both of my Kane-County-payment queries was the *Illinois State Comptroller*, which is the wrong corpus by construction (it holds State of Illinois payments; <county-a> is a unit of local government and its disbursements never pass through it). Ranking put the authoritative-looking-but-structurally-irrelevant source first and the actual answer fourth-ish. No fix implied — just: on government-finance questions the top hit is often the biggest agency rather than the right jurisdiction, and reading down mattered here.
+**A note on `web` that is a compliment and a caveat.** `web "<county-a> <state-a> vendor payments checkbook transparency accounts payable disbursements"` is what cracked this task — the county's own agenda-packet PDFs surfaced at #2 and #4, and the `*UNIQUE*` markers were right that these were single-engine finds. But the top hit for both of my <county-a>-payment queries was the *<state-a> State Comptroller*, which is the wrong corpus by construction (it holds state-government payments; <county-a> is a unit of local government and its disbursements never pass through it). Ranking put the authoritative-looking-but-structurally-irrelevant source first and the actual answer fourth-ish. No fix implied — just: on government-finance questions the top hit is often the biggest agency rather than the right jurisdiction, and reading down mattered here.
 
 **Severity:** slowed overall. Nothing wrong shipped, and one wrong thing (the SAT/synopsis-threshold mixup) was caught *by* the tool. But Friction 1 is a live correctness hazard for exactly the "defensible negative" use case the tool exists for — a silent empty read on a large remote PDF is indistinguishable from a clean extraction.
 `[fixed 00ca941 + 182db4a — remote PDFs are decoded rather than read as bytes, and a zero-match grep says so explicitly instead of reporting a triumphant reduction over nothing. Your framing of the hazard is the one the fix was written against: an empty read that looks like a clean extraction is a false absence manufactured inside the tool, which is the single thing it must never do. `--tables --json` remains unfixed and tracked.]`
 
 ## 2026-08-19 · <vendor-a> parent-task synthesis pass (no field research) · agent:claude-sonnet-5-parallel-tick3-c
-**Task:** claim the <vendor-a>/<vendor-a> PARENT task, read every child task's work log + the org profile, and update the parent's own deliverable with a cross-cluster synthesis and a highest-value-gap recommendation. Explicitly not a cascade-search research task — I never called `cascade-search` myself this pass, so I have nothing to add to today's rich thread above about `--all-types`, `extract` truncation, or `web` ranking. This entry is about `~/kb/kb` (Pyrite) instead, which is in scope per the skill's own framing ("report friction on a tool you just used").
+**Task:** claim the <vendor-a>/<vendor-a> PARENT task, read every child task's work log + the entity profile, and update the parent's own deliverable with a cross-cluster synthesis and a highest-value-gap recommendation. Explicitly not a cascade-search research task — I never called `cascade-search` myself this pass, so I have nothing to add to today's rich thread above about `--all-types`, `extract` truncation, or `web` ranking. This entry is about the research-notes CLI (Pyrite) instead, which is in scope per the skill's own framing ("report friction on a tool you just used").
 
 **Friction — the state machine rejects a `claimed → done` transition with no shortcut, even when the work is genuinely already done. Severity: annoyed, cheap workaround.**
 ```
-$ ~/kb/kb task update "mark-action-run-montana-sos-interactive-search-..." -k cascade-research -s done
+$ pyrite task update "<task-id>" -k <kb> -s done
 ERROR [VALIDATION_FAILED]: Cannot move task from 'claimed' to 'done'. Allowed
 next: in_progress, cancelled. Tasks follow open → claimed → in_progress →
 done/failed/blocked/review; walk through the intermediate states rather than
 skipping (or use 'cancelled' to retire an obsolete task from any state).
 ```
-This was a "MARK ACTION" ticket: assignee had already been hand-set to `mark-completed-human-session` by whoever filed the follow-up notes, and the actual work (a Montana SOS interactive session) was visibly done — both target files (`organizations/<vendor-a>-profile.md`, `actors/<person-h>.md`) already carried the resolved finding. The task file itself was just never advanced past `claimed`. The error message is actually good — it names the exact allowed-next set and the intended path — so I could self-serve immediately (`-s in_progress` then `-s done`, two calls). Not a real blocker. But it's worth noting the specific shape: a *human*-attributed completion (assignee is a human-session marker, not an agent) still has to walk the same agent-oriented state ladder as a machine-claimed task, which reads a little oddly — there's no "record a completed human action" shortcut distinct from "advance a claimed-but-unstarted-by-anyone task."
+This was a human-action ticket: assignee had already been hand-set to a human-session marker by whoever filed the follow-up notes, and the actual work (a <state-b> Secretary of State interactive session) was visibly done — both target notes (the <vendor-a> entity profile and the <person-h> profile) already carried the resolved finding. The task file itself was just never advanced past `claimed`. The error message is actually good — it names the exact allowed-next set and the intended path — so I could self-serve immediately (`-s in_progress` then `-s done`, two calls). Not a real blocker. But it's worth noting the specific shape: a *human*-attributed completion (assignee is a human-session marker, not an agent) still has to walk the same agent-oriented state ladder as a machine-claimed task, which reads a little oddly — there's no "record a completed human action" shortcut distinct from "advance a claimed-but-unstarted-by-anyone task."
 **Would have helped:** nothing urgent — the error message already told me the fix. Maybe worth a one-line callout in the skill's Step 11 ("Transitions") section noting that `claimed`/`review`/`blocked` states sometimes need an explicit intermediate `-s in_progress` hop even when you're just closing out someone else's already-finished work, since a first-time reader might reasonably try `claimed → done` directly (I did) and only learn the ladder from the error.
 
-**Worked well — `task list -f json` piped through a small python filter was the fastest way to get a clean cross-child status table.** For a synthesis task specifically (as opposed to a single-task research pass), what I actually needed first was "what state is every sibling task in, right now" — a single `task list -k cascade-research -f json | python3 -c "..."` grep-and-print got me a full status/priority/assignee table for the ~15 sibling tickets in one call, which is what let me tell (before reading a single work log) which threads were live-claimed by other agents this tick (stay off) vs. genuinely stale/open (worth flagging as the next dispatch). This isn't a novel pattern relative to the skill doc, but it's worth confirming it scales fine to a ~15-sibling family with no friction.
+**Worked well — `task list -f json` piped through a small python filter was the fastest way to get a clean cross-child status table.** For a synthesis task specifically (as opposed to a single-task research pass), what I actually needed first was "what state is every sibling task in, right now" — a single `task list -k <kb> -f json | python3 -c "..."` grep-and-print got me a full status/priority/assignee table for the ~15 sibling tickets in one call, which is what let me tell (before reading a single work log) which threads were live-claimed by other agents this tick (stay off) vs. genuinely stale/open (worth flagging as the next dispatch). This isn't a novel pattern relative to the skill doc, but it's worth confirming it scales fine to a ~15-sibling family with no friction.
 
-**Observation, not a complaint — the org profile file itself is where most of the real synthesis already lived.** By the time I read `organizations/<vendor-a>-profile.md` in full, nearly everything I would have wanted to say in a parent-task synthesis was already stated there, per-section, by the workers who wrote it (each section timestamped and self-correcting against the master memo). The parent task's own "Work Log" ended up being a pointer-and-triage document — what's closed, what's live, what's genuinely untouched — rather than new analysis, because the analysis had already happened in the org profile. Not a tool problem, just worth naming for whoever designs the next parent-task synthesis prompt: if the org profile is well-maintained, the parent task's marginal value is triage (which sibling to dispatch next), not restating findings.
+**Observation, not a complaint — the entity profile itself is where most of the real synthesis already lived.** By the time I read the <vendor-a> entity profile in full, nearly everything I would have wanted to say in a parent-task synthesis was already stated there, per-section, by the workers who wrote it (each section timestamped and self-correcting against the master memo). The parent task's own "Work Log" ended up being a pointer-and-triage document — what's closed, what's live, what's genuinely untouched — rather than new analysis, because the analysis had already happened in the entity profile. Not a tool problem, just worth naming for whoever designs the next parent-task synthesis prompt: if the entity profile is well-maintained, the parent task's marginal value is triage (which sibling to dispatch next), not restating findings.
 
-## 2026-08-19 · S1 keystone rewrite — verifying Du Bois 1900 Paris Exposition facts · agent:claude-sonnet-5-parallel-tick3-d
+## 2026-08-19 · draft-revision task — verifying Du Bois 1900 Paris Exposition facts · agent:claude-sonnet-5-parallel-tick3-d
 
 **[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
 
-**Task:** a draft-revision ticket (rewrite THE WITNESSES keystone), so most of the work was reading corpus, not searching. The one place I genuinely needed the open web was verifying new claims about Du Bois's 1900 Paris Exposition data portraits — this material did not exist anywhere in the KB and I was about to make it the piece's cold-open artifact, so it needed independent verification before I'd trust it in a keystone.
+**Task:** a draft-revision ticket, so most of the work was reading corpus, not searching. The one place I genuinely needed the open web was verifying new claims about Du Bois's 1900 Paris Exposition data portraits — this material did not exist anywhere in the research notes and I was about to make it the piece's cold-open artifact, so it needed independent verification before I'd trust it in the draft.
 
 **Worked well — `web` gave a clean, high-precision first pass.** `cascade-search web "Du Bois 1900 Paris Exposition data visualization charts Library of Congress" --wait` returned the LOC's own resource guide and item record at #1-3, Public Domain Review and the "Exhibit of American Negroes" Wikipedia page right behind — i.e. tier-1 (LOC) and reasonable tier-2 sources both surfaced on the first query, no query reformulation needed. Coverage line (`79/82 responsive`) made it easy to trust the completeness of that pass without extra work.
 
@@ -665,52 +677,52 @@ ESCALATABLE: a real browser session could plausibly pass this gate.
 ```
 The typed outcome did its job — I knew immediately this was a tooling block, not evidence the page/collection doesn't exist, and moved on to corroborating the same facts (chart count, item description) via other tier-1/tier-2 sources rather than treating the gap as a finding. I didn't invoke the browser escalation myself since loc.gov is exactly the kind of public-records source the allow-list should cover and a secondary LOC page (the resource guide) had already given me what I needed — but flagging in case that page specifically is a recurring block worth pre-escalating for future workers who need the item record directly rather than just corroboration.
 
-**Net:** clean, fast, no wasted calls. Two `web`/`extract` calls got me from zero corpus coverage to three independently-corroborated facts (collaborators, chart count, reception/Grand Prize) I was comfortable citing in a keystone piece. This is a small, low-drama use case relative to today's other entries, but it's the kind of "does this actually save time on a real verification need" test the tool should keep passing.
+**Net:** clean, fast, no wasted calls. Two `web`/`extract` calls got me from zero corpus coverage to three independently-corroborated facts (collaborators, chart count, reception/Grand Prize) I was comfortable citing in the draft. This is a small, low-drama use case relative to today's other entries, but it's the kind of "does this actually save time on a real verification need" test the tool should keep passing.
 
-## 2026-08-19 · Burke Law Group $150M ORR withdrawal (task orr-withdrew-the-burke-law-group-...) · agent:claude-opus-4-8-parallel-tick3-a
+## 2026-08-19 · award-withdrawal task (<vendor-i>, $150M ORR) · agent:claude-opus-4-8-parallel-tick3-a
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
-**Task:** find why a $150M ORR single-source cooperative agreement to a Houston law firm was withdrawn 11 days after it was announced, what replaced it, and who the firm is. `fedreg` + `usaspending` + `courtlistener` + `extract`, plus WebSearch.
+**Task:** find why a $150M ORR single-source cooperative agreement to a <city-a> law firm was withdrawn 11 days after it was announced, what replaced it, and who the firm is. `fedreg` + `usaspending` + `courtlistener` + `extract`, plus WebSearch.
 
-**Worked well 1 — `fedreg` answered the central question outright, and its two-result precision was itself the finding.** `cascade-search --wait fedreg "Burke Law Group"` returned exactly the two notices as results #1 and #2 (both `*UNIQUE*`), and — this is the part that mattered — nothing else Burke-related in the whole corpus. "There is no re-announcement of the $150M" is a claim I could only make because the corpus is defined and the result set was clean. Results #3-20 were obvious noise (Medicare OPPS, gas pipelines, marine mammals) matching on "Burke"/"Law"/"Group" separately, which is fine and self-evidently ignorable. This is the tool doing exactly what it's for.
+**Worked well 1 — `fedreg` answered the central question outright, and its two-result precision was itself the finding.** `cascade-search --wait fedreg "<vendor-i>"` returned exactly the two notices as results #1 and #2 (both `*UNIQUE*`), and — this is the part that mattered — nothing else <vendor-i>-related in the whole corpus. "There is no re-announcement of the $150M" is a claim I could only make because the corpus is defined and the result set was clean. Results #3-20 were obvious noise (Medicare OPPS, gas pipelines, marine mammals) matching on the firm name's three words separately, which is fine and self-evidently ignorable. This is the tool doing exactly what it's for.
 
-**Worked well 2 — `extract --text` on a paywall-adjacent news page, 95.5% reduction, and it beat WebFetch outright.** WebFetch on houstonchronicle.com returned "unable to fetch" and on texastribune.org returned a hard `HTTP 403 Forbidden`. `$CS --wait extract "https://www.houstonpublicmedia.org/.../559368/..." --text` pulled the full AP wire story at ~31,788 → ~1,419 tokens, and that single extraction carried the ORR press statement, the firm's "small portion" quote, the Shapiro/Shubow roster detail, the USCRI $20M/through-December replacement figure, AND the CLSEPA plaintiff quote. Four of my five open questions came out of one call. `extract` on a syndicated-wire mirror is a better move than WebFetch on the paywalled original, and that's now twice in this log.
+**Worked well 2 — `extract --text` on a paywall-adjacent news page, 95.5% reduction, and it beat WebFetch outright.** WebFetch on a regional newspaper's site returned "unable to fetch" and on a state news site returned a hard `HTTP 403 Forbidden`. `$CS --wait extract "https://www.<outlet-d-domain>/.../<id>/..." --text` pulled the full AP wire story at ~31,788 → ~1,419 tokens, and that single extraction carried the ORR press statement, the firm's "small portion" quote, the <person-j>/<person-k> roster detail, the <org-b> $20M/through-December replacement figure, AND the <org-c> plaintiff quote. Four of my five open questions came out of one call. `extract` on a syndicated-wire mirror is a better move than WebFetch on the paywalled original, and that's now twice in this log.
 
-**Worked well 3 — `usaspending --count --all-types` gave me the publishable negative the writeup needed.** `VerifiedAbsence` on "Burke Law Group" is load-bearing in the artifact ("no federal money of any type ever reached this firm"), and I would not have written it that confidently off an empty list.
+**Worked well 3 — `usaspending --count --all-types` gave me the publishable negative the writeup needed.** `VerifiedAbsence` on "<vendor-i>" is load-bearing in the artifact ("no federal money of any type ever reached this firm"), and I would not have written it that confidently off an empty list.
 
 **Friction 1 — I re-committed the documented `head` exit-code mistake, on the same day it's warned about two entries above mine in this file. Severity: annoyed, self-inflicted, but suggests a fix.**
 ```
-$ $CS --wait usaspending "Burke Law Group" --count --all-types 2>&1 | head -25
+$ $CS --wait usaspending "<vendor-i>" --count --all-types 2>&1 | head -25
 echo "=== EXIT: $? ==="     # printed 0
 ```
 Then, unpiped:
 ```
-$ OUT=$($CS --wait usaspending "Burke Law Group" --count --all-types 2>&1); echo "TRUE EXIT: $?"
+$ OUT=$($CS --wait usaspending "<vendor-i>" --count --all-types 2>&1); echo "TRUE EXIT: $?"
 TRUE EXIT: 1
 ```
 **Observation:** exit was 0 through the pipe, 1 without. **Conclusion:** the tool is correct and I was wrong — same as the two agents cited in SKILL.md. What's interesting is that I had *read that exact warning* in SKILL.md maybe fifteen minutes earlier and still did it, because piping to `head` is muscle memory for "don't blow up my context," and the outcome word `VerifiedAbsence` was printed right there in the body so I wasn't reading for the exit code at all. **Would have helped:** the human-readable output already prints the outcome name — that's what saved me. So the fix may be docs-side and small: SKILL.md teaches `if $CS ...; then` exit-code branching in its very first example, *then* warns about pipelines 150 lines later under "Report the friction." Putting the pipeline caveat immediately adjacent to the exit-code branching example (where the reader forms the habit) would land better than putting it in the feedback section (where the reader is already done). Cheap doc reorder; this is now the third independent report of the same stumble.
 
 **Friction 2 — `web` returned zero results with 78/82 coverage and honestly refused to certify, which is correct behavior, but `retry after: Nones` is a broken string. Severity: cosmetic (the `Nones`), annoyed (the empty result).**
 ```
-$ $CS --wait web "\"Burke Law Group\" Houston immigration ORR \$150 million unaccompanied children" 2>&1 | head -40
+$ $CS --wait web "\"<vendor-i>\" <city-a> immigration ORR \$150 million unaccompanied children" 2>&1 | head -40
 == RateLimited ==
 coverage: 78/82 responsive | 1 distinct index(es) | RATE-LIMITED: searxng:brave, searxng:google cse | ERRORED: searxng:duckduckgo, searxng:startpage
 retry after: Nones
 detail:    Cannot certify absence: coverage incomplete ...
 ```
 `retry after: Nones` is a `None` interpolated into an f-string with an `s` suffix — should suppress the line entirely when there's no retry-after value, or print `unknown`. Tiny, but it's the kind of thing that makes an agent wonder if it mis-parsed the output.
-The substantive half: this was a *heavily* loaded query (quoted phrase + five extra terms) and the story was on the front page of NPR/ABC/Texas Tribune that week, so zero results with 78/82 engines responding is a surprising miss. I switched straight to WebSearch, which returned ten on-point outlets on the first identical-intent query. **Not filed as a bug** — SKILL.md is explicit that `web` is a discovery tier whose engines don't honour quoted phrases, and that a `web` zero is a weak negative; the tool told me so and downgraded correctly. But the practical lesson for the docs is narrower than "web is fuzzy": **`web` degrades badly on long queries with a quoted phrase, precisely the query shape an agent writes when it wants a specific entity.** One line — "keep `web` queries short; move entity precision to a corpus source" — would have saved me the call.
+The substantive half: this was a *heavily* loaded query (quoted phrase + five extra terms) and the story was on the front page of national and state outlets that week, so zero results with 78/82 engines responding is a surprising miss. I switched straight to WebSearch, which returned ten on-point outlets on the first identical-intent query. **Not filed as a bug** — SKILL.md is explicit that `web` is a discovery tier whose engines don't honour quoted phrases, and that a `web` zero is a weak negative; the tool told me so and downgraded correctly. But the practical lesson for the docs is narrower than "web is fuzzy": **`web` degrades badly on long queries with a quoted phrase, precisely the query shape an agent writes when it wants a specific entity.** One line — "keep `web` queries short; move entity precision to a corpus source" — would have saved me the call.
 
-**Where the results fell short (corpus gap, not a bug) — `courtlistener '"Burke Law Group"' --type r` was the wrong corpus for the question, and its `*UNIQUE*` hits are false friends.** 20 results, `total_matches` present, all fine mechanically. But the firm was founded in 2023 and had no federal award, so the phrase matches mostly as *counsel of record on unrelated dockets* (Smith v. Ideal Towing, Texas v. EPA, an opiate MDL) — a fuzzy-name-collision problem that the recipient-name-vs-keyword caveat in SKILL.md covers for `usaspending` but nothing covers for `courtlistener`. Result #5 *was* CLSEPA v. HHS, which looked like a hit and was really the phrase appearing in a docket I'd already read from another route. **Would have helped:** a caveat parallel to the usaspending one — "a quoted firm name in `courtlistener` matches attorney-of-record appearances, not party status; use `--type d` or read the party field before treating a hit as involvement." I nearly recorded "Burke Law Group appears in the CLSEPA docket" as a finding before checking what the match actually was.
+**Where the results fell short (corpus gap, not a bug) — `courtlistener '"<vendor-i>"' --type r` was the wrong corpus for the question, and its `*UNIQUE*` hits are false friends.** 20 results, `total_matches` present, all fine mechanically. But the firm was founded in 2023 and had no federal award, so the phrase matches mostly as *counsel of record on unrelated dockets* (an unrelated towing case, a state-v-EPA case, an opiate MDL) — a fuzzy-name-collision problem that the recipient-name-vs-keyword caveat in SKILL.md covers for `usaspending` but nothing covers for `courtlistener`. Result #5 *was* <case-a>, which looked like a hit and was really the phrase appearing in a docket I'd already read from another route. **Would have helped:** a caveat parallel to the usaspending one — "a quoted firm name in `courtlistener` matches attorney-of-record appearances, not party status; use `--type d` or read the party field before treating a hit as involvement." I nearly recorded "<vendor-i> appears in the <case-a> docket" as a finding before checking what the match actually was.
 
-**Note on the task rather than the tool, since it affects dispatch:** the ticket said "the corpus has almost nothing on it," but a prior pass had already archived both FR notices in-repo with SHA-256 and written a source note containing the withdrawal's operative sentence. My first `fedreg` call was therefore redundant with work already on disk. A `~/kb/kb search` before the first cascade-search call is what caught it — worth keeping that ordering in the worker skill (it already is, Step 5 item 1; I'm confirming it earns its place).
+**Note on the task rather than the tool, since it affects dispatch:** the ticket said "the corpus has almost nothing on it," but a prior pass had already archived both FR notices in-repo with SHA-256 and written a source note containing the withdrawal's operative sentence. My first `fedreg` call was therefore redundant with work already on disk. A research-notes search before the first cascade-search call is what caught it — worth keeping that ordering in the worker skill (it already is, Step 5 item 1; I'm confirming it earns its place).
 
 **Severity:** slowed at worst. All four research questions were answered, three from tier-1 primary documents, and the one confident-wrong-answer risk in the task (asserting the injunction caused the withdrawal) was avoidable because the *primary document itself* named the actual cause. `fedreg` + `extract` did the real work here.
 
-## 2026-08-19 · <county-a> Claims Paid multi-month sample (sample-<county-a>-claims-paid-reports-...) · agent:claude-sonnet-5-parallel-tick3-b
+## 2026-08-19 · <county-a> Claims Paid multi-month sample · agent:claude-sonnet-5-parallel-tick3-b
 
-**[fixed — see 2026-08-19 · foia-follow-through-vendor-attribution-<vendor-a>-training-dollars entry below, re-verified against the same file/command shape the same day]**
+**[fixed — see the 2026-08-19 FOIA follow-through task (vendor attribution) entry below, re-verified against the same file/command shape the same day]**
 **Task:** sample 18 <county-a> Board agenda-packet PDFs (Finance and Budget Committee, 2016-2023) for
 Sheriff training-category payee rows, checking for a handful of specific vendor names ("<vendor-a>" etc).
 The task prompt explicitly warned that `extract` had previously grepped raw PDF binary on these large
@@ -721,8 +733,8 @@ trusting a result. So this session both used the tool and specifically re-tested
 **The remote-PDF text-layer fix is real and verified — worked well.** On the actual packet PDF I was
 working with (`AG PKT 23-10 Finance.pdf`, 1.57M chars, ~394K raw tokens):
 ```
-$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "Sheriff" --wait
-== Extract == https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
+$ cascade-search extract "https://www.<county-a-domain>/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "Sheriff" --wait
+== Extract == https://www.<county-a-domain>/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
 source:   PDF text layer (1,578,283 chars, exact)
 raw ~394,570 tok -> extracted ~3,943 tok (99.0% reduction)
   [Sheriff] ...Tree Services T. Resolution: Authorizing a Contract Extension...
@@ -741,8 +753,8 @@ workshop hotel" ($531.48 + $905.80, Sheriff p-card section) buried around line 1
 extracted text file. After finding it by hand, I went back and specifically re-tested `extract --grep`
 against the *exact same remote URL* to see whether the claimed fix would have caught it:
 ```
-$ cascade-search extract "https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "Desert" --wait
-== Extract == https://www.kanecountyil.gov/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
+$ cascade-search extract "https://www.<county-a-domain>/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf" --grep "<vendor-a-word>" --wait
+== Extract == https://www.<county-a-domain>/Lists/Events/Attachments/6723/AG%20PKT%2023-10%20Finance.pdf
 source:   PDF text layer (1,578,283 chars, exact)
 raw ~394,570 tok -> extracted ~28 tok (100.0% reduction)
 $ echo $?
@@ -750,11 +762,11 @@ $ echo $?
 ```
 No match lines, no "no matches found" message, exit 0 — the *exact same output shape* the task warned
 about, except this time the `source:` line is genuinely accurate (the fix for the binary-grep bug is
-real), so the failure mode has moved rather than disappeared. I confirmed "Desert" (capital D) appears
-twice in the document via `grep -c -i desert` on my own `pdftotext -layout` output of the identical PDF —
+real), so the failure mode has moved rather than disappeared. I confirmed "<vendor-a-word>" (capitalised) appears
+twice in the document via `grep -c -i <vendor-a-word>` on my own `pdftotext -layout` output of the identical PDF —
 ground truth is a real hit, not a typo on my part. To rule out case-sensitivity or a stopword issue I
-retried with `"<vendor-a>"`, `"interdiction"`, `"LEADSONLINE"`, and `"CelleBrite"` — all four are
-verified-present strings in the same p-card table (LeadsOnline LLC and CelleBrite Inc. are payee names a
+retried with `"<vendor-a>"`, `"interdiction"`, `"<VENDOR-J>"`, and `"<vendor-k>"` — all four are
+verified-present strings in the same p-card table (<vendor-j> LLC and <vendor-k> Inc. are payee names a
 few hundred lines from "<vendor-a>" in my local extraction) — **all four returned the identical
 `~28 tok / 100.0% reduction / zero match lines / exit 0` shape.** Only `--grep "Sheriff"` (which appears
 in the document's very first pages, in resolution titles) returned real matches.
@@ -782,7 +794,7 @@ have reported "<vendor-a> does not appear in the September 2023 <county-a> packe
 
 **Worked well, unprompted by the task — discovering the county's own SharePoint list API.** Not a
 cascade-search finding, but worth naming since it's a reusable pattern other county/municipal-government
-tasks in this KB will hit: `kanecountyil.gov` runs on SharePoint, and its committee page
+tasks in this research will hit: `<county-a-domain>` runs on SharePoint, and its committee page
 (`/Pages/CountyBoard/committee.aspx?cID=7`) embeds the exact `_api/web/lists/getbytitle('Events')/items?
 $select=...&$expand=AttachmentFiles&$filter=Status eq 'Scheduled' and Committee eq <id>` query it uses
 client-side to render the meeting list. Calling that endpoint directly with `curl` + `ACCEPT:
@@ -793,18 +805,18 @@ this is one CMS's private-but-undocumented API, not a general public-records sou
 "government SharePoint sites often expose their event/document list via `_api/web/lists`" pattern note
 belongs somewhere findable for future county-government tasks, since it isn't specific to <county-a>.
 
-## 2026-08-19 · foia-follow-through-vendor-attribution-<vendor-a>-training-dollars · claude-sonnet-5
+## 2026-08-19 · FOIA follow-through task (vendor attribution, <vendor-a> training dollars) · claude-sonnet-5
 
-**Context:** re-checked the same large <county-a> PDF (`<county-a>-board-agenda-packet-2023-10-claims-paid-september-2023.pdf`,
-1,578,283 chars) that an earlier pass on this investigation flagged for the now-supposedly-fixed
+**Context:** re-checked the same large <county-a> PDF (a local copy of the October 2023 board agenda packet,
+1,578,283 chars) that an earlier pass on this research flagged for the now-supposedly-fixed
 `extract --grep` global-match-cap bug (see prior entry above, same file). The task prompt told me the fix
 had landed within the hour and asked me to re-verify if I hit that behavior again.
 
 **Command:**
 ```
-$CS extract "$F" --grep "Fifth Third" --grep "Procurement Card" --grep "Purchase Card"
+$CS extract "$F" --grep "<bank-a>" --grep "Procurement Card" --grep "Purchase Card"
 ```
-**Got:** `'Fifth Third' matched 223 times, showing first 40; 'Procurement Card' matched 98 times, showing
+**Got:** `'<bank-a>' matched 223 times, showing first 40; 'Procurement Card' matched 98 times, showing
 first 40` — each pattern reports its own true count and its own cap notice. Ran `--grep "Purchase Card"`
 alone for comparison: 2 real matches, no "showing first N" line at all (nothing to truncate). This is
 exactly the per-pattern behavior the fix was supposed to produce, and it held under a real multi-pattern
@@ -818,7 +830,7 @@ large county PDFs (1.19M and 1.52M chars).
 the two dollar amounts I needed to trace ($531.48, $905.80) live in a "Procurement Card Activity Report"
 table that has NO Fund column — merchant, department, amount, date, business-purpose text, nothing else.
 The payee-level "Claims Paid Report" in the *same PDF* does carry a Fund column but aggregates procurement-
-card charges under the card issuer ("Fifth Third Bank") with no per-transaction line, and there is no
+card charges under the card issuer ("<bank-a> Bank") with no per-transaction line, and there is no
 shared invoice/transaction ID between the two tables. `extract --grep` retrieved both tables correctly and
 completely (verified this session) — the gap is structural to the source document, not a tool limitation.
 Noting it here only because it's the kind of "the tool worked, the source still can't answer the question"
@@ -832,7 +844,7 @@ with different pattern sets, and trust a negative result without re-reading the 
 **Severity:** n/a — this is a fix-verification entry, not a new complaint. Recommend marking the prior
 entry `[fixed]` with a pointer to this one.
 
-## 2026-08-19 · brief-write-detention-executive-branch-artifact task · claude-sonnet-5
+## 2026-08-19 · brief-writing task (dating a statutory mandate) · claude-sonnet-5
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
@@ -850,7 +862,7 @@ entry `[fixed]` with a pointer to this one.
 
 **Severity:** annoyed (fedreg) / worked-well (web + extract combo)
 
-## 2026-08-19 · fact-check-du-bois-paris-exposition task · claude-sonnet-5
+## 2026-08-19 · historical fact-check task (Du Bois 1900 Paris Exposition) · claude-sonnet-5
 
 **[tracked]** Browser allow-list gap, the second most-reported friction. Root cause addressed 2026-09-19: the list was hardcoded with no override, so every registry needed a commit. It is now extendable via `~/.evidence-search/allowed_hosts.json` with a required reason; run `evidence-search hosts`. The specific host in this entry still needs adding, but you can now add it yourself.
 
@@ -909,19 +921,19 @@ before filing, logged only as a documentation-warning success story.
 
 ---
 
-## 2026-08-19 · map-the-wider-after-academy-training-vendor-market (<vendor-a> cluster) · claude-opus-4-8-parallel-tick4-b
+## 2026-08-19 · vendor-market mapping task (<vendor-a> cluster) · claude-opus-4-8-parallel-tick4-b
 
 Vendor-market census: was <vendor-a>/<vendor-a> an outlier or an instance? Ran ~25 `usaspending`
 count/group queries, ~6 `courtlistener`, ~5 `web`, 2 `extract`. **The tool answered the ticket's
 structural question, and five prior passes using consumer web search had failed on it.** Detail below,
 but the headline for maintainers: `usaspending` recipient-name search is the thing that broke a
-question that had been stuck in this KB for eight days.
+question that had been stuck in this research for eight days.
 
 **Friction 1 — `courtlistener` has no `--format json`, and the failure is a Python traceback.**
 
 **Command (exact):**
 ```
-$CS courtlistener '"Calibre Press"' --type r --wait --format json 2>/dev/null | python3 -c "...json.load(sys.stdin)..."
+$CS courtlistener '"<vendor-l-brand-1>"' --type r --wait --format json 2>/dev/null | python3 -c "...json.load(sys.stdin)..."
 ```
 **Expected:** JSON, because my dispatch prompt told me to "read `meta.total_matches`" — which implies a
 structured output mode, and `usaspending` habits primed me for one.
@@ -938,7 +950,7 @@ emits.
 already assumes), or — cheaper — print `total_matches` and `next_cursor` in the human-readable footer.
 Right now `results: 20` is ambiguous between "20 matches" and "20 shown, N total," and the standing
 caveat in my dispatch ("read meta.total_matches, a row count is not a count") is un-actionable as built.
-**Severity:** slowed. It also degraded a finding: I could not distinguish whether `"Calibre Press"`'s 20
+**Severity:** slowed. It also degraded a finding: I could not distinguish whether `"<vendor-l-brand-1>"`'s 20
 rows were the whole match set or a page, so I wrote it up as unverified rather than as reach evidence.
 `[fixed ec88f4c — the header now prints `results: N of M total_matches`, so a 20-row page can no longer be mistaken for a complete match set. Your note that the dispatch caveat was "un-actionable as built" is the sharpest statement of the problem in this file: the doc told workers to read a field they could not reach. Three independent reports; one line of output.]`
 
@@ -946,7 +958,7 @@ rows were the whole match set or a page, so I wrote it up as unverified rather t
 
 **Command (exact):**
 ```
-$CS extract "https://www.courtlistener.com/docket/65524587/margarito-t-lopez-v-city-of-los-angeles/" --grep "Calibre" --grep "Glennon" --grep "Street Survival"
+$CS extract "https://www.courtlistener.com/docket/<docket-id>/<case-slug>/" --grep "<vendor-l-brand-1>" --grep "<person-l>" --grep "<vendor-l-brand-2>"
 ```
 **Got:** `raw ~184,708 tok -> extracted ~3 tok (100.0% reduction)` and nothing else. Same shape on a
 second call against a USAspending award page (`raw ~729 tok -> extracted ~3 tok (99.6% reduction)`).
@@ -966,14 +978,14 @@ the same number but not the same finding.
 
 **Command (exact):**
 ```
-$CS usaspending "Killology" --group contracts --limit 30 --wait
+$CS usaspending "<vendor-m>" --group contracts --limit 30 --wait
 ```
 **Got:** 30 rows for a vendor that `--count` reports as **45 awards**. No aggregate obligation figure
 anywhere in either mode — `--count` gives award *counts* only, `--group contracts` gives per-award
 dollars. To get "what has this vendor been paid," I had to scrape the printed rows with a regex and sum
 them in Python, once per vendor, ~10 times.
 **Friction:** every dollar total in my deliverable is therefore a **floor**, not a total, for any vendor
-with >30 awards (Killology, Blue Courage, VirTra 253, Oak Grove 220). I had to caveat the census table
+with >30 awards (<vendor-m>, <vendor-n>, <vendor-o> 253, <vendor-p> 220). I had to caveat the census table
 accordingly, which materially weakens it — "at least $217,454" is a much weaker claim than "$217,454".
 **Would have helped:** a `--sum` / `--total` on `usaspending` that returns total obligated across ALL
 matching awards, not just the displayed page. For a procurement-heavy beat this is the single most
@@ -987,9 +999,9 @@ common question asked of the tool and it is currently the one thing it will not 
 succeed where five prior passes failed. Concretely:
 
 ```
-$CS usaspending "Calibre Press" --count --wait     -> VerifiedAbsence
-$CS usaspending "Street Survival" --count --wait   -> VerifiedAbsence
-$CS usaspending "Lifeline Training" --count --wait -> Hit, 27 awards
+$CS usaspending "<vendor-l-brand-1>" --count --wait -> VerifiedAbsence
+$CS usaspending "<vendor-l-brand-2>" --count --wait -> VerifiedAbsence
+$CS usaspending "<vendor-l>" --count --wait         -> Hit, 27 awards
 ```
 
 Same company, three names. Prior passes searched the **brands** and correctly got nothing; the money is
@@ -1005,58 +1017,57 @@ to `usaspending`'s recipient-name matching, and it would be worth one line in th
 registered recipient name; resolve the corporate parent before treating an absence as dispositive."
 
 Also worked well: `web` reporting coverage honestly (`80/82 responsive | RATE-LIMITED: searxng:brave |
-ERRORED: searxng:startpage`) and **refusing to certify absence** on the Mike Hanson query at 78/82. My
+ERRORED: searxng:startpage`) and **refusing to certify absence** on the <person-m> query at 78/82. My
 dispatch prompt specifically warned me not to write tooling-limited negatives up as content-exhausted
 ones, and the tool enforced that for me rather than leaving it to my discipline. That is the correct
-division of labour and it directly changed what I wrote (Hanson logged as unresolved-retry, not as a
+division of labour and it directly changed what I wrote (<person-m> logged as unresolved-retry, not as a
 negative finding).
 
 **Severity summary:** Friction 1 — slowed. Friction 2 — slowed, near-miss on a wrong conclusion.
 Friction 3 — slowed, degraded output strength. Net: the tool won the ticket; the friction is all in
 getting aggregates and in empty-result presentation.
 
-## 2026-08-19 · brief-write-draft-series-2-keystone-panopticon-was-the-wrong-metaphor-to-v1 · claude-sonnet-5
+## 2026-08-19 · brief-writing task (turned out stale) · claude-sonnet-5
 
-**Context:** claimed a "brief-write/draft" task instructing me to write a 4,500-6,000w
-RAMM keystone brief on the panopticon-vs-Agre-capture frame correction. Did not end up
+**Context:** claimed a brief-writing task instructing me to write a long-form
+brief on a framing correction. Did not end up
 needing cascade-search at all — the actual finding was that the deliverable already
-existed (fact-checked, publish-audited, with-Amy since 2026-06-11), so the task closed
+existed (fact-checked, publish-audited, with an editor since 2026-06-11), so the task closed
 as a stale-ticket discovery rather than a research task. Logging this because the
 absence of cascade-search usage is itself informative for triage, and because the
-discovery method is a `~/kb/kb search` / Pyrite task-list finding worth naming.
+discovery method is a `pyrite search` / Pyrite task-list finding worth naming.
 
-**Command:** `~/kb/kb search "panopticon wrong metaphor keystone" -k drafts --limit 10`
+**Command:** `pyrite search "<topic keywords>" -k <drafts-kb> --limit 10`
 
 **Expected:** a ranked list of loosely-related theme/draft entries to orient on.
 
-**Got:** the top hit (`dc-launch-order-checklist`) contained the exact answer in its
-snippet — a highlighted `with-amy · fc complete` status line with a live Drive-doc
+**Got:** the top hit (a launch-order checklist entry) contained the exact answer in its
+snippet — a highlighted `with-editor · fc complete` status line with a live shared-doc
 link for the precise piece the task asked me to write. One search call resolved the
-whole task. This is `~/kb/kb search`, not cascade-search, but it is the tool that
+whole task. This is `pyrite search`, not cascade-search, but it is the tool that
 actually mattered for this ticket and it worked well: FTS ranking surfaced a launch
-checklist over dozens of theme/task files that also mention "panopticon."
+checklist over dozens of theme/task files that also mention the topic keyword.
 
 **Friction:** none in the tooling. The friction was upstream, in the task itself —
 the claimed ticket's body asserted "the brief EXISTS but is not yet drafted" as
 settled fact, sourced to a 2026-06-11 brief-gap survey. Two *other* task files for
-the identical deliverable (`write-keystone-brief-series-2-...` and
-`brief-write-the-panopticon-was-the-wrong-metaphor-...`) were both already `status:
-done` in the same `~/kb/kb task list` output space, and the actual draft file had
-been sitting in `drafts/drafts/` with a completed audit trail for over two months.
-Nothing in `~/kb/kb task list --status open` flagged this as likely-redundant before
+the identical deliverable (two differently-slugged task files) were both already `status:
+done` in the same `pyrite task list` output space, and the actual draft file had
+been sitting in the drafts folder with a completed audit trail for over two months.
+Nothing in `pyrite task list --status open` flagged this as likely-redundant before
 I claimed it — I only found out by reading the task body, then checking the
 `Produces:` path by hand.
 
-**Would have helped:** if task claiming (or the investigation-research skill's Step 1
+**Would have helped:** if task claiming (or the research-worker skill's Step 1
 picker) did a cheap pre-check — does the `Produces:` path, or an obvious slug match,
 already exist as a file? — before surfacing a task as open. This is a Pyrite/
 task-hygiene gap, not a cascade-search gap, but it cost real wall-clock: I read three
 overlapping task files and a 398-line draft plus its audit sidecar before concluding
 "do nothing, close it." A worker with less discipline than "verify the Produces: path
 before writing" could easily have shipped a second competing draft against a piece
-already sitting in Amy's editorial queue.
+already sitting in an editor's queue.
 
-**Worked well:** `~/kb/kb search` scoped to `-k drafts` surfaced the ground-truth
+**Worked well:** `pyrite search` scoped to the drafts KB surfaced the ground-truth
 status in the first hit. The audit-sidecar convention (separate `.audit.yaml` with
 fact_check_log / publish_audit / revision_log / pre_publish_blockers) made it fast to
 confirm the draft was not a rough stub — it had already cleared fact-check and a
@@ -1066,14 +1077,14 @@ right call rather than a guess.
 **Severity:** slowed (on the task-hygiene issue, not on any search tool). No
 cascade-search friction to report this pass — clean non-use.
 
-## 2026-08-19 · pull-psc-naics-course-titles-on-all-27-lifeline-training-awards · claude-sonnet-5
+## 2026-08-19 · PSC/NAICS pull task (27 awards, <vendor-l>) · claude-sonnet-5
 
-**Context:** ticket asked for PSC + NAICS + course-title/description on all 27 of Lifeline
-Training Ltd's federal prime contracts, testing whether any repeats the <vendor-b> ICE
+**Context:** ticket asked for PSC + NAICS + course-title/description on all 27 of <vendor-l>'s
+federal prime contracts, testing whether any repeats the <vendor-b> ICE
 pattern (protective-purpose title against combat-coded PSC U013). Needed the actual
 `product_or_service_code` field on every award, not just titles.
 
-**Command 1:** `$CS --wait usaspending "Lifeline Training" --group contracts --limit 27 --json`
+**Command 1:** `$CS --wait usaspending "<vendor-l>" --group contracts --limit 27 --json`
 
 **Expected:** either the PSC/NAICS fields directly, or a documented way to pull them for a
 whole result set.
@@ -1127,11 +1138,11 @@ doc recommends.
 awards in well under a minute including sleep spacing), but it is a silent gap: nothing in
 `--help` or the skill doc flags that PSC/NAICS require leaving the tool, so the first attempt
 (via `record`) cost a full round-trip before I found the actual path.
-`[fixed 887fe54 — `usaspending --detail <id>` returns PSC and NAICS directly; you were the third worker to hand-roll the same curl loop, which is what made the case. The very next opus-5 pass used it and reported it carried that task's central finding: PSC codes 6910 TRAINING AIDS / U099 contradicted a vendor's own marketing and corrected a standing KB judgment. This is the clearest complaint-to-shipped-feature loop in the file.]`
+`[fixed 887fe54 — `usaspending --detail <id>` returns PSC and NAICS directly; you were the third worker to hand-roll the same curl loop, which is what made the case. The very next opus-5 pass used it and reported it carried that task's central finding: PSC codes 6910 TRAINING AIDS / U099 contradicted a vendor's own marketing and corrected a standing research judgment. This is the clearest complaint-to-shipped-feature loop in the file.]`
 
 ---
 
-## 2026-08-19 · task <vendor-d>-owns-<outlet-a>-… (trade-press ownership / sourcing-bias methodology) · claude-opus-5[1m]
+## 2026-08-19 · trade-press ownership task (<vendor-d>/<outlet-a>, sourcing-bias methodology) · claude-opus-5[1m]
 
 **Context:** verify at tier-1 that <outlet-a> is owned by <vendor-d>, establish what <vendor-d> sells,
 and determine whether the ownership skews the vendor census. Heavy use of `usaspending`
@@ -1146,7 +1157,7 @@ SERVICES` etc. directly. **That one flag carried my entire central finding**: <v
 self-description is "policy, training, wellness" SaaS, and the corpus had previously written it
 off as "not a training vendor" on that basis — the PSC codes (four × `6910 TRAINING AIDS`, one
 `U099 EDUCATION/TRAINING`, one under `NAICS 611699`) contradict the marketing and corrected an
-existing KB judgment. The skill doc's claim that these codes are "the contracting officer's
+existing research judgment. The skill doc's claim that these codes are "the contracting officer's
 classification, not the vendor's marketing" is not a nice-to-have framing; it was the load-
 bearing evidentiary move of the whole task. Same for `--sum` returning `$1,564,745.51 across 15
 awards` with the literal word **`complete`** — I could state the figure as exact rather than a
@@ -1207,7 +1218,7 @@ The reduction was superb (110,323 → 1,783 tok, 98.4%) but ended in
 --max-chars N to raise this cap.]`. The message is clear and names both fixes — genuinely good
 error copy. But the default cut 2,823 chars out of an already-98%-reduced 6,823-char document,
 and the tail I lost turned out to contain the **single most load-bearing string in my whole
-task**: the product menu listing "PoliceOne Academy" as a <vendor-d> *app* alongside "<outlet-a>" as a
+task**: the product menu listing "<vendor-d-product>" as a <vendor-d> *app* alongside "<outlet-a>" as a
 *resource*, which is what proves the news brand and the training product are the same brand
 family. I only got it because I re-ran with `--max-chars 12000` on a hunch.
 **Would have helped:** scale the display cap to the *post*-extraction size rather than a fixed
@@ -1235,11 +1246,11 @@ But the *capability* gap is real and worth logging as a missing-source finding p
 does publication X write about entity Y."** I tried the obvious fallback — the publication's own
 search — and it is a trap:
 `https://<outlet-a-domain>/search?q=<vendor-a>` → **1,967 results**;
-`?q=Force%20Science` → **28,081**; `?q=Calibre%20Press` → **41,130**.
+`?q=<vendor-b-full>` → **28,081**; `?q=<vendor-l-brand-1>` → **41,130**.
 Those numbers are worthless. The site tokenises unquoted terms, so they measure how often
-*snow*, *force*, and *press* appear across the archive — the exact error class the skill doc
-warns about for unquoted CourtListener queries (`<vendor-b-full>` 51,622 vs `"Force
-Science Institute"` 155), reproduced on a different corpus. **I flagged this in my KB artifact
+the individual common words in each name appear across the archive — the exact error class the skill doc
+warns about for unquoted CourtListener queries (`<vendor-b-full>` 51,622 vs `"<vendor-b-full>"`
+155), reproduced on a different corpus. **I flagged this in my research notes
 specifically so the next worker doesn't mistake them for a coverage census**, but a less careful
 pass would have published "<outlet-a> mentions <vendor-b> 28,081 times" as a finding, and it
 would have been meaningless.
@@ -1250,14 +1261,14 @@ coverage-bias questions are recurring on this beat and the tool currently has no
 them.
 **Severity:** annoyed (I got a defensible "not determinable" out of it, which is the right
 answer, but only because I knew to distrust the site-search numbers).
-`[wontfix as a feature — tracked as a documented boundary. "How much does publication X write about entity Y" has no honest path here: site-scoped engine counts are estimates that move between runs, and a publication's own search tokenises (your 1,967 / 28,081 / 41,130 are counts of *snow*, *force*, *press*). Both roads produce a number that looks like a census and is not one, which is the failure class this tool exists to prevent — so the tool should keep declining rather than ship a plausible fake. Recording it as out-of-scope in the skill doc so the next worker stops reaching for the site-search trap; you already flagged it in the KB artifact, which is the correct handling.]`
+`[wontfix as a feature — tracked as a documented boundary. "How much does publication X write about entity Y" has no honest path here: site-scoped engine counts are estimates that move between runs, and a publication's own search tokenises (your 1,967 / 28,081 / 41,130 are counts of the individual common words in each name). Both roads produce a number that looks like a census and is not one, which is the failure class this tool exists to prevent — so the tool should keep declining rather than ship a plausible fake. Recording it as out-of-scope in the skill doc so the next worker stops reaching for the site-search trap; you already flagged it in the research notes, which is the correct handling.]`
 
 **Friction 5 — `AccessBlocker: http-404` on a guessed URL reads like a wall, but is just a
 wrong guess.** Commands:
 ```
 $CS --wait extract "https://<outlet-a-domain>/about" --grep ...        → AccessBlocker, http-404
 $CS --wait extract "https://<outlet-a-domain>/editorial-standards" ... → AccessBlocker, http-404
-$CS --wait extract "https://www.policemag.com/about-us" --grep ...   → AccessBlocker, http-404
+$CS --wait extract "https://www.<outlet-b-domain>/about-us" --grep ... → AccessBlocker, http-404
 ```
 Each printed `NOT a negative finding. Access was blocked.` That's true but misleading in
 register: 404 is not "access was blocked," it's "you guessed the wrong path." Nothing is walling
@@ -1272,7 +1283,7 @@ which should be reserved for Cloudflare/Turnstile/403.
 
 **Friction 6 — GlobeNewswire `extract` times out repeatedly (reported, not blocking).**
 ```
-$CS --wait extract "https://www.globenewswire.com/news-release/2019/02/08/1712466/0/en/<vendor-d>-and-Praetorian-Digital-Merge-Creating-Comprehensive-Content-Training-and-Policy-Platform-for-Public-Safety-and-Local-Government.html" --text --max-chars 6000
+$CS --wait extract "https://www.globenewswire.com/news-release/2019/02/08/<id>/0/en/<vendor-d>-and-<vendor-q>-Merge-<rest-of-slug>.html" --text --max-chars 6000
 ```
 **Got, twice, ~4 minutes apart:**
 ```
@@ -1294,10 +1305,10 @@ on this beat and GlobeNewswire being effectively unreadable is a gap worth knowi
   very file. This is the feature that made the difference between "<vendor-d> is a SaaS company per
   its website" and "the government classifies <vendor-d> as a training school and a publisher."
 - **`--sum`'s `complete` vs floor marker.** Being told the figure is complete let me upgrade an
-  existing KB number from approximate to exact and say so.
+  existing research-notes number from approximate to exact and say so.
 - **`extract --grep` returning an explicit in-document negative.** This produced my single
   sharpest finding. Running
-  `$CS --wait extract "https://<outlet-a-domain>/about-us" --grep "<vendor-d>|<VENDOR-D>|parent|owned|ownership|subsidiary|Praetorian"`
+  `$CS --wait extract "https://<outlet-a-domain>/about-us" --grep "<vendor-d>|<VENDOR-D>|parent|owned|ownership|subsidiary|<vendor-q>"`
   returned
   `NO MATCHES for '…' in 37,547 tokens of text. This is an absence IN THIS DOCUMENT ONLY -- the
   document was read, the terms are not in it.`
@@ -1305,7 +1316,7 @@ on this beat and GlobeNewswire being effectively unreadable is a gap worth knowi
   disclosure page details ad and affiliate revenue and never names its owner. **A bare empty
   result would not have been publishable; the explicit scoped-absence language made it a
   finding.** More tools should do this.
-- **`--grep` on a local PDF** (the in-repo archived 2009 column) using the identical syntax as on
+- **`--grep` on a local PDF** (a locally archived 2009 column) using the identical syntax as on
   a URL. No mode switch, no flags to remember, and it surfaced both the `Copyright © 2026
   <vendor-d>` footer and the author's disclosed vendor affiliation in one call.
 - **`usaspending --count --all-types`** giving `contracts: 15 | loans: 1` up front, so I knew the
@@ -1317,7 +1328,7 @@ they are cheap fixes with disproportionate payoff. Friction 4 is the interesting
 missing capability on a question shape (who owns the press, and does it show in coverage) that
 this beat will keep asking.
 
-## 2026-08-19 · trace-non-federal-money-into-<vendor-a>-hidta (task) · claude-sonnet-5-parallel-tick7-b
+## 2026-08-19 · non-federal money tracing task (<vendor-a>, HIDTA) · claude-sonnet-5-parallel-tick7-b
 
 **Context:** needed to (a) confirm the $3.3M <vendor-a> federal-contract floor was complete,
 (b) enumerate a public vendor site's sequentially-numbered course-calendar pages
@@ -1368,7 +1379,7 @@ shot with no ambiguity.
 no rate-limit surprises beyond the normal shared-ledger `web` RateLimited-then-retry cycle
 documented elsewhere in this log, which behaved exactly as described.
 
-## 2026-08-19 · <vendor-d>-owns-<outlet-a> (SECOND pass on an already-worked ticket) · claude-opus-5[1m] · agent:claude-opus-4-8-parallel-tick8-a
+## 2026-08-19 · trade-press ownership task (<vendor-d>/<outlet-a>), SECOND pass on an already-worked ticket · claude-opus-5[1m] · agent:claude-opus-4-8-parallel-tick8-a
 
 **Context:** dispatched on the same ticket tick7-a worked earlier today, under a brief that
 said it was unworked. It wasn't. So I used cascade-search for something the log doesn't have
@@ -1380,9 +1391,9 @@ to be a distinct use case, and the tool is unusually good at it. Reporting from 
 Three claims, three commands, three exact reproductions:
 
 ```
-$CS extract "https://<vendor-d-domain>/about-us/" --grep "Praetorian|<outlet-a>|Riverside|GTCR|2019|acquir"
+$CS extract "https://<vendor-d-domain>/about-us/" --grep "<vendor-q>|<outlet-a>|<org-d>|<org-e>|2019|acquir"
 $CS usaspending "<vendor-d>" --sum
-$CS extract "https://<outlet-a-domain>/about-us" --grep "<vendor-d>|parent|owned|ownership|subsidiary|Praetorian"
+$CS extract "https://<outlet-a-domain>/about-us" --grep "<vendor-d>|parent|owned|ownership|subsidiary|<vendor-q>"
 ```
 
 The `--sum` came back `$1,564,745.51 across 15 awards ... complete` — **identical to the cent**
@@ -1427,7 +1438,7 @@ still cooling`). Better still, a note when a *query shape* has recently failed t
 
 **Friction 3 — CourtListener docket pages are ~95% chrome, and `--text` gives you the chrome.**
 ```
-$CS extract "https://www.courtlistener.com/docket/71299595/hosea-small-v-<vendor-d>-llc/" --text
+$CS extract "https://www.courtlistener.com/docket/<docket-id>/<case-slug>/" --text
 ```
 94.5% reduction, and the surviving 1,510 tokens were almost entirely CourtListener's
 sign-in modal, RECAP install nag, and the "🙏 daily prayers" explainer. **Zero** case metadata.
@@ -1443,10 +1454,10 @@ own sibling's page shape is a gap. **Severity:** slowed; near-miss on correctnes
 
 **Where the results fell short (not an error, a corpus point).** The ownership question —
 "who owns this trade outlet" — has no good source here. I got there via `web` (which found
-policemag.com's own announcement) plus `bobit.com/about`, then *validated* the answer with
+<outlet-b-domain>'s own announcement) plus `<org-f-domain>/about`, then *validated* the answer with
 `usaspending --limit/--detail` on the publisher. **That last move is the generalizable trick and
 I'd like it written down somewhere:** to test whether a publisher is a market participant, pull
-its federal award PSC/NAICS. Bobit came back `PSC U005 TUITION/REG/MEMB FEES, NAICS 561920
+its federal award PSC/NAICS. <org-f> came back `PSC U005 TUITION/REG/MEMB FEES, NAICS 561920
 CONVENTION AND TRADE SHOW ORGANIZERS`; <vendor-d> came back technical writing, training aids, and
 misc-schools. The contracting officer's classification separated a press outlet from a vendor
 that owns one, on a question procurement data isn't nominally *for*. That's the strongest thing
@@ -1456,21 +1467,21 @@ the tool did for me today and it wasn't in any doc.
 - `--sum` reporting `complete` vs. floor. I could state a figure as exact instead of hedging.
 - The in-document absence message (`This is an absence IN THIS DOCUMENT ONLY -- the document
   was read, the terms are not in it`) is the single best-worded output in this tool. It states
-  the scope of the negative so precisely that I could put it in a KB entry verbatim as evidence.
+  the scope of the negative so precisely that I could put it in the research notes verbatim as evidence.
 - `RateLimited` refusing to masquerade as absence, twice, on a question where a false negative
   would have been an actual published error.
 
 **Overall severity:** slowed. Task completed, nothing blocked. Friction 3 is the one worth
 fixing first — it sits on a first-class source and it nearly let a mischaracterised case stand.
 
-## 2026-08-19 · ledger-lead-corroborate-cumberland-county-me · claude-sonnet-5
+## 2026-08-19 · lead-corroboration task (county commission vote) · claude-sonnet-5
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
-**Task:** corroborate a single-tier-2-sourced daily-capture ledger drop (Cumberland County ME
+**Task:** corroborate a single-tier-2-sourced news lead (a <county-c>
 3-1 vote to drop ICE from the jail's USMS contract) with a second, ideally tier-1, source.
 
-**Command:** `$CS web "site:cumberlandcounty.org commissioners meeting April 2026 ICE" --wait`
+**Command:** `$CS web "site:<county-c-domain> commissioners meeting April 2026 ICE" --wait`
 **Expected:** either results or a clean `RateLimited`/`AccessBlocker` typed outcome.
 **Got:** `RateLimited`, exit 3, with a well-formed message: "Cannot certify absence: coverage
 incomplete (78/82 responsive | RATE-LIMITED: searxng:brave, searxng:google cse | ERRORED:
@@ -1484,7 +1495,7 @@ this session succeeded within ~5s, try again shortly") so an agent doesn't have 
 5s or 30s is the right wait. Minor — I guessed right this time. **Severity:** annoyed.
 
 **Friction — Legistar / government meeting-portal JS rendering.** `$CS extract
-"https://cumberlandcounty.legistar.com/MainBody.aspx" --text` and the sibling `Calendar.aspx`
+"https://<county-c>.legistar.com/MainBody.aspx" --text` and the sibling `Calendar.aspx`
 and `Legislation.aspx` pages all returned only the page chrome (nav, filter-dropdown labels,
 "select" placeholder text) — the actual meeting/legislation rows are loaded via AJAX and never
 appear in the static HTML. This is the exact source type the task asked me to check (county
@@ -1505,25 +1516,25 @@ outcome (`mechanism: js-only` — this mechanism is already listed in the skill 
 for escalation here) rather than a silent low-content `Hit`. I worked around it by falling back
 to `web` search to find secondary reporting of the same meeting (a YouTube upload of the meeting
 recording, confirming the date) instead of the primary Legistar record — a workaround I
-documented explicitly in the KB entry rather than silently treating it as verified, but it's
+documented explicitly in the research notes rather than silently treating it as verified, but it's
 exactly the kind of routing-around the hallway-testing skill flags as the expensive failure
 mode if it goes unreported. **Severity:** slowed (did not block — task still closed `done` with
-strong tier-1 news corroboration — but the county's own primary record, which is what the ledger
-disposition specifically asked for, remains unretrieved).
+strong tier-1 news corroboration — but the county's own primary record, which is what the task
+specifically asked for, remains unretrieved).
 
-**Worked well:** `extract --text` on live news articles was excellent — six separate outlet
-pages (Portland Press Herald x2, Maine Public, WMTW, Bangor Daily News, Maine Wire) each reduced
+**Worked well:** `extract --text` on live news articles was excellent — six separate local-outlet
+pages each reduced
 95-99% while preserving every fact I needed (commissioner names, vote tallies, dollar figures,
 direct quotes) without a single re-fetch. The `news` RSS command's "redirect only, not citable"
 labeling on every Google News result is a good guardrail — it stopped me from accidentally
 citing an uncitable redirect URL and pushed me to `web` for a citable link, which is exactly the
 right nudge.
 
-## 2026-08-19 · ledger-pattern-characterize-eyes-on-ice-as-a-source · claude-opus-4-8-parallel-tick8-b
+## 2026-08-19 · source-characterization task (a detention-beat newsletter) · claude-opus-4-8-parallel-tick8-b
 
 **[tracked]** Web/SearXNG rate-limiting cluster, the most-reported friction in this log. Partly root-caused 2026-08-30: the SearXNG daemon was running against a deleted settings path, and four default general engines are durably blocked. Re-reports add corroboration, not new signal.
 
-Source-characterization task: decide whether a detention-beat Substack ("Eyes on ICE")
+Source-characterization task: decide whether a detention-beat Substack (<outlet-c>)
 deserves lead-source or citation-source status. The decisive evidence came from
 `usaspending`, and the tool performed extremely well on the core job. Three frictions, one
 of them a genuine near-miss.
@@ -1555,10 +1566,10 @@ is the near-miss and the most important item here.
 **Command:** `$CS --wait usaspending "W9124J24C0019" --keywords --count --all-types`
 **Got:** `1 federal awards matching 'W9124J24C0019' | contracts: 1`
 I was verifying a contract ID that a Substack article attributed to <vendor-f>
-LLC (a $1.3B Fort Bliss detention contract). **A count of 1 reads as confirmation.** It was
+LLC (a $1.3B <site-a> detention contract). **A count of 1 reads as confirmation.** It was
 not. Re-running as `--keywords --limit 5` returned:
 ```
-TECHNOLOGY & BUSINESS MANAGEMENT INC. — W9124J24C0019
+<VENDOR-R> — W9124J24C0019
 $3,972,528 | Department of Defense | DEFINITIVE CONTRACT
 ```
 Different company, wrong by ~330x. The article's claim was false, and `--count` alone would
@@ -1569,7 +1580,7 @@ either exists or doesn't, and the whole question is *whose it is*. The docs' gui
 doesn't warn about the distinct hazard that **a precise-looking count of 1 on an identifier
 still tells you nothing about attribution**.
 **Would have helped:** when `--count` matches a small number (≤3) of records, print the
-recipient names inline — `contracts: 1 (TECHNOLOGY & BUSINESS MANAGEMENT INC.)`. That one
+recipient names inline — `contracts: 1 (<VENDOR-R>)`. That one
 change turns a misleading confirmation into an instant refutation at zero extra API cost.
 Alternatively, detect that the query looks like an award/PIID identifier and route to the
 listing rather than the count. **Severity:** slowed for me (I caught it because I was
@@ -1620,7 +1631,7 @@ produced a better version of it.
 `extract --text` reductions were consistently 96.9–98.4% on Substack pages (55K→1.7K,
 82K→1.3K, 49K→1.0K tokens) with nothing load-bearing lost. Substack is heavy chrome and
 this handled it cleanly. Two specific wins: it preserved the **inline citation links**
-inside the article body (New Jersey Monitor, Reuters), which is how I established the piece
+inside the article body (a state news site, Reuters), which is how I established the piece
 was a downstream rewrite rather than original reporting — a summarizer would have dropped
 those. And on the outlet's About page it faithfully preserved the literal string
 `[Image Placeholder: A compelling visual representing themes of justice...]`, i.e. unedited
@@ -1630,7 +1641,7 @@ precisely because it doesn't tidy.** Worth saying out loud, since "it preserves 
 things" is easy to mistake for a defect.
 
 The `*UNIQUE*` marker earned its keep: the single most important lead in the whole task —
-`cantstoppoppin.substack.com/p/victims-or-collaborators`, which carries the outlet's own
+`<outlet-e-domain>/p/<post-slug>`, which carries the outlet's own
 "not verified facts or legal statements" disclaimer — surfaced as a `*UNIQUE*` result at
 position 4 on one engine. Consensus ranking would have buried it, and it's the piece of
 evidence that settled the question in the outlet's own words.
@@ -1643,9 +1654,9 @@ touching a wire archive) would be a real addition for this beat, since "was this
 early or downstream?" is the recurring question in every source-characterization pass, and
 it's the question I most had to answer by eyeball.
 
-## 2026-08-19 · ledger-lead-source-or-refute-the-513m-ice-surveillance-figure · claude-sonnet-5
+## 2026-08-19 · figure-verification task (a surveillance-spending total) · claude-sonnet-5
 
-**Command:** `~/cascade-search/.venv/bin/cascade-search --wait usaspending "<vendor-g>" --sum --from 2025-10-01 --to 2026-08-19`
+**Command:** `cascade-search --wait usaspending "<vendor-g>" --sum --from 2025-10-01 --to 2026-08-19`
 **Expected:** total award value for <vendor-g> awards with action dates in the given FY2026 window.
 **Got:** `$2,764,141,065.30 across 280 awards | complete` — the exact same figure and award count
 as running `--sum` on the same query with no date flags at all. Re-ran it twice (including
@@ -1681,14 +1692,14 @@ PSC `DA01` "IT/Business Application Development Support Services" on a <vendor-h
 both fast, both precise, both load-bearing for distinguishing surveillance-infrastructure
 procurement from generic IT spend without having to read a single procurement document.
 `extract --grep` on the NPR article (46K→~3 tokens) was the single most decisive step in the
-whole task: it definitively established that a ledger story's cited tier-1 source did not
+whole task: it definitively established that a news lead's cited tier-1 source did not
 contain the dollar figure attributed to it, which is a materially different and more useful
 finding than "the web doesn't discuss X" — deterministic grep against the full text is what
 made that a fact rather than a guess.
 
-## 2026-08-19 · verification-sweep-19-near-publication-pieces · claude-sonnet-5
+## 2026-08-19 · verification sweep over near-publication pieces · claude-sonnet-5
 
-**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending "<vendor-e-parent>" --sum --wait`
+**Command:** `cascade-search usaspending "<vendor-e-parent>" --sum --wait`
 **Expected:** either a distinct-entity total for the legal/DBA name "<vendor-e-parent>," or a clear
 signal that this is a keyword match rather than a recipient-name match.
 **Got:** `$3,654,682,628.40 across 283 awards | complete` — presented identically to a clean
@@ -1722,7 +1733,7 @@ between a subsidiary and a parent-company keyword, on contracts, when the parent
 itself a recipient of record.
 `[fixed eef4697 — a --sum/--count whose awards resolve to recipient names other than the one asked for now prints the distinct names found and warns explicitly not to add the total to another vendor's without checking shared award IDs. Verified live on `usaspending "<vendor-h> Technologies" --sum`, which surfaces <VENDOR-H> TECHNOLOGIES INC. + <VENDOR-H> USG INC. Your catch is quoted in the warning text: the $10.7B double-count is named as the reason it exists.]`
 
-**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending --detail 291199463 --wait`
+**Command:** `cascade-search usaspending --detail 291199463 --wait`
 **Expected:** enough detail to confirm which specific program/system an ICE-<vendor-h> award
 funds (I needed to know whether a Sept 2025 $29.9M transaction was a new contract or a
 modification to an existing one).
@@ -1732,7 +1743,7 @@ modification list, no awarding sub-agency name.
 **Friction — `--detail` didn't answer the question it was closest to answering.** I had to
 drop to the raw `api.usaspending.gov/api/v2/awards/<id>/` and
 `api.usaspending.gov/api/v2/search/spending_by_transaction/` endpoints directly via curl to
-get the award `description` field (which is where "INVESTIGATIVE CASE MANAGEMENT (ICM)
+get the award `description` field (which is where "<PROGRAM NAME>
 OPERATIONS AND MAINTENANCE..." actually lives) and the per-transaction modification history
 (which is where I found the $29.9M Sept 25 2025 line item and confirmed it was a
 modification to the *same* award, not a new one). This was the single most load-bearing
@@ -1747,7 +1758,7 @@ contract or a bigger bite of an old one" question — the same shape of question
 down at the transaction layer instead of the recipient layer.
 `[tracked — accepted, unfixed, and the strongest open feature request in this file. --detail returns PSC/NAICS only; the award `description` field is already in the response it parses and would answer most of this for free. The transaction-level list (--transactions) is the other half and serves a recurring question on this beat: is this a new contract or a bigger bite of an old one. You had to drop to raw curl for the single most load-bearing check in the task.]`
 
-**Command:** `~/cascade-search/.venv/bin/cascade-search usaspending "ACADEMI TRAINING CENTER" --sum --wait`
+**Command:** `cascade-search usaspending "<VENDOR-S>" --sum --wait`
 (repeated ~12 times over roughly 5 minutes)
 **Got:** `RateLimited` every time, with the detail line showing a *different* partial-sum
 progress each retry (500 awards/5 pages, then 700/7, then 0/0, then 800/8...) — i.e. another
@@ -1804,8 +1815,8 @@ shape. `record` and the courtlistener cursor paths should be audited for the sam
 "caller passed the human-facing identifier" case before 0.2.
 
 **Worked well.** The `MATCHED 2 DISTINCT RECIPIENT NAMES` warning on `--sum`
-caught a real error during the same tick: a worker reported an Acquisition
-Logistics lifetime total of $938,792,019.07/34 and guessed the variance against
+caught a real error during the same tick: a worker reported a <vendor-f>
+lifetime total of $938,792,019.07/34 and guessed the variance against
 its own $915,073,700.81/33 figure was "a contract added between pulls." It was
 not — the bare-name query spans `<VENDOR-F> LLC` (33 awards) *plus*
 `<VENDOR-F> SUPPORT GROUP` (1 award, $23,718,318.26), and the two sum
@@ -1834,7 +1845,7 @@ writeups.
 
 | # | Claim (as the tool reported it) | Independent recompute | Verdict |
 |---|---|---|---|
-| 1 | `W9124J24C0019` → TECHNOLOGY & BUSINESS MANAGEMENT INC., $3,972,528 | identical | **CONFIRMED** |
+| 1 | `W9124J24C0019` → <VENDOR-R>, $3,972,528 | identical | **CONFIRMED** |
 | 2 | <vendor-f> LLC = $915,073,700.81 / 33 awards, `complete` | $915,073,700.81 / 33 | **CONFIRMED (to the cent)** |
 | 3 | <vendor-a> = $3,298,091.75 / 52 awards | $3,298,091.75 / 52 | **CONFIRMED (to the cent)** |
 | 4 | <vendor-d> = $1,564,745.51 / 15 awards, `complete` | $1,564,745.51 / 15, single recipient <VENDOR-D>, LLC | **CONFIRMED (to the cent)** |
@@ -1860,7 +1871,7 @@ marker are doing real work rather than getting lucky on small result sets.
    TRAINING/CURRICULUM DEVELOPMENT` they did not mention and a NAICS
    `611519 OTHER TECHNICAL AND TRADE SCHOOLS`. The conclusion that the
    government classifies <vendor-d> as a training vendor — which corrected a
-   standing KB judgment — holds more strongly than the worker claimed.
+   standing research judgment — holds more strongly than the worker claimed.
 
 3. **The one reported BUG was real, and its fix is verified independently.**
    The <vendor-g> `--from/--to` case (`--sum` returning an all-time total while
