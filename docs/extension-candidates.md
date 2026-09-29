@@ -229,7 +229,9 @@ source would be, and under what scope.
 
 ---
 
-## Draft issues for approval (not filed)
+## Filed issues (2026-09-29)
+
+Approved and filed: #16 FEC (bulk first), #17 usaspending IDV false absence (bug), #18 CourtListener docket-watch, #19 LDA + congressional disclosures re-probe, #20 state data-broker registries. Drafts kept below for reference.
 
 ### Draft: FEC campaign-finance source, bulk first
 
