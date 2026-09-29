@@ -14,6 +14,18 @@ didn't exist" is worth more than "404 handling is wrong."
 
 Append to `FEEDBACK.md`; never edit someone else's entry.
 
+**Maintainers: triage is not optional bookkeeping.** An untriaged log stops
+being an engine and becomes an archive — and the cost is not abstract. The
+CourtListener soft block was reported on 2026-08-28 with a correct root cause
+and a written spec, went untriaged, and was re-derived from scratch by another
+worker on 09-17 who paid the full diagnostic cost again. By then 31 entries had
+accumulated with no marker, while the file's own header still claimed
+everything was triaged.
+
+Mark entries `[fixed <commit>]`, `[wontfix — reason]`, or `[tracked]`. A
+`[tracked]` costs one line and saves the next worker the whole re-derivation.
+If you cannot fix it, say it is known.
+
 ## The one rule that matters most
 
 **An empty result is never reported as an absence unless it is genuinely one.**
@@ -26,6 +38,24 @@ refuses to construct and downgrades to `RateLimited` — do not work around that
 
 When you add a source, ask what happens when the caller passes a plausible-but-
 wrong identifier. If the answer is "we return an absence," that is a bug.
+
+**The guard only catches dirt you declare.** `verified_absence()` refuses on a
+coverage that *says* an engine failed. It cannot refuse when a source failed and
+built a clean `Coverage` anyway — which is how three false absences shipped with
+the suite green: a WAF challenge read as a document, award rows whose amounts
+wouldn't parse read as no awards, and a cached absence that dropped its own
+caveats. Each one exited 11, which a shell caller reads as publishable.
+
+So: route through `run_source`. Every source that did was correct; the one
+function that re-implemented the shell by hand carried the bug. If you must
+hand-roll, add your entry point to `ENTRY_POINTS` in
+`tests/test_every_source_absence.py` — it sweeps transport failure, rate
+limiting and malformed payloads across all sources, and it is what makes the
+guarantee cover code nobody thought to spot-check.
+
+Ask specifically: *can this source return zero rows for a reason other than the
+corpus being empty?* A parse failure, an unread page, a challenge stub and a
+shape change all look like zero. None of them is an absence.
 
 ## Tests
 

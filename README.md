@@ -79,6 +79,15 @@ The core guarantee, enforced in code: **if any engine was rate-limited or
 errored, a verified absence cannot be constructed.** It downgrades to
 `RateLimited` automatically. That is `test_dirty_coverage_cannot_yield_verified_absence`.
 
+That guard catches coverage a source **declares** dirty. It cannot catch a
+source that failed and didn't notice — which is how three false absences shipped
+with the suite green (an AWS WAF soft block read as a document, unparseable
+award amounts read as no awards, and a cached absence that lost its own scope;
+all fixed, see the 2026-09-19 entry in `FEEDBACK.md`). The generic backstop is
+`tests/test_every_source_absence.py`, which sweeps **every** source entry point
+against transport failure, rate limiting and a malformed payload. Adding a
+source means adding one line to its `ENTRY_POINTS` table.
+
 ## Install
 
 ```bash
@@ -323,6 +332,15 @@ registries. It exists because CAPTCHA-walled public-records UIs frequently sit
 in front of data the same agency publishes ungated elsewhere, and a human with
 a browser is permitted to read those records. It is not a general-purpose
 bypass, and it will not run against a host that is not on the list.
+
+Run `evidence-search hosts` to see the current boundary. Operators extend it in
+`~/.evidence-search/allowed_hosts.json` (or `$EVIDENCE_ALLOWED_HOSTS`) as
+`{"host": "why this is a public record"}` — **the reason is required**, and an
+entry without one is refused, so the list cannot decay into undocumented
+hostnames. The matching rule is unchanged for configured hosts: the boundary is
+the dot, so allowing `sos.example.gov` never allows `evil-sos.example.gov`. A
+malformed config fails closed to the shipped baseline, which a config file can
+extend but never reduce.
 
 **What this does not do:** it does not evade paywalls, forge sessions, rotate
 identity to defeat rate limits, or fetch anything behind a login. When a wall

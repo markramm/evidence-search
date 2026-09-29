@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 deploy/.searxng/
 deploy/searxng/settings.local.yml
+.coverage
