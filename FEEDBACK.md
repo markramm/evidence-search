@@ -2035,3 +2035,82 @@ current?" -- usually the real question on a docket watch.
 **Also useful, unprompted:** the empty-result message on `extract` -- "This is an
 absence IN THIS DOCUMENT ONLY" -- stopped me from over-reading a zero, and
 `--grep` on the docket page hit 97.8-99.9% reduction on a ~184k-token page.
+
+
+## 2026-09-29 · live-story survey (8 investigations, ~35 calls) for docs/extension-candidates.md · claude-opus-5.5
+
+**Command:** `evidence-search --wait usaspending "70CMSW26D00000016" --keywords --count`
+**Expected:** a Hit. The PIID is a multi-award IDIQ that exists (usaspending award 362519505).
+**Got:** `== VerifiedAbsence ==` (exit 11). The ASKED line read `types=A,B,C,D`. `not_searched`
+listed only "awards below the reporting threshold, classified and otherwise unreported spending".
+The same command with `--all-types` returned `== Hit ==`, `idvs: 1`.
+**Friction:** **a certified false negative.** Nothing in the output says IDVs (or grants, loans,
+etc.) were excluded. `types=A,B,C,D` is only readable if you already know the award-type codes.
+The mirror case: `usaspending "<vendor-a>" --count` → `contracts: 1`, while `--all-types` →
+`contracts: 1 | idvs: 1`, a silent undercount on the vendor's only IDIQ.
+**Had to figure out:** that `count()` defaults to `CONTRACT_TYPES`
+(`evidence_search/sources/usaspending.py`, line ~55 / ~378).
+**Would have helped:** (1) `not_searched` names the excluded award groups whenever types is not
+every group; (2) a PIID-shaped query routes on its 9th character (`D` → include IDVs; `R`/`Q` → "a
+solicitation number, never an award ID; try SAM.gov" rather than an absence). `usaspending
+"70CDCR26R00000026" --keywords --count` (an RFP number) also returned VerifiedAbsence: true, and
+meaningless. (3) A regression case in `tests/test_every_source_absence.py`.
+**Severity:** blocked (correctness). A worker following the documented `--count` pattern on an IDIQ
+is handed a publishable-looking negative that is wrong.
+
+**Command:** `evidence-search extract "https://api.open.fec.gov/v1/schedules/schedule_b/?committee_id=<pac-a>&recipient_committee_id=<pac-b>&api_key=DEMO_KEY&per_page=100&sort=disbursement_date" --text`
+**Got:** `== RateLimited ==` (exit 13), `retry after: 34289s`, `detail: HTTP 429`, on the first
+call of the session. The block also printed `source:    docs`.
+**Friction:** (a) The `source: docs` label is wrong for an `extract` of an arbitrary URL; I briefly
+thought I had called the wrong subcommand. (b) This corroborates the 2026-08-28 entry: there is no
+FEC client, and `DEMO_KEY` arrives already spent.
+**What worked instead:** FEC **bulk** files are keyless and fast. `pas2` + `oth` for six cycles
+(9-36 MB each, `https://www.fec.gov/files/bulk-downloads/<year>/{pas2,oth}<yy>.zip`), filtered by
+committee ID, answered "did PAC A give to leadership PAC B, and is the count of N right" in
+minutes. It also caught two things a name search gets wrong: a same-surname candidate in another
+state (distinguished only by committee/candidate ID, and later refunded via a line-16 row), and one
+contribution dated differently by giver and recipient.
+**Would have helped:** an `fec` source built **bulk first** (same local indexer as #3/#5), with the
+API as an optional recency path on a registered key. Drafted in `docs/extension-candidates.md`.
+**Severity:** slowed (answered outside the tool).
+
+**Command:** `evidence-search --wait courtlistener '"<docket-number>"' --type r`, then the same with `--court dcd`
+**Got:** without `--court`, 14 dockets in different districts sharing the number. With `--court dcd`,
+2 results: the case, and a **related case** whose "notice of related case" entry carries the first
+case's number.
+**Worked well:** that second result was new information for the story, and a quoted docket number
+plus `--court` is a cheap related-case finder. `--type r` now prints
+`results: 20 of N total_matches`, which a 2026-09-20 entry said it did not; it looks fixed in the build I ran (the `fix/false-absences` checkout).
+**Friction:** `extract <docket-url> --grep 'MINUTE ORDER|hearing'` truncated each passage at about
+200 characters, which cut the order text mid-sentence. I had to re-run with `--text`, save it, and
+grep by hand to read the entries and find "Answer due for ALL FEDERAL DEFENDANTS by <date>".
+**Would have helped:** the `--docket` mode other entries request, returning full entry text plus the
+`Last Updated` stamp. For a docket-watch negative ("no PI motion as of X"), that stamp *is* the
+scope.
+**Severity:** slowed.
+
+**Command:** `evidence-search --wait extract "https://www.gao.gov/products/<gao-report>" --ids`, then `--browser`
+**Got:** `== AccessBlocker ==` (exit 12), `mechanism: http-403`. With `--browser`: "Host www.gao.gov
+is not on the public-records allow-list."
+**Friction:** GAO reports are legislative-branch public records, the same class as the registries
+already allowed. Two prior passes on this beat hit the same 403 and worked around it with WebFetch +
+pdftotext. The new "add it with a reason" message is clear, and I did not change the local config.
+**Would have helped:** gao.gov in the default allow-list.
+**Severity:** slowed.
+
+**Command:** `evidence-search --wait extract "https://projects.propublica.org/nonprofits/api/v2/search.json?q=<org-name-one-word>"` and `...?q=%22<org name two words>%22`
+**Got:** the one-word spelling returned `total_results: 1`, a different organization in another state.
+The two-word spelling returned 2 EINs and ranked the *wrong* one first.
+**Friction:** none with the tool (`extract` read the JSON fine, exit 0). This is evidence for #4's
+collision warning: a client that took the top hit would attribute grants to the wrong EIN.
+**Severity:** annoyed (no 990 client yet).
+
+**Minor:** `usaspending` has no `--agency`, so "no award from agency X containing 'Y' since D"
+cannot be scoped; I used `--keywords --count --from D` (VerifiedAbsence, FUZZY). The
+earlier `--agency` request in this log still stands. Also, a date-bounded absence ending today does not
+mention reporting lag in `not_searched`.
+
+**Worked well:** `fedreg --agency ... --type ... --from ...` gave clean, countable results for rule
+monitoring (3 and 6 rows, all on point). `web` answered from 81/84 engines with the coverage line
+naming the gaps, and surfaced the regulator's own pages first. `extract --grep` on a
+40,834-token docket page came down to 321 tokens. No gate was needed all session.
