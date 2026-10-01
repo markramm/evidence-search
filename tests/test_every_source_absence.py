@@ -60,6 +60,23 @@ def _docs(**kw):
     return docs.search("anything", **kw)
 
 
+def _lda(**kw):
+    from evidence_search.sources import lda
+    return lda.search(client_name="anything", **kw)
+
+
+def _fec(**kw):
+    import pathlib
+    import tempfile
+    from evidence_search.sources import fec
+    # A FRESH cache dir every call: fec.between() treats an unindexed (base,
+    # cycle) as "not yet read" and goes to fetch it, which is exactly the path
+    # these generic sweeps need to exercise. A shared dir would let one
+    # parametrised call's index satisfy a later one and skip the fetch.
+    cache_dir = pathlib.Path(tempfile.mkdtemp()) / "fec_cache"
+    return fec.between("C0AAAAAAAA", "C0BBBBBBBB", 2008, 2008, cache_dir=cache_dir, **kw)
+
+
 def _usa_search(**kw):
     from evidence_search.sources import usaspending
     return usaspending.search("anything", **kw)
@@ -88,6 +105,8 @@ ENTRY_POINTS = [
     ("propublica_disclosures.search", _propublica),
     ("oscn.search", _oscn),
     ("docs.search", _docs),
+    ("lda.search", _lda),
+    ("fec.between", _fec),
     ("usaspending.search", _usa_search),
     ("usaspending.counts", _usa_counts),
     ("usaspending.dollar_sum", _usa_dollar_sum),
@@ -124,6 +143,11 @@ def test_transport_failure_is_never_an_absence(label, call, monkeypatch):
     # usaspending POSTs through its own helper rather than http.fetch.
     import evidence_search.sources.usaspending as us
     monkeypatch.setattr(us, "_post", lambda p, pl: (None, ("http", "simulated failure")))
+    # fec downloads bulk zips directly rather than going through http.fetch.
+    import evidence_search.sources.fec as fec_src
+    monkeypatch.setattr(fec_src, "_download", lambda base, cycle, cache_dir, timeout=180.0: (
+        None, AccessBlocker(query=f"{base}{cycle}", mechanism=Blocker.SERVER_ERROR,
+                            url="u", detail="simulated transport failure")))
 
     out = call(use_cache=False)
     assert not isinstance(out, VerifiedAbsence), (
@@ -184,6 +208,16 @@ def test_malformed_success_payload_is_never_an_absence(label, call, monkeypatch)
         {"results": [{"Award ID": "W1", "Recipient Name": "ACME",
                       "Award Amount": "5,000,000"}],
          "page_metadata": {"hasNext": False}}, None))
+    # fec: a "downloaded" zip whose lines don't match the declared field shape.
+    import tempfile as _tf
+    import pathlib as _pl
+    import zipfile as _zf
+    import evidence_search.sources.fec as fec_src
+    _gz = _pl.Path(_tf.mkdtemp()) / "garbage.zip"
+    with _zf.ZipFile(_gz, "w") as _z:
+        _z.writestr("itpas2.txt", "not|the|right|shape\n" * 5)
+    monkeypatch.setattr(fec_src, "_download",
+                        lambda base, cycle, cache_dir, timeout=180.0: (_gz, None))
 
     try:
         out = call(use_cache=False)

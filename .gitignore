@@ -9,3 +9,9 @@ deploy/searxng/settings.local.yml
 # Raw field reports: may name subjects, tasks and local paths. Never published;
 # redact before copying anything into the tracked FEEDBACK.md or an issue.
 FEEDBACK.local.md
+
+# FEC bulk-download cache (zips + derived SQLite index). Defaults to
+# ~/.evidence-search/fec_bulk, outside the repo; these patterns are
+# belt-and-suspenders for anyone who points EVIDENCE_FEC_CACHE in-tree.
+fec_bulk/
+.fec_cache/

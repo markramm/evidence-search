@@ -99,6 +99,11 @@ python3 -m venv .venv && ./.venv/bin/pip install -e .
 Retrieved documents are archived to `~/.evidence-search/archive` by default;
 set `EVIDENCE_ARCHIVE` to point it at your own corpus. The call ledger and
 cache live in `~/.evidence-search/store.db`; override with `EVIDENCE_DB`.
+`fec` downloads bulk files and builds its own local SQLite index under
+`~/.evidence-search/fec_bulk`; override with `EVIDENCE_FEC_CACHE`. That cache
+is never committed and is only ever populated by a query that needs it — the
+first `fec` call for a cycle downloads the cycle's `pas2`/`oth`/`cm` files once
+(9-36 MB each); every later query against that cycle answers from the index.
 
 Upgrading from `cascade-search`? If `~/.cascade-search/` is the only one of the
 two that exists, it is used as-is, so an existing ledger, archive and any open
@@ -181,6 +186,8 @@ walk the structure to find what the negative is about.
 | `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — the countable primitive. |
 | `fedreg` | none | 30/min | Federal Register rules/notices/EOs. `count` is a real total. |
 | `crossref` | none | 40/min | Scholarly records. DOI lookup is exact; title search is FUZZY. |
+| `lda` | none | 30/min | Senate LDA lobbying filings (LD-2). `--bill "H.R. 2994"` scans filings for a bill number. |
+| `fec` | none | 30/hr (bulk downloads) | FEC campaign finance, bulk-first local index. `--from-committee`/`--to-committee`/`--cycles`. |
 | `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
 
@@ -450,6 +457,9 @@ a verify-before-citing warning.
 evidence-search crossref 10.1177/10986111251357498   # exact, authoritative
 evidence-search crossref "Forced Science"            # fuzzy, verify the match
 evidence-search fedreg "immigration detention" --type rule
+evidence-search lda --client "Purdue Pharma" --year 2008 --bill "H.R. 2994"
+evidence-search fec --from-committee C00370643 --to-committee C00343863 --cycles 2006-2014
+evidence-search fec --committee "Rogers" --cycles 2008        # warns on multiple IDs
 ```
 
 **`web` is discovery, not census.** Its engines largely ignore quoted phrases,

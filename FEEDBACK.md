@@ -2035,3 +2035,39 @@ current?" -- usually the real question on a docket watch.
 **Also useful, unprompted:** the empty-result message on `extract` -- "This is an
 absence IN THIS DOCUMENT ONLY" -- stopped me from over-reading a zero, and
 `--grep` on the docket page hit 97.8-99.9% reduction on a ~184k-token page.
+
+## 2026-10-01 · building `lda` and `fec` sources (#16, #19) · claude-sonnet-5
+
+**Task:** implement the LDA and FEC sources #16/#19 scoped, following the
+existing `run_source` pattern and the absence invariant.
+
+**Real finding, not a synthetic one: FEC's `pas2` and `oth` bulk extracts are
+NOT disjoint for committee-to-candidate rows.** `pas2` is documented as
+"committee transactions to a candidate" and `oth` as "committee-to-committee";
+the design note in `docs/extension-candidates.md` (and my own first draft)
+assumed they partition cleanly. They do not: a PAC's contribution to a
+candidate committee appears in BOTH files, byte-identical down to `SUB_ID`
+(FEC's own globally unique schedule-line identifier) — verified against five
+real contributions across three cycle files. Summing both files' rows for a
+`committee X -> committee Y` query doubled every dollar figure (five $1,000
+contributions read as $10,000) before `_dedupe_by_sub_id` was added. The
+regression fixture now includes the real duplicate rows specifically so the
+dedup path is exercised, not merely assumed — CONTRIBUTING's point about
+`dollar_sum` shipping green without a test that would have caught it applies
+here too; a fixture that only had the `pas2` side would never have failed.
+
+**Performance note, from indexing real cycles.** A cold index of 3 cycles'
+`pas2`+`oth` (~2M rows) took several minutes with per-row `INSERT` on the
+default SQLite journal; switching to `executemany` + WAL + `synchronous=NORMAL`
+(the same tradeoff `Store()` already makes for its own ledger) was the fix.
+Noted here because "bulk-first" implies a tool a user will actually wait on —
+worth probing if the real index later grows into the multi-cycle, multi-file
+range the issue's "2006-2014" example implies; a 3-cycle index landed north of
+250 MB on disk.
+
+**LDA, by contrast, was clean.** `client_name`/`registrant_name` are confirmed
+case-insensitive substring matches (not exact), which is in the caveat the
+source returns, not a surprise found in the field.
+
+Not re-reporting: the general sources surveyed in `docs/extension-candidates.md`
+(#1-#20) — this entry is additive, about what building two of them turned up.

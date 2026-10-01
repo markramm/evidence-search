@@ -308,6 +308,23 @@ def main(argv=None) -> int:
     fr.add_argument("--limit", "--per-page", type=int, default=20, dest="per_page",
                     help="max results per page (alias: --per-page)")
 
+    fc = sub.add_parser("fec", help="FEC campaign finance (bulk-first, local index)")
+    fc.add_argument("--from-committee", dest="from_committee", help="giving committee ID, e.g. C00370643")
+    fc.add_argument("--to-committee", dest="to_committee", help="receiving committee ID")
+    fc.add_argument("--committee", help="look up committee ID(s) by name (warns on multiple matches)")
+    fc.add_argument("--cycles", help="FEC cycle or range, e.g. '2008' or '2006-2014' (required)")
+    fc.add_argument("--cache-dir", help="local bulk-file cache (default ~/.evidence-search/fec_bulk)")
+    _limit(fc)
+
+    ld = sub.add_parser("lda", help="Senate LDA lobbying filings (LD-2; no key)")
+    ld.add_argument("--client", help="client name (case-insensitive substring match)")
+    ld.add_argument("--registrant", help="registrant/lobbying firm name (substring match)")
+    ld.add_argument("--year", action="append", type=int,
+                    help="filing year; repeat for multiple years (e.g. --year 2008 --year 2009)")
+    ld.add_argument("--bill", help='bill number to find named in a filing, e.g. '
+                                   '"H.R. 2994" or "S. 2160" (spacing/periods normalized)')
+    _limit(ld)
+
     dc = sub.add_parser("docs", help="search a documentation site's index (no key)")
     dc.add_argument("query")
     dc.add_argument("--site", default="claude-code")
@@ -438,6 +455,40 @@ def main(argv=None) -> int:
                                 date_from=a.date_from, date_to=a.date_to,
                                 limit=a.limit, page=a.page, store=store,
                                 limiter=limiter, use_cache=use_cache), a.json)
+
+    if a.cmd == "fec":
+        from pathlib import Path as _Path
+        from .sources import fec as fec_src
+        if not a.cycles:
+            print("fec needs --cycles, e.g. --cycles 2006-2014", file=sys.stderr)
+            return EXIT_USAGE
+        try:
+            c_from, c_to = fec_src.parse_cycle_range(a.cycles)
+        except ValueError as e:
+            print(f"fec: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        cache_dir = _Path(a.cache_dir).expanduser() if a.cache_dir else None
+        if a.committee:
+            return _emit(fec_src.lookup_committee(a.committee, c_from, c_to, store=store,
+                                                  limiter=limiter, cache_dir=cache_dir,
+                                                  use_cache=use_cache), a.json, a.limit)
+        if not a.from_committee or not a.to_committee:
+            print("fec needs --from-committee and --to-committee (or --committee to "
+                  "look up an ID)", file=sys.stderr)
+            return EXIT_USAGE
+        return _emit(fec_src.between(a.from_committee, a.to_committee, c_from, c_to,
+                                     store=store, limiter=limiter, cache_dir=cache_dir,
+                                     use_cache=use_cache), a.json, a.limit)
+
+    if a.cmd == "lda":
+        from .sources import lda as lda_src
+        if not a.client and not a.registrant:
+            print("lda needs --client and/or --registrant", file=sys.stderr)
+            return EXIT_USAGE
+        return _emit(lda_src.search(client_name=a.client, registrant_name=a.registrant,
+                                    years=a.year, bill=a.bill, store=store,
+                                    limiter=limiter, use_cache=use_cache),
+                     a.json, a.limit)
 
     if a.cmd == "crossref":
         from .sources import crossref as cr_src

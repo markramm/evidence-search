@@ -75,6 +75,20 @@ POLICIES: dict[str, Policy] = {
         note="No key, no advertised limit. `count` IS a real total -- the corpus "
              "is a defined body of government documents. 404 means zero results.",
     ),
+    "fec": Policy(
+        windows=[(3600, 30)], min_interval_s=1.0,
+        note="Bulk pas2/oth/cm zips (fec.gov/files/bulk-downloads), 9-36MB each, "
+             "no key, no advertised limit (verified 2026-09-29 -- the OpenFEC "
+             "DEMO_KEY API path is 429'd by the time anyone reaches it). Paced "
+             "per DOWNLOAD, not per query -- once a cycle is indexed locally, "
+             "answering from it spends no budget at all.",
+    ),
+    "lda": Policy(
+        windows=[(60, 30)], min_interval_s=0.5,
+        note="lda.gov/api/v1 (lda.senate.gov 301s here). No key, no advertised "
+             "limit (verified 2026-09-29). Paced like federal_register -- an "
+             "unmetered public API is a courtesy, not a license.",
+    ),
     "docs": Policy(
         windows=[(60, 25)], min_interval_s=0.3,
         note="Documentation llms.txt/sitemap indexes. No key, no search engine.",
