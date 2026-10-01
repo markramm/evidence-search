@@ -1,0 +1,107 @@
+"""Real FEC bulk rows, extracted 2026-09-30 from the published pas2/oth/cm
+cycle files (fec.gov/files/bulk-downloads) with `grep`/`awk` on committee ID --
+no transcription, no synthesized numbers. This is the fixture for the #16
+regression test; nothing in the test suite downloads these files itself.
+
+Committees:
+  C00370643  PURDUE PHARMA INC. POLITICAL ACTION COMMITTEE (PURDUE PAC)
+  C00343863  ROGERS FOR CONGRESS            (Mike Rogers, Michigan -- H0MI08042)
+  C00367862  MIKE ROGERS FOR CONGRESS       (Mike D. Rogers, Alabama -- H2AL03032)
+  C00370791  MAJORITY INITIATIVE TO KEEP ELECTING REPUBLICANS FUND
+             A.K.A MIKE R FUND              (Rogers of Michigan's leadership PAC)
+
+PAS2 (committee -> candidate committee): only the GIVING committee (Purdue PAC)
+files these rows -- verified by querying cmte_id=C00343863/C00367862 with
+other_id=C00370643 in the same cycle files and finding nothing, which is itself
+the "only one side reported" shape `between()` is built to surface.
+
+A finding this fixture exists to pin down: every PAC-to-CANDIDATE row above
+ALSO appears in the SAME cycle's itoth.txt, verbatim down to SUB_ID (FEC's own
+globally unique schedule-line identifier) -- e.g. SUB_ID 4040920081087244249
+is the Rogers-for-Congress $1,000 row in BOTH 2008_pas208/itpas2.txt and
+2008_oth08/itoth.txt. The two bulk extracts are not disjoint. `between()`
+dedupes on SUB_ID (falling back to file:tran_id:image_num) so a committee-to-
+candidate transaction is counted once, not twice. The OTH_LINES entries below
+for the Rogers committees are that duplicate -- real bytes, not synthesized --
+included so the dedup path is exercised, not merely assumed.
+
+OTH (committee -> committee, no candidate on either side): BOTH C00370643 and
+C00370791 separately report the SAME 2006 and 2012 transfers with DIFFERENT
+SUB_IDs/image numbers/transaction IDs -- genuine independent corroboration,
+the "both sides reported" case `between()` is built to surface (and distinct
+from the pas2/oth duplication above, which is the same report counted twice).
+"""
+
+# itpas2.txt, 22 fields: CMTE_ID|AMNDT_IND|RPT_TP|TRANSACTION_PGI|IMAGE_NUM|
+# TRANSACTION_TP|ENTITY_TP|NAME|CITY|STATE|ZIP_CODE|EMPLOYER|OCCUPATION|
+# TRANSACTION_DT|TRANSACTION_AMT|OTHER_ID|CAND_ID|TRAN_ID|FILE_NUM|MEMO_CD|
+# MEMO_TEXT|SUB_ID
+
+# Purdue Pharma PAC (C00370643) -> Rogers for Congress, MI (C00343863):
+# 5 x $1,000, 2005-2010 -- one per cycle file as noted.
+PAS2_LINES = {
+    2006: [
+        "C00370643|N|M7|P|25980561207|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||06132005|1000|C00343863|H0MI08042|SB23.4700|178505|||4071120051059087073",
+    ],
+    2008: [
+        # -> Rogers for Congress, MI (2 contributions this cycle)
+        "C00370643|N|YE|P2008|28930167488|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||12032007|1000|C00343863|H0MI08042|SB23.4889|318083|||4022020081084957002",
+        "C00370643|N|M3|P2008|28930805284|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||02152008|1000|C00343863|H0MI08042|SB23.4901|327259|||4040920081087244249",
+        # -> Mike Rogers for Congress, AL: $1,000 contribution, later refunded.
+        "C00370643|N|M11|P2008|27990936839|24K|CCM|MIKE ROGERS FOR CONGRESS|ANNISTON|AL|36201|||10092007|1000|C00367862|H2AL03032|SB23.4880|311023|||4111920071082458912",
+        "C00370643|N|YE|P2008|28930167486|24K|CCM|MIKE ROGERS FOR CONGRESS|ANNISTON|AL|36201|||12312007|-1000|C00367862|H2AL03032|SA16.4888|318083|||4022020081084919905",
+    ],
+    2010: [
+        "C00370643|N|M4|P|29991985551|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||03272009|1000|C00343863|H0MI08042|SB23.4971|414266|||4042320091114158073",
+        "C00370643|N|Q3|G|10991322698|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||08132010|1000|C00343863|H0MI08042|B344868|499613|||4110520101131243092",
+    ],
+}
+
+# itoth.txt, 21 fields: CMTE_ID|AMNDT_IND|RPT_TP|TRANSACTION_PGI|IMAGE_NUM|
+# TRANSACTION_TP|ENTITY_TP|NAME|CITY|STATE|ZIP_CODE|EMPLOYER|OCCUPATION|
+# TRANSACTION_DT|TRANSACTION_AMT|OTHER_ID|TRAN_ID|FILE_NUM|MEMO_CD|MEMO_TEXT|
+# SUB_ID
+#
+# Purdue Pharma PAC (C00370643) <-> the leadership PAC (C00370791), 2006 and
+# 2012 -- BOTH sides filed their own report of the same $1,000 each time
+# (distinct SUB_IDs: 4080220061067953457 vs 4101920061070459846 in 2006).
+#
+# Plus: the itoth.txt DUPLICATE of every PAS2_LINES row above -- same SUB_ID,
+# same IMAGE_NUM, same TRAN_ID as the pas2 copy -- extracted from the same
+# cycle files to exercise `between()`'s dedup rather than merely assume it.
+OTH_LINES = {
+    2006: [
+        "C00370643|N|M7||26930252075|24K|PAC|MAJORITY INITIATIVE TO KEEP ELECTING REPUBLICANS FUND|WASHINGTON|DC|20035|||06262006|1000|C00370791|SB23.4774|228943|||4080220061067953457",
+        "C00370791|N|Q3||26960496069|18K|COM|PURDUE PHARMA INC. PAC|STAMFORD|CT|06901|||08172006|1000|C00370643|SA11C-1330-1743-C|243272|||4101920061070459846",
+        # duplicate of the 2006 Rogers-MI pas2 row (SUB_ID 4071120051059087073)
+        "C00370643|N|M7|P|25980561207|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||06132005|1000|C00343863|SB23.4700|178505|||4071120051059087073",
+    ],
+    2008: [
+        # duplicates of the 2008 Rogers-MI and Rogers-AL pas2 rows
+        "C00370643|N|M11|P2008|27990936839|24K|CCM|MIKE ROGERS FOR CONGRESS|ANNISTON|AL|36201|||10092007|1000|C00367862|SB23.4880|311023|||4111920071082458912",
+        "C00370643|N|YE|P2008|28930167488|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||12032007|1000|C00343863|SB23.4889|318083|||4022020081084957002",
+        "C00370643|N|YE|P2008|28930167486|24K|CCM|MIKE ROGERS FOR CONGRESS|ANNISTON|AL|36201|||12312007|-1000|C00367862|SA16.4888|318083|||4022020081084919905",
+        "C00370643|N|M3|P2008|28930805284|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||02152008|1000|C00343863|SB23.4901|327259|||4040920081087244249",
+    ],
+    2010: [
+        # duplicates of the 2010 Rogers-MI pas2 rows
+        "C00370643|N|M4|P|29991985551|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||03272009|1000|C00343863|SB23.4971|414266|||4042320091114158073",
+        "C00370643|N|Q3|G|10991322698|24K|CCM|ROGERS FOR CONGRESS|BRIGHTON|MI|48116|||08132010|1000|C00343863|B344868|499613|||4110520101131243092",
+    ],
+    2012: [
+        "C00370643|N|Q2|P2012|12971399699|24K|PAC|MAJORITY INITIATIVE KEEP ELECTING|SPRINGFIELD|VA|22152|||06202012|1000|C00370791|B407370|795192|||4072520121159768845",
+        "C00370791|N|Q2||12952442566|18K|PAC|PURDUE PHARMA INC. PAC|STAMFORD|CT|06901|||06222012|1000|C00370643|SA11C-1330-3516-C|797280|||4080320121160143659",
+    ],
+}
+
+# cm.txt, 15 fields: CMTE_ID|CMTE_NM|TRES_NM|CMTE_ST1|CMTE_ST2|CMTE_CITY|
+# CMTE_ST|CMTE_ZIP|CMTE_DSGN|CMTE_TP|CMTE_PTY_AFFILIATION|CMTE_FILING_FREQ|
+# ORG_TP|CONNECTED_ORG_NM|CAND_ID
+CM_LINES = {
+    2008: [
+        "C00343863|ROGERS FOR CONGRESS|Tillstrom, Valerie|PO Box 581|Post Office Box 581|Brighton|MI|48116|P|H|REP|Q||Vail Conference|H0MI08042",
+        "C00367862|MIKE ROGERS FOR CONGRESS|Rogers, Donna Elizabeth|123 EAST 13TH STREET||Anniston|AL|36201|P|H|REP|Q|||H2AL03032",
+        "C00370643|PURDUE PHARMA INC. POLITICAL ACTION COMMITTEE (PURDUE PAC)|Drelich, Joseph|c/o Henry Shaw CPA P.C.|106 Corporate Park Dr. Suite 307|White Plains|NY|10604|U|Q||M|C|Purdue Pharma Inc.|",
+        "C00370791|MAJORITY INITIATIVE TO KEEP ELECTING REPUBLICANS FUND A.K.A MIKE R FUND|Carlin, Robert|PO Box 2485||Springfield|VA|22152|U|Q||Q||None|",
+    ],
+}

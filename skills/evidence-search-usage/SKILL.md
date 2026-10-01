@@ -79,6 +79,9 @@ $CS oscn --county tulsa --case CF-2013-00001       # one case, archived w/ SHA-2
 $CS propublica "BlackRock"                         # Trump-team disclosures
 $CS fedreg "immigration detention" --type rule     # rules/notices/EOs, real count
 $CS crossref 10.1177/10986111251357498             # exact scholarly record
+$CS lda --client "Purdue Pharma" --year 2008 --bill "H.R. 2994"   # LD-2 naming a bill
+$CS fec --committee "Rogers" --cycles 2008          # resolve a name; warns on multiple IDs
+$CS fec --from-committee C00370643 --to-committee C00343863 --cycles 2006-2014
 $CS docs "prompt caching" --site claude-api        # vendor documentation
 $CS limits                                         # policy + live usage
 $CS gate ui                                        # human gates, in a browser
@@ -128,7 +131,14 @@ that is wrong, which is worse than no number:
 |---|---|
 | `usaspending`, `fedreg` | **yes** — defined corpora, real totals |
 | `courtlistener` | **yes**, if you quote the phrase — read `total_matches` |
-| `crossref`, `web` | **no** — both match loosely; their totals measure nothing |
+| `fec` | **yes** — a committee pair's transactions are a census of what FEC published, not an estimate |
+| `crossref`, `web`, `lda` | **no** — name/text matching is fuzzy; their totals measure nothing |
+
+**`fec`'s first call for a cycle is slow; later ones are not.** It downloads
+that cycle's bulk files (9-36 MB each) and builds a local SQLite index before
+answering — expect it to take noticeably longer than every other source on a
+cold cache. Every later `fec` query against an already-indexed cycle answers
+from disk with no network at all.
 
 **Hit a paywall on a journal article?** `crossref <doi>` returns the
 authoritative record — exact title, journal, year, every author — which is
