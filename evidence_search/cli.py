@@ -706,18 +706,23 @@ def main(argv=None) -> int:
         return 0
 
     if a.cmd == "limits":
-        from .core.limits import POLICIES
+        from .core.limits import POLICIES, effective_policy
         rows = []
-        for name, pol in sorted(POLICIES.items()):
+        for name in sorted(POLICIES):
+            pol, origin = effective_policy(name)
             used = [f"{store.count_calls(name, w)}/{m} per {int(w)}s" for w, m in pol.windows]
             rows.append({"source": name, "windows": used, "cacheable": pol.cacheable,
-                         "index_origin": pol.index_origin, "note": pol.note})
+                         "index_origin": pol.index_origin, "note": pol.note,
+                         "windows_from": origin or "built-in"})
         if a.json:
             print(json.dumps(rows, indent=2))
         else:
             for r in rows:
                 print(f"\n{r['source']}")
                 print(f"  usage:     {', '.join(r['windows'])}")
+                if r["windows_from"] != "built-in":
+                    print(f"  OVERRIDE:  windows set by {r['windows_from']}; "
+                          "the note below describes the built-in policy")
                 print(f"  cacheable: {r['cacheable']}   index: {r['index_origin']}")
                 if r["note"]:
                     print(f"  note:      {r['note']}")

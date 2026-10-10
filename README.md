@@ -320,6 +320,20 @@ would — not to extract at machine speed because it can.
   nothing, from what its behaviour implies: OSCN engages Turnstile after
   roughly ten fetches in a session, so the cap is 8 over a 30-minute window —
   deliberate headroom, not the maximum we could get away with.
+- **A paid tier can be declared.** The built-in ceilings are what a source
+  publishes for everyone. If your account has a higher one, say so in
+  `~/.evidence-search/limits.conf` (or `EVIDENCE_SEARCH_LIMITS_FILE`), one source
+  per line:
+
+  ```
+  courtlistener = 20/min, 250/hr, 1000/day
+  ```
+
+  `EVIDENCE_SEARCH_LIMITS` takes the same text, `;`-separated, and wins over the
+  file. An override replaces the budget windows only; spacing, session caps and
+  backoff stay as built. A line that cannot be read stops the tool instead of
+  falling back, and `evidence-search limits` marks every overridden source. Set
+  a number your account does not have and the source will rate-limit you.
 - **The ledger is shared and reservation is atomic.** Twelve parallel agents
   draw from one budget in a single SQLite ledger with `BEGIN IMMEDIATE`. Fan-out
   cannot be used to multiply your way past a limit, which is the usual way
