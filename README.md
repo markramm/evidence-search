@@ -184,7 +184,10 @@ walk the structure to find what the negative is about.
 | `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
 
-Set `COURTLISTENER_TOKEN` for the authenticated tier.
+Set `COURTLISTENER_TOKEN` for the authenticated tier, or put the token in
+`~/.config/courtlistener/token` (mode 600; `COURTLISTENER_TOKEN_FILE` overrides the
+path). The variable wins when both are set. The file is the one to use for agents
+and scheduled jobs, whose shells do not read your login profile.
 
 ## Browser escalation and humanomation
 

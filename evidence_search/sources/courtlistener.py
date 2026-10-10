@@ -27,8 +27,35 @@ API = "https://www.courtlistener.com/api/rest/v4"
 SOURCE = "courtlistener"
 
 
+def _token_file() -> str:
+    explicit = os.environ.get("COURTLISTENER_TOKEN_FILE")
+    if explicit:
+        return explicit
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "courtlistener", "token")
+
+
+def _token() -> str | None:
+    """The API token: the environment first, then a file.
+
+    The file exists because the variable alone is not enough. A token exported
+    from a shell profile reaches login shells only; agent tool shells, cron and
+    cloud setup scripts start without it, and every call then ran on the
+    anonymous tier while the caller believed it was authenticated (2026-10-10:
+    401s on docket endpoints with a paid membership in place).
+    """
+    tok = (os.environ.get("COURTLISTENER_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        with open(_token_file(), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def _headers():
-    tok = os.environ.get("COURTLISTENER_TOKEN")
+    tok = _token()
     return {"Authorization": f"Token {tok}"} if tok else {}
 
 
