@@ -5,8 +5,11 @@ in production. Discovering them at runtime costs a worker's dispatch cycle.
 """
 from __future__ import annotations
 
+import os
+import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from .store import Store
 
@@ -94,6 +97,101 @@ POLICIES: dict[str, Policy] = {
 DEFAULT_POLICY = Policy(windows=[(60, 20)], min_interval_s=0.5)
 
 
+# --- Account-specific overrides ---------------------------------------------
+#
+# The policies above encode what each source publishes for everyone. Some
+# sources sell a higher tier: a CourtListener membership raises 5/50/125 to
+# 20/250/1,000. Without a way to say so, the limiter refuses calls the account
+# is entitled to, and a paid budget is spent at the free rate.
+#
+# An override replaces a source's budget WINDOWS and nothing else. Spacing,
+# session caps and backoff stay as encoded: those protect the source from us,
+# and no membership changes them.
+
+LIMITS_ENV = "EVIDENCE_SEARCH_LIMITS"
+LIMITS_FILE_ENV = "EVIDENCE_SEARCH_LIMITS_FILE"
+
+_UNITS = {
+    "s": 1, "sec": 1, "second": 1,
+    "min": 60, "minute": 60,
+    "h": 3600, "hr": 3600, "hour": 3600,
+    "d": 86400, "day": 86400,
+}
+_WINDOW = re.compile(r"^(\d+)\s*/\s*(\d*)\s*([a-z]+)$")
+
+
+class LimitsConfigError(ValueError):
+    """An override that cannot be read as written.
+
+    Raised, never skipped. A typo that fell back to the default would run a
+    paid account at the free rate, or the reverse, with nothing to show for it.
+    """
+
+
+def _limits_file() -> Path:
+    explicit = os.environ.get(LIMITS_FILE_ENV)
+    return Path(explicit) if explicit else Path.home() / ".evidence-search" / "limits.conf"
+
+
+def parse_limits(text: str, origin: str) -> dict[str, list[tuple[float, int]]]:
+    """Parse `source = 20/min, 250/hr, 1000/day` lines (or `;`-separated)."""
+    out: dict[str, list[tuple[float, int]]] = {}
+    for raw in re.split(r"[\n;]", text):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise LimitsConfigError(f"{origin}: expected 'source = N/unit, ...', got {line!r}")
+        source, spec = (part.strip() for part in line.split("=", 1))
+        if source not in POLICIES:
+            raise LimitsConfigError(
+                f"{origin}: unknown source {source!r} (known: {', '.join(sorted(POLICIES))})")
+        windows = []
+        for item in spec.split(","):
+            m = _WINDOW.match(item.strip().lower())
+            unit = m.group(3) if m else ""
+            if unit not in _UNITS and unit.endswith("s"):
+                unit = unit[:-1]        # mins, hrs, days
+            if not m or unit not in _UNITS or int(m.group(1)) < 1:
+                raise LimitsConfigError(
+                    f"{origin}: cannot read window {item.strip()!r} for {source} "
+                    "(use e.g. 20/min, 250/hr, 1000/day)")
+            windows.append((float(_UNITS[unit] * int(m.group(2) or 1)), int(m.group(1))))
+        if not windows:
+            raise LimitsConfigError(f"{origin}: no windows given for {source}")
+        out[source] = sorted(windows)
+    return out
+
+
+def load_overrides() -> dict[str, tuple[list[tuple[float, int]], str]]:
+    """{source: (windows, where it came from)}. The variable wins over the file.
+
+    Read on every call: the file is a few bytes, and a long-lived process must
+    not keep spending at a rate its operator has already changed.
+    """
+    found: dict[str, tuple[list[tuple[float, int]], str]] = {}
+    path = _limits_file()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    for source, windows in parse_limits(text, str(path)).items():
+        found[source] = (windows, str(path))
+    for source, windows in parse_limits(os.environ.get(LIMITS_ENV, ""), LIMITS_ENV).items():
+        found[source] = (windows, LIMITS_ENV)
+    return found
+
+
+def effective_policy(source: str) -> tuple[Policy, str | None]:
+    """(policy in force, origin of its windows or None when built in)."""
+    base = POLICIES.get(source, DEFAULT_POLICY)
+    override = load_overrides().get(source)
+    if override is None:
+        return base, None
+    windows, origin = override
+    return replace(base, windows=list(windows)), origin
+
+
 class Limiter:
     """Rate discipline over the SHARED ledger.
 
@@ -113,7 +211,7 @@ class Limiter:
         self.store = store
 
     def policy(self, source: str) -> Policy:
-        return POLICIES.get(source, DEFAULT_POLICY)
+        return effective_policy(source)[0]
 
     def backoff_remaining(self, source: str) -> tuple[float, int, str]:
         """(seconds still to wait, streak length, reason). 0 when clear."""

@@ -33,6 +33,11 @@ def _isolated_state(tmp_path, monkeypatch, request):
     import evidence_search.core.archive as archive_mod
     import evidence_search.core.store as store_mod
 
+    # A developer's own ~/.evidence-search/limits.conf must not change what the
+    # suite asserts about the built-in policies.
+    monkeypatch.setenv("EVIDENCE_SEARCH_LIMITS_FILE", str(tmp_path / "no-limits.conf"))
+    monkeypatch.delenv("EVIDENCE_SEARCH_LIMITS", raising=False)
+
     monkeypatch.setattr(store_mod, "DEFAULT_DB", tmp_path / "store.db")
     monkeypatch.setattr(archive_mod, "DEFAULT_ARCHIVE", tmp_path / "archive")
 
