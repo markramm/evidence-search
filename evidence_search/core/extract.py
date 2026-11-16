@@ -37,7 +37,17 @@ def page_text(html: str, max_chars: int = 0) -> str:
     and carry no information for an investigator.
     """
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "noscript", "svg"]):
+    # <header> is site chrome at the top of a page and the HEADLINE BLOCK inside
+    # an article: <article><header><h1>..</h1><p>By ..</p></header>. Stripping
+    # every <header> removed the headline and byline before grep ran, so a
+    # search for either reported no match in a document that opens with them.
+    # Keep a header that belongs to the content or carries the page's h1.
+    for tag in soup.find_all("header"):
+        if getattr(tag, "decomposed", False):
+            continue
+        if tag.find_parent(["article", "main"]) is None and tag.find("h1") is None:
+            tag.decompose()
+    for tag in soup(["script", "style", "nav", "footer", "aside", "noscript", "svg"]):
         tag.decompose()
     text = soup.get_text("\n")
     text = re.sub(r"[ \t]+", " ", text)

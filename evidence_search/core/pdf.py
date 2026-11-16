@@ -33,6 +33,10 @@ class PdfToolMissing(RuntimeError):
     """A required binary is not installed."""
 
 
+class PdfReadFailed(RuntimeError):
+    """The text layer could not be read -- which is not the same as there being none."""
+
+
 def have(tool: str) -> bool:
     return shutil.which(tool) is not None
 
@@ -45,8 +49,15 @@ def text_layer(path: Path, timeout: int = 120) -> str:
     try:
         r = subprocess.run(["pdftotext", "-layout", str(path), "-"],
                            capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return ""
+    except subprocess.TimeoutExpired as e:
+        # A timeout is a FAILURE to read, not an empty text layer. Returning ""
+        # here made read() conclude "scanned document" and OCR the first 50
+        # pages of a large PDF that had a perfect text layer -- a lossy, capped
+        # read presented as the document, and a grep over it as a negative.
+        raise PdfReadFailed(
+            f"pdftotext timed out after {timeout}s on {path.name}. The text layer "
+            "was NOT read; this says nothing about what the document contains."
+        ) from e
     return r.stdout.decode("utf-8", errors="replace")
 
 

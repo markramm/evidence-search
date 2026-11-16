@@ -210,6 +210,62 @@ def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
     return EXIT_BY_OUTCOME.get(type(outcome), EXIT_INTERNAL_ERROR)
 
 
+#: Below this many characters of VISIBLE text, an HTML page is a stub, and a
+#: grep that finds nothing in it has not read a document. Same threshold, and
+#: the same question, as http._SOFT_BLOCK_PROSE_MIN.
+EXTRACT_MIN_VISIBLE_CHARS = 200
+
+
+def _read_pdf(path, target: str, allow_ocr: bool, max_pages: int, label: str = ""):
+    """Decode a PDF for `extract`: (text, provenance, blocker_or_None).
+
+    One routine for the local and the remote branch. The remote branch used to
+    call pdf.read() bare: no no-text-layer refusal under --no-ocr (so a scanned
+    PDF was grepped as its handful of stray glyphs and reported as "the terms
+    are not in it") and no handling of a missing or timed-out pdftotext.
+    """
+    from .core import pdf as _pdf
+    from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
+
+    def _blocker(tag: str, detail: str):
+        return _AB(query=target, coverage=_Cv(queried=["extract"], errored={"extract": tag}),
+                   mechanism=_B.SERVER_ERROR, url=target, detail=detail)
+
+    try:
+        raw, prov = _pdf.read(path, allow_ocr=allow_ocr, max_pages=max_pages)
+    except _pdf.PdfToolMissing as e:
+        return None, None, _blocker("missing-tool", str(e))
+    except _pdf.PdfReadFailed as e:
+        return None, None, _blocker("pdf-read-failed", str(e))
+
+    if prov["source"] == "none":
+        return None, None, _blocker(
+            "no-text-layer",
+            f"Scanned PDF: only {prov['text_layer_chars']} characters of "
+            "text layer. OCR was disabled (--no-ocr). Re-run without it "
+            "to read this, and treat the result as unverified.")
+
+    if prov["source"] == "ocr" and not raw.strip():
+        return None, None, _blocker(
+            "no-text",
+            f"No text layer ({prov['text_layer_chars']} chars) and OCR of "
+            f"{prov['pages_ocred']} page(s) produced no text. The document was "
+            "NOT read; this says nothing about what it contains.")
+
+    if prov["source"] == "ocr":
+        # Loud, on stderr, every time. An OCR read that a worker
+        # mistakes for verbatim text is the failure this guards.
+        print(f"evidence-search: {label + ' had ' if label else ''}NO TEXT LAYER "
+              f"({prov['text_layer_chars']} chars) -- fell back to OCR. "
+              f"{prov['pages_ocred']} page(s) at {prov['dpi']}dpi"
+              + (f", TRUNCATED at the {prov['page_cap']}-page cap"
+                 if prov.get("truncated") else "")
+              + ".\n  This text is NOT verbatim and has NOT been human-verified. "
+                "Confirm every identifier, docket number and dollar figure against "
+                "the page image before citing.", file=sys.stderr)
+    return raw, prov, None
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="evidence-search",
                                 description="Federated research client with typed outcomes.")
@@ -520,7 +576,6 @@ def main(argv=None) -> int:
             # built to prevent them. Same file by local path found the passage.
             if raw and raw.lstrip()[:5].startswith("%PDF"):
                 import tempfile as _tf
-                from .core import pdf as _pdf
                 # Re-fetch as BYTES. `fetch` decoded the response as text, and
                 # re-encoding that string corrupts the PDF -- enough that a file
                 # with a perfect text layer fell back to OCR. The bytes have to
@@ -532,16 +587,13 @@ def main(argv=None) -> int:
                     _tmp.write(_bin)
                     _tmp_path = _P(_tmp.name)
                 try:
-                    raw, _prov = _pdf.read(_tmp_path, allow_ocr=not a.no_ocr,
-                                           max_pages=a.ocr_pages)
-                    if _prov["source"] == "ocr":
-                        print(f"evidence-search: remote PDF had NO TEXT LAYER "
-                              f"({_prov['text_layer_chars']} chars) -- fell back to OCR, "
-                              f"{_prov['pages_ocred']} page(s). NOT verbatim, NOT "
-                              "human-verified.", file=sys.stderr)
-                    _pdf_provenance = _prov
+                    raw, _prov, _pdf_blocked = _read_pdf(
+                        _tmp_path, a.target, not a.no_ocr, a.ocr_pages, "remote PDF")
                 finally:
                     _tmp_path.unlink(missing_ok=True)
+                if _pdf_blocked:
+                    return _emit(_pdf_blocked, a.json)
+                _pdf_provenance = _prov
         else:
             _path = _P(a.target).expanduser()
             _head = b""
@@ -560,46 +612,39 @@ def main(argv=None) -> int:
             # digits in tables, and a wrong docket number archived with a
             # SHA-256 looks authoritative.
             if _head.startswith(b"%PDF"):
-                from .core import pdf as _pdf
-                try:
-                    raw, _prov = _pdf.read(_path, allow_ocr=not a.no_ocr,
-                                           max_pages=a.ocr_pages)
-                except _pdf.PdfToolMissing as e:
-                    from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
-                    return _emit(_AB(
-                        query=a.target,
-                        coverage=_Cv(queried=["extract"], errored={"extract": "missing-tool"}),
-                        mechanism=_B.SERVER_ERROR, url=a.target, detail=str(e)), a.json)
-
-                if _prov["source"] == "none":
-                    from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
-                    return _emit(_AB(
-                        query=a.target,
-                        coverage=_Cv(queried=["extract"], errored={"extract": "no-text-layer"}),
-                        mechanism=_B.SERVER_ERROR, url=a.target,
-                        detail=(f"Scanned PDF: only {_prov['text_layer_chars']} characters of "
-                                "text layer. OCR was disabled (--no-ocr). Re-run without it "
-                                "to read this, and treat the result as unverified.")), a.json)
-
-                if _prov["source"] == "ocr":
-                    # Loud, on stderr, every time. An OCR read that a worker
-                    # mistakes for verbatim text is the failure this guards.
-                    print(f"evidence-search: NO TEXT LAYER "
-                          f"({_prov['text_layer_chars']} chars) -- fell back to OCR. "
-                          f"{_prov['pages_ocred']} page(s) at {_prov['dpi']}dpi"
-                          + (f", TRUNCATED at the {_prov['page_cap']}-page cap"
-                             if _prov.get("truncated") else "")
-                          + ".\n  This text is NOT verbatim and has NOT been human-verified. "
-                            "Confirm every identifier, docket number and dollar figure against "
-                            "the page image before citing.", file=sys.stderr)
+                raw, _prov, _pdf_blocked = _read_pdf(
+                    _path, a.target, not a.no_ocr, a.ocr_pages)
+                if _pdf_blocked:
+                    return _emit(_pdf_blocked, a.json)
                 _pdf_provenance = _prov
             else:
                 raw = _path.read_text(errors="replace")
-        is_html = is_url or a.target.endswith((".html", ".htm"))
+        # A decoded PDF is text, wherever it came from. Treating a remote one
+        # as HTML ran its text through an HTML parser before the grep.
+        is_html = (is_url or a.target.endswith((".html", ".htm"))) and not _pdf_provenance
 
         payload = {}
         if a.grep:
             payload["matches"] = _x.grep(raw, a.grep, is_html=is_html)
+            _found = [m for m in payload["matches"] if m["pattern"] != "__truncated__"]
+            _visible = len(_x.page_text(raw)) if is_html else len(raw.strip())
+            if not _found and is_html and _visible < EXTRACT_MIN_VISIBLE_CHARS:
+                # A NEGATIVE needs a document. Incapsula and Akamai answer with
+                # a 200 and a page of script; so does any wall whose signature
+                # is not known yet. "The document was read, the terms are not
+                # in it" was printed over exactly those.
+                from .core.results import AccessBlocker as _AB, Blocker as _B, Coverage as _Cv
+                return _emit(_AB(
+                    query=a.target,
+                    coverage=_Cv(queried=["extract"], errored={"extract": "no-visible-text"}),
+                    mechanism=_B.SERVER_ERROR, url=a.target,
+                    detail=(f"Only {_visible} characters of visible text were served "
+                            f"({len(raw):,} characters fetched). That is too little to "
+                            "be the document: a stub, a script-rendered page or an "
+                            "unrecognised wall. NO MATCHES here is NOT an absence. "
+                            "Run with --text to see what was served."
+                            + ("" if (not is_url or a.browser) else
+                               " Then retry with --browser."))), a.json)
         if a.ids:
             payload["identifiers"] = _x.identifiers(raw, is_html=is_html)
         if a.tables:
@@ -635,8 +680,10 @@ def main(argv=None) -> int:
                 # the opposite. Reported twice by workers; it nearly produced a
                 # wrong conclusion on an attorney-of-record question.
                 pats = ", ".join(repr(x) for x in (a.grep or []))
-                print(f"  NO MATCHES for {pats} in {stats['raw_tokens_est']:,} tokens "
-                      "of text.\n  This is an absence IN THIS DOCUMENT ONLY -- the "
+                # The size of the TEXT that was searched, not of the raw HTML:
+                # a 40KB page of script used to read as "10,000 tokens of text".
+                print(f"  NO MATCHES for {pats} in {max(1, _visible // _x.CHARS_PER_TOKEN):,} tokens "
+                      "of visible text.\n  This is an absence IN THIS DOCUMENT ONLY -- the "
                       "document was read, the terms are not in it.")
             for m in payload.get("matches", []):
                 if m["pattern"] == "__truncated__":
