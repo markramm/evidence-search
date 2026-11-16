@@ -56,7 +56,10 @@ def test_absence_from_cache_reports_cache_age(monkeypatch):
     s = _store()
     key = __import__("evidence_search.core.store", fromlist=["cache_key"]).cache_key(
         "news_rss", "nothing here")
-    s.put(key, "news_rss", [], ttl_s=3600)
+    # A cached absence is only replayable with the shape marker it rests on.
+    from evidence_search.core.results import absence_meta
+    s.put(key, "news_rss", [], ttl_s=3600,
+          meta=absence_meta([], ["x"], ["y"], "rss channel with no items"))
 
     out = news_rss.search("nothing here", s, None, True)
     assert isinstance(out, VerifiedAbsence)

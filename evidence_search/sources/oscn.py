@@ -53,6 +53,12 @@ CASE_RE = re.compile(r"\b([A-Z]{2,3}-\d{4}-\d{5})\b")
 
 
 def _no_records(html: str) -> bool:
+    """OSCN's own sentence for an empty docket search -- the positive marker.
+
+    It is the ONLY route to an absence for this source: a page with no case
+    links and without this sentence (a challenge page served with a 200, a
+    redesign) is refused by run_source rather than read as "no filings".
+    """
     return "Found No Records" in html
 
 

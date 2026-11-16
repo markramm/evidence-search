@@ -40,7 +40,12 @@ _SIGNATURES = [
                 r'|challenges\.cloudflare\.com'
                 r'|data-sitekey=["\'][^"\']*["\'][^>]*turnstile', re.I), Blocker.TURNSTILE),
     (re.compile(r"cf-browser-verification|managed challenge|challenge-platform"
-                r"|checking your browser before accessing", re.I), Blocker.CLOUDFLARE),
+                r"|checking your browser before accessing"
+                # The interstitial's own copy, as served to OSCN callers with a
+                # 200: none of the widget markers above appear in it.
+                r"|verifying you are human\. this may take a few seconds"
+                r"|needs to review the security of your connection", re.I),
+     Blocker.CLOUDFLARE),
     (re.compile(r'class=["\'][^"\']*g-recaptcha'
                 r'|www\.google\.com/recaptcha/api2/'
                 r'|grecaptcha\.(?:render|execute|enterprise)', re.I), Blocker.RECAPTCHA),
@@ -49,6 +54,28 @@ _SIGNATURES = [
                 r'|["\']?dd_cookie|window\.__dd|datadome[-_]?(?:captcha|challenge)', re.I),
      Blocker.DATADOME),
 ]
+
+#: A challenge page's <title>. Unlike the body signatures this is checked with
+#: no prose ceiling: the title is the interstitial naming itself, and a padded
+#: challenge page (the OSCN one runs past 3000 visible characters) otherwise
+#: skipped every signature and was parsed as a results page with no rows.
+_CHALLENGE_TITLE = re.compile(
+    r"<title>\s*(?:just a moment\.\.\.|attention required!\s*\|\s*cloudflare)\s*</title>",
+    re.I)
+
+#: Imperva/Incapsula. The resource script alone is furniture -- protected sites
+#: inject it into pages they DO serve -- so it counts only on a page with no
+#: content (see detect_blocker). The incident sentence is the block page itself.
+_INCAPSULA_SCRIPT = re.compile(r"/_Incapsula_Resource\?", re.I)
+_INCAPSULA_BLOCK = re.compile(
+    r"Request unsuccessful\.\s*Incapsula incident ID|"
+    r"_Incapsula_Resource\?[^\"'>]*incident_id=", re.I)
+
+#: Akamai's edge refusal: the title, its sentence, and its reference number or
+#: error host together. "Access Denied" alone is an English phrase.
+_AKAMAI_DENIED = re.compile(
+    r"<title>\s*Access Denied\s*</title>.*?You don't have permission to access"
+    r".*?(?:Reference\s*(?:&#35;|#)\s*[\w.]+|errors\.edgesuite\.net)", re.I | re.S)
 
 #: Text that survives tag-stripping. A challenge interstitial is mostly widget
 #: and little prose; a served record page is the reverse. Cloudflare's "Sorry,
@@ -109,6 +136,15 @@ def detect_blocker(status: int, body: str, headers: dict | None = None) -> Block
             if pattern.search(head):
                 challenged = mech
                 break
+    if challenged is None and _CHALLENGE_TITLE.search(head):
+        challenged = Blocker.CLOUDFLARE
+    if challenged is None and (
+            _INCAPSULA_BLOCK.search(head)
+            or (_INCAPSULA_SCRIPT.search(head)
+                and _visible_len(body) < _SOFT_BLOCK_PROSE_MIN)):
+        challenged = Blocker.IMPERVA
+    if challenged is None and _AKAMAI_DENIED.search(head):
+        challenged = Blocker.AKAMAI
 
     # A named mechanism outranks the status. 403 is the NORMAL status for a
     # Cloudflare wall, and only the named mechanisms set escalate_to_browser --
@@ -124,6 +160,12 @@ def detect_blocker(status: int, body: str, headers: dict | None = None) -> Block
         return Blocker.AUTH_WALL
     if status >= 500:
         return Blocker.SERVER_ERROR
+    # Every other non-2xx is a blocker too. Only 401/403/404/5xx used to be,
+    # so a 400 carrying {"detail": "Invalid cursor"} flowed on as content,
+    # parsed to zero rows and was certified -- and cached -- as an absence. A
+    # source for which some status IS an answer says so (run_source answer_on).
+    if not 200 <= status < 300:
+        return Blocker.HTTP_STATUS
     # A near-empty body with script tags and no text is an SPA shell.
     #
     # Thresholds are tuned against the shells observed 2026-08-19 (SAM.gov

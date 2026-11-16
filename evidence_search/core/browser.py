@@ -57,9 +57,18 @@ ALLOWED_HOSTS = {
 }
 
 # Signals that a human gate is on screen and no amount of waiting will clear it.
+#
+# "Verifying you are human" and the "Just a moment..." title are the Cloudflare
+# interstitial's own wording. The first cut matched only "verify you are
+# human", so that page came back from here as HTML, parsed to no rows, and was
+# cached as a 24h absence.
 _HUMAN_GATE = re.compile(
-    r"(verify you are human|i'm not a robot|select all images|"
-    r"complete the security check|press and hold)", re.I)
+    r"(verify(?:ing)? (?:that )?you are (?:a )?human|i'm not a robot|select all images|"
+    r"complete the security check|press and hold|"
+    r"needs to review the security of your connection|"
+    r"checking your browser before accessing|"
+    r"<title>\s*just a moment)", re.I)
+_GATE_TITLE = re.compile(r"turnstile|just a moment|attention required", re.I)
 
 
 #: Operator-supplied additions: {host: reason}. JSON, at $EVIDENCE_ALLOWED_HOSTS
@@ -178,7 +187,7 @@ def fetch(url: str, *, source: str, query: str = "", wait_ms: int = 3500,
             mechanism=Blocker.SERVER_ERROR, url=url, detail=f"{type(e).__name__}: {e}")
 
     # Did a human-solvable gate survive the wait?
-    if _HUMAN_GATE.search(html[:20000]) or "Turnstile" in title:
+    if _HUMAN_GATE.search(html[:20000]) or _GATE_TITLE.search(title or ""):
         token = ""
         if store:
             token = store.create_job(source, "awaiting_human", {

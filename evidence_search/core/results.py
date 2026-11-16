@@ -30,6 +30,11 @@ class Blocker(str, Enum):
     AWS_WAF = "aws-waf-challenge"                 # CourtListener, site-wide from 2026-08-28
     NOT_FOUND = "http-404"
     SERVER_ERROR = "http-5xx"
+    # Added 2026-11-16 from a code review, not from production sightings.
+    # Any other non-2xx: a 400 with a JSON error body used to pass as content.
+    HTTP_STATUS = "http-unexpected-status"
+    IMPERVA = "imperva-incapsula"                 # 200 stub carrying only the challenge script
+    AKAMAI = "akamai-access-denied"               # 200/403 "Access Denied ... Reference #"
     WRONG_ID_TYPE = "wrong-identifier-type"       # caller-side: right corpus, wrong key
 
 
@@ -268,7 +273,7 @@ class AccessBlocker(Outcome):
         # Mechanisms a real browser can plausibly get past (spec 3a).
         self.escalate_to_browser = self.mechanism in {
             Blocker.CLOUDFLARE, Blocker.TURNSTILE, Blocker.RECAPTCHA,
-            Blocker.DATADOME, Blocker.JS_ONLY, Blocker.AWS_WAF,
+            Blocker.DATADOME, Blocker.JS_ONLY, Blocker.AWS_WAF, Blocker.IMPERVA,
         }
 
     @property
@@ -342,9 +347,29 @@ def verified_absence(query: str, coverage: Coverage, searched: str,
                            caveats=caveats or [])
 
 
+def absence_meta(probes: "list[Probe]", not_searched: list[str] | None,
+                 caveats: list[str] | None, shape_verified: str) -> dict:
+    """The sidecar stored with a cached absence.
+
+    `shape_verified` names the positive marker the response carried. A cached
+    empty result without it is not replayed -- see replay_cached.
+    """
+    if not shape_verified:
+        raise ValueError("a cached absence must name the shape marker it rests on")
+    return {"probes": [asdict(p) for p in probes],
+            "not_searched": list(not_searched or []),
+            "caveats": list(caveats or []),
+            "shape_verified": shape_verified}
+
+
 def replay_cached(query: str, rows, fetched_at: float, *, source: str,
                   searched: str, index_origin: str = "n/a", meta: dict | None = None):
     """Rebuild an outcome from cache, disclosing that it IS from cache.
+
+    Returns None for a cached EMPTY result that carries no `shape_verified`
+    marker. Such a row was written when zero parsed rows was enough to cache
+    an absence, so it may record an error body or a challenge page; the caller
+    treats None as a cache miss and asks the source again.
 
     Every source previously synthesised a clean Coverage at read time, which
     asserted responsiveness that was never re-tested and dated the finding
@@ -365,6 +390,8 @@ def replay_cached(query: str, rows, fetched_at: float, *, source: str,
     # question, same exit 11, materially weaker sentence -- and the caveat is
     # exactly what the README says keeps a published claim defensible.
     m = meta or {}
+    if not m.get("shape_verified"):
+        return None
     return verified_absence(
         query, cov, f"{searched} [cached, established {when}]",
         probes=[Probe(**p) for p in m.get("probes", [])],

@@ -11,7 +11,7 @@ from xml.etree import ElementTree as ET
 
 from ..core.limits import Limiter
 from ..core.results import Result
-from ..core.source import run_source
+from ..core.source import RecognizedEmpty, run_source
 from ..core.store import Store
 
 ENDPOINT = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
@@ -40,8 +40,18 @@ def _parse(body: str) -> list[Result]:
     except ET.ParseError as e:
         raise ValueError(f"bad RSS/XML: {e}") from e
 
+    # The feed must be a feed. Well-formed XML that is not <rss><channel> -- an
+    # error document, an XHTML consent or challenge page -- has no <item>s
+    # either, and that used to be an absence of news.
+    channel = root.find("channel") if root.tag == "rss" else None
+    if channel is None:
+        raise ValueError(f"not an RSS feed (root <{root.tag}>, no <channel>)")
+    items = channel.findall("item")
+    if not items:
+        return RecognizedEmpty("rss channel with no items")
+
     out = []
-    for it in root.findall(".//item"):
+    for it in items:
         def txt(tag):
             el = it.find(tag)
             return el.text if el is not None and el.text else ""
@@ -68,4 +78,17 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
         searched="google-news-rss",
         parse=_parse, store=store, limiter=limiter, use_cache=use_cache,
         index_origin=INDEX_ORIGIN, ttl_s=3600,
+        # An empty feed is an absence from ONE news index's search feed, and
+        # used to be reported with no caveats at all ("Not found").
+        exact_match_supported=False,
+        corpus=("Google News RSS search feed: one page of recent news items, "
+                "from the publishers Google News indexes."),
+        not_searched=["the general web (use `web`)",
+                      "publishers Google News does not index",
+                      "older coverage outside what the feed returns",
+                      "court, contract and disclosure records"],
+        caveats=["DISCOVERY tier: one news index, one page of its feed, with "
+                 "Google's own query interpretation. No news in this feed is not "
+                 "'no coverage exists'; do not publish it as an absence without "
+                 "a second source."],
     )

@@ -44,7 +44,7 @@ from urllib.parse import quote
 from ..core.http import fetch
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
-                            Result, replay_cached, verified_absence)
+                            Result, absence_meta, replay_cached, verified_absence)
 from ..core.store import CachePoisoned, Store, cache_key, normalize_url
 
 SOURCE = "searxng"
@@ -97,32 +97,41 @@ _BLOCK_SIGNALS = (
 _CONFIG_TTL = 3600
 
 
-def _enabled_engines(base: str, store: Store) -> list[str]:
-    """Engines the instance will actually query. Cached: it changes at deploy time.
+def _enabled_engines(base: str, store: Store, categories: str = "") -> list[str]:
+    """Engines the instance will query FOR THESE CATEGORIES. Cached: it changes
+    at deploy time.
 
     Without this the results array alone cannot distinguish "nobody found it"
     from "nobody was asked".
+
+    The roster is filtered to the requested categories. It used to be every
+    enabled engine on the instance, so a `general` search with nothing found
+    reported "across N engines" counting the music, science and map engines
+    that were never asked -- and counted each of them as having answered.
+    An engine whose config entry lists no categories is kept: we cannot show
+    it was not asked.
     """
-    # v2: the namespacing change altered the SHAPE of this cached value, and a
-    # stale v1 entry (bare engine names) silently broke the responsive-count
-    # arithmetic -- 82/82 responsive while two engines were failing. Version the
-    # key so a format change can never be served a stale entry.
-    key = cache_key(f"{SOURCE}:config:v2", base)
-    hit = store.get(key)
-    if hit is not None:
-        return hit
-    body, blocked = fetch(f"{base}/config", source=SOURCE, query="config")
-    if blocked or not body:
-        return []
-    try:
-        cfg = json.loads(body)
-    except json.JSONDecodeError:
-        return []
-    names = sorted(f"searxng:{e['name']}" for e in cfg.get("engines", []) if e.get("enabled", True))
-    # The engine roster is bookkeeping, not results: a metered policy must not
-    # cost us a /config fetch on every single search.
-    store.put(key, SOURCE, names, ttl_s=_CONFIG_TTL, is_metadata=True)
-    return names
+    # v3: the value is now {engine: [categories]}. As with v2 (namespacing),
+    # the key is versioned so a format change is never served a stale entry.
+    key = cache_key(f"{SOURCE}:config:v3", base)
+    roster = store.get(key)
+    if not isinstance(roster, dict):
+        body, blocked = fetch(f"{base}/config", source=SOURCE, query="config")
+        if blocked or not body:
+            return []
+        try:
+            cfg = json.loads(body)
+            roster = {f"searxng:{e['name']}": list(e.get("categories") or [])
+                      for e in cfg.get("engines", []) if e.get("enabled", True)}
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            return []
+        # The engine roster is bookkeeping, not results: a metered policy must
+        # not cost us a /config fetch on every single search.
+        store.put(key, SOURCE, roster, ttl_s=_CONFIG_TTL, is_metadata=True)
+    wanted = {c.strip().lower() for c in (categories or "").split(",") if c.strip()}
+    return sorted(name for name, cats in roster.items()
+                  if not wanted or not cats
+                  or wanted & {str(c).lower() for c in cats})
 
 
 def _classify(errors: list) -> tuple[list[str], dict[str, str], list[str]]:
@@ -200,10 +209,17 @@ def search(query: str, categories: str = "general", pageno: int = 1,
 
     key = cache_key(SOURCE, query, categories=categories, pageno=pageno, base=base)
     if use_cache:
-        entry = store.get_entry(key)
+        entry = store.get_entry(key, with_meta=True)
         if entry is not None:
-            return replay_cached(query, entry[0], entry[1], source=SOURCE,
-                                 searched=f"searxng ({categories})", index_origin="mixed")
+            # With its sidecar: a replayed absence used to come back as a bare
+            # "Not found", without the DISCOVERY-tier caveat the first answer
+            # carried. None means a cached empty result with no shape marker
+            # (written before one was required); ask again.
+            replayed = replay_cached(query, entry[0], entry[1], source=SOURCE,
+                                     searched=f"searxng ({categories})",
+                                     index_origin="mixed", meta=entry[2])
+            if replayed is not None:
+                return replayed
 
     allowed, retry, why = limiter.reserve(SOURCE)
     if not allowed:
@@ -240,13 +256,25 @@ def search(query: str, categories: str = "general", pageno: int = 1,
                     "format DISABLED; add `formats: [html, json]` under `search:` "
                     "in settings.yml."))
 
+    # The results array must BE there. A JSON body without one ({"error": ...},
+    # a proxy's own reply) is not a search that found nothing.
+    rows = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return AccessBlocker(
+            query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
+            mechanism=Blocker.SERVER_ERROR, url=url,
+            detail=("payload shape changed (no `results` list in the instance's "
+                    "JSON) -- NOT an absence."))
+
     rate_limited, errored, unclassified = _classify(data.get("unresponsive_engines"))
-    enabled = _enabled_engines(base, store)
+    enabled = _enabled_engines(base, store, categories)
     failed = set(rate_limited) | set(errored)
     # Fall back to the engines that actually returned rows if /config is
-    # unavailable -- degraded, but never silently optimistic.
-    queried = enabled or sorted({f"searxng:{e}" for r in data.get("results", [])
-                                 for e in (r.get("engines") or [])} | failed)
+    # unavailable -- degraded, but never silently optimistic. An engine that
+    # failed was asked, whatever the roster says.
+    queried = (sorted(set(enabled) | failed) if enabled else
+               sorted({f"searxng:{e}" for r in rows if isinstance(r, dict)
+                       for e in (r.get("engines") or [])} | failed))
     responsive = [e for e in queried if e not in failed]
 
     cov = Coverage(queried=queried, responsive=responsive,
@@ -266,7 +294,9 @@ def search(query: str, categories: str = "general", pageno: int = 1,
     # list is evidence, and unique_to_engine is computed from it.
     out = []
     by_url: dict[str, Result] = {}
-    for r in data.get("results", []):
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
         engines = sorted(r.get("engines") or ([r["engine"]] if r.get("engine") else []))
         # `positions` is a list of ranks and `engines` a set of names; they are
         # parallel only by convention, so pair them positionally and only when
@@ -303,11 +333,44 @@ def search(query: str, categories: str = "general", pageno: int = 1,
         by_url[norm] = item
         out.append(item)
 
+    absence_probes = [Probe(
+        source=f"searxng:{categories}", endpoint=url, query=query,
+        params={"categories": categories, "pageno": pageno},
+        corpus=f"{len(queried)} upstream web engines, mixed indexes",
+        result_count=0, exact_match_supported=EXACT_PHRASE_SUPPORTED,
+        at=time.time())]
+    absence_not_searched = ["anything the upstream engines do not index",
+                            "paywalled, login-gated, and robots-excluded pages"]
+    absence_caveats = [
+        "DISCOVERY tier: the engines do not reliably honour quoted phrases and "
+        "SearXNG exposes no per-engine flag saying which do, so this negative is "
+        "materially weaker than one from a corpus with known query semantics. "
+        "Do not publish it as an absence without a second, exact-matched source.",
+        "SearXNG reports an engine that was blocked upstream and returned an "
+        "empty list the same way as one that found nothing, unless the instance "
+        "lists it as unresponsive. 'Every engine answered' means 'none was "
+        "reported failing'."]
+    if pageno > 1:
+        absence_caveats.append(
+            f"This is page {pageno}. An empty page past the first is the end of "
+            "the results, not an absence -- page 1 answers whether anything matched.")
+    if rows and not out:
+        # Rows were sent and none could be read.
+        return AccessBlocker(
+            query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
+            mechanism=Blocker.SERVER_ERROR, url=url,
+            detail=(f"payload shape changed ({len(rows)} result row(s), none "
+                    "readable) -- NOT an absence."))
+
     if use_cache and cov.is_clean:
         # Only cache a CLEAN sweep. Caching a partial one would replay a
-        # degraded search as though every engine had answered.
+        # degraded search as though every engine had answered. An empty one
+        # is stored with its scope, so the replay states the same limits.
         try:
-            store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=3600)
+            store.put(key, SOURCE, [x.__dict__ for x in out], ttl_s=3600,
+                      meta=None if out else absence_meta(
+                          absence_probes, absence_not_searched, absence_caveats,
+                          "results: []"))
         except CachePoisoned as e:
             # Refusing to cache is right, but the caller still asked a question:
             # serve this run and let the next call re-fetch. This must NOT touch
@@ -321,15 +384,6 @@ def search(query: str, categories: str = "general", pageno: int = 1,
         # rather than letting it read like a corpus-backed absence.
         return verified_absence(
             query, cov, f"searxng ({categories}) across {len(queried)} engines",
-            probes=[Probe(source=f"searxng:{categories}", endpoint=url, query=query,
-                          params={"categories": categories, "pageno": pageno},
-                          corpus=f"{len(queried)} upstream web engines, mixed indexes",
-                          result_count=0, exact_match_supported=EXACT_PHRASE_SUPPORTED,
-                          at=time.time())],
-            not_searched=["anything the upstream engines do not index",
-                          "paywalled, login-gated, and robots-excluded pages"],
-            caveats=["DISCOVERY tier: the engines do not reliably honour quoted phrases and "
-                     "SearXNG exposes no per-engine flag saying which do, so this negative is "
-                     "materially weaker than one from a corpus with known query semantics. "
-                     "Do not publish it as an absence without a second, exact-matched source."])
+            probes=absence_probes, not_searched=absence_not_searched,
+            caveats=absence_caveats)
     return Hit(query=query, coverage=cov, results=out)

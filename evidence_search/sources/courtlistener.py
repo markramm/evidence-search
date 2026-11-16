@@ -20,7 +20,7 @@ from ..core.archive import archive
 from ..core.http import fetch
 from ..core.limits import Limiter
 from ..core.results import Coverage, Hit, RateLimited, Result
-from ..core.source import run_source
+from ..core.source import RecognizedEmpty, json_rows, run_source
 from ..core.store import Store
 
 API = "https://www.courtlistener.com/api/rest/v4"
@@ -75,10 +75,19 @@ def _parse(body: str, query: str = "", store=None) -> list[Result]:
     except json.JSONDecodeError as e:
         raise ValueError(f"non-JSON response (auth wall or throttle): {e}") from e
 
+    # `results` must be there and be a list. An error body ({"detail": ...})
+    # has neither, and a `count` of 155 beside an empty page is a cursor or
+    # paging failure -- json_rows refuses both rather than letting them read
+    # as "no dockets".
+    rows = json_rows(data, "results", total_key="count")
+    if isinstance(rows, RecognizedEmpty):
+        return rows
     total = data.get("count")
-    returned = len(data.get("results", []))
+    returned = len(rows)
     out = []
-    for r in data.get("results", []):
+    for r in rows:
+        if not isinstance(r, dict):
+            raise ValueError(f"a result row is {type(r).__name__}, not an object")
         # RECAP rows carry `docket_absolute_url`; opinion rows carry
         # `absolute_url`. Taking only the latter emitted an empty url for every
         # RECAP hit while `docket_id` -- everything needed to build the link --

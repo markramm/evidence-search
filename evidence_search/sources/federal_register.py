@@ -18,8 +18,8 @@ import json
 from urllib.parse import urlencode
 
 from ..core.limits import Limiter
-from ..core.results import Blocker, Coverage, Result, verified_absence
-from ..core.source import run_source
+from ..core.results import Blocker, Result
+from ..core.source import RecognizedEmpty, Unanswerable, run_source
 from ..core.store import Store
 
 SOURCE = "federal_register"
@@ -50,8 +50,29 @@ def _parse(body: str, query: str, page: int, store) -> list[Result]:
         # that a thing does not exist.
         raise ValueError(f"non-JSON response: {e}") from e
 
-    total = data.get("count") or 0
-    rows = data.get("results") or []
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+    # `count` is the positive marker: every search response carries it, and an
+    # error body ({"errors": ...}) does not. `results` may be omitted when the
+    # count is zero, so its absence alone is not treated as a shape change.
+    total = data.get("count")
+    rows = data.get("results")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ValueError(f"`results` is {type(rows).__name__}, not a list")
+    if not rows:
+        if isinstance(total, bool) or not isinstance(total, int):
+            raise ValueError(
+                "no rows and no integer `count` in response "
+                f"(keys: {', '.join(sorted(map(str, data))) or 'none'})")
+        if total > 0:
+            raise Unanswerable(
+                f"the Federal Register reports {total} matching documents but page "
+                f"{page} carries none -- a page past the end, NOT an absence. "
+                "Re-run with --page 1.")
+        return RecognizedEmpty("count: 0")
+    total = total or 0
     out = []
     for r in rows:
         agencies = [a.get("name") for a in (r.get("agencies") or []) if a.get("name")]
@@ -85,21 +106,22 @@ def _parse(body: str, query: str, page: int, store) -> list[Result]:
     return out
 
 
-def _absence_on_404(query: str):
-    """The API 404s a zero-result search instead of returning an empty list.
-
-    That is an ABSENCE, not a wall, and conflating them would be exactly the
-    error this package exists to prevent. Every other status stays a blocker --
-    a transient 503 was observed live mid-session.
-    """
-    def handler(blocked, body):
-        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
-            return verified_absence(
-                query,
-                Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                f"federal register: no documents matching {query!r}")
-        return None
-    return handler
+#: The API 404s a zero-result search instead of returning an empty list.
+#:
+#: That is an ABSENCE, not a wall, and conflating them would be exactly the
+#: error this package exists to prevent. Every other status stays a blocker --
+#: a transient 503 was observed live mid-session.
+#:
+#: Declared to run_source rather than handled in an on_blocked callback, which
+#: built the absence by hand with no probes, no not_searched and no caveats
+#: ("Not found"), and left the 404 counted as a failure toward backoff. The
+#: caveat is the honest limit of the reading: a 404 body is discarded by the
+#: transport, so a moved endpoint is indistinguishable from a zero-result one.
+_404_IS_ZERO_RESULTS = {Blocker.NOT_FOUND: (
+    "This negative rests on an HTTP 404, which the Federal Register API returns "
+    "for a search with no matches. A 404 for any other reason (a moved or "
+    "renamed endpoint) would read the same; confirm with a query known to match "
+    "before relying on it.")}
 
 
 def search(query: str, doc_type: str | None = None, agency: str | None = None,
@@ -130,7 +152,7 @@ def search(query: str, doc_type: str | None = None, agency: str | None = None,
         searched=f"federal register search for {query!r}",
         parse=lambda b: _parse(b, query, page, store),
         store=store, limiter=limiter, use_cache=use_cache,
-        on_blocked=_absence_on_404(query),
+        answer_on=_404_IS_ZERO_RESULTS,
         corpus=("Federal Register: proposed and final rules, notices, and "
                 "presidential documents. A defined corpus, so counts are "
                 "measurements rather than estimates."),

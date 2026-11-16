@@ -79,8 +79,36 @@ def _usa_dollar_sum(**kw):
     return usaspending.dollar_sum("anything", **kw)
 
 
+def _searxng(**kw):
+    from evidence_search.engines import searxng
+    return searxng.search("anything", base="http://searxng.invalid", **kw)
+
+
+def _news_rss(**kw):
+    from evidence_search.engines import news_rss
+    return news_rss.search("anything", **kw)
+
+
+def _patch_fetch(monkeypatch, fn):
+    """Replace the GET transport by every door a source reaches it through.
+
+    run_source looks `core.http.fetch` up at call time; searxng binds its own
+    reference at import, so it needs patching by name as well.
+    """
+    import evidence_search.core.http as http_mod
+    import evidence_search.engines.searxng as searxng_mod
+    monkeypatch.setattr(http_mod, "fetch", fn)
+    monkeypatch.setattr(searxng_mod, "fetch", fn)
+
+
 #: (label, callable). Every public entry point that can return an Outcome.
+#:
+#: searxng and news_rss carry about 98% of real call volume and were outside
+#: this sweep until 2026-11-16: the engines live in a different package from
+#: the sources, and the list was written from the sources directory.
 ENTRY_POINTS = [
+    ("searxng.search", _searxng),
+    ("news_rss.search", _news_rss),
     ("crossref.search", _crossref_search),
     ("crossref.by_doi", _crossref_by_doi),
     ("federal_register.search", _fedreg),
@@ -113,14 +141,13 @@ def test_transport_failure_is_never_an_absence(label, call, monkeypatch):
     verified absence here is claiming to have searched a corpus it never
     reached.
     """
-    import evidence_search.core.http as http_mod
     from evidence_search.core.results import AccessBlocker, Blocker
 
     def _blocked(url, *, source, query="", **kw):
         return None, AccessBlocker(query=query, mechanism=Blocker.SERVER_ERROR,
                                    url=url, detail="simulated transport failure")
 
-    monkeypatch.setattr(http_mod, "fetch", _blocked)
+    _patch_fetch(monkeypatch, _blocked)
     # usaspending POSTs through its own helper rather than http.fetch.
     import evidence_search.sources.usaspending as us
     monkeypatch.setattr(us, "_post", lambda p, pl: (None, ("http", "simulated failure")))
@@ -153,14 +180,6 @@ def test_rate_limited_is_never_an_absence(label, call, monkeypatch):
         f"{label} should downgrade to RateLimited, got {type(out).__name__}")
 
 
-#: Sources that scrape HTML rather than parse a typed payload. A JSON source
-#: can tell a malformed body from an empty one because the shape is declared;
-#: a scraper counting rows cannot. Listed explicitly so the exemption is
-#: visible and shrinks as sources gain positive shape checks -- never so the
-#: sweep quietly passes.
-_HTML_SCRAPERS = {"oscn.search", "docs.search"}
-
-
 @pytest.mark.parametrize("label,call", ENTRY_POINTS, ids=[e[0] for e in ENTRY_POINTS])
 def test_malformed_success_payload_is_never_an_absence(label, call, monkeypatch):
     """A 200 whose body we cannot read is a parse failure, not an empty corpus.
@@ -172,12 +191,10 @@ def test_malformed_success_payload_is_never_an_absence(label, call, monkeypatch)
     A source is allowed to return AccessBlocker, RateLimited, or even a Hit
     here. The single forbidden answer is "it isn't there."
     """
-    import evidence_search.core.http as http_mod
-
     def _garbage(url, *, source, query="", **kw):
         return "<!doctype html><html><body>\x00\x01 not the expected shape", None
 
-    monkeypatch.setattr(http_mod, "fetch", _garbage)
+    _patch_fetch(monkeypatch, _garbage)
     import evidence_search.sources.usaspending as us
     # Award rows present, amounts unreadable -- the exact live-bug shape.
     monkeypatch.setattr(us, "_post", lambda p, pl: (
@@ -192,15 +209,104 @@ def test_malformed_success_payload_is_never_an_absence(label, call, monkeypatch)
         # run_source converts a ValueError from parse() into an AccessBlocker
         # ("payload shape changed"), which is the designed route.
         return
-    if label in _HTML_SCRAPERS and isinstance(out, VerifiedAbsence):
-        pytest.xfail(
-            f"{label} reads an unrecognised page as zero rows. An HTML scraper "
-            "cannot tell 'the page served no results' from 'the page is not the "
-            "page I know' by row count alone -- it needs a positive shape check "
-            "(the results table exists) the way oscn already has a positive "
-            "sentinel for its real empty page. Tracked, not fixed here.")
+    # No exemptions. oscn and docs used to xfail here: an HTML scraper that
+    # counted rows read an unrecognised page as zero of them. An absence now
+    # needs a positive marker from every source, scrapers included.
     assert not isinstance(out, VerifiedAbsence), (
         f"{label} certified an absence over an unreadable payload: {out}")
+
+
+#: Bodies that parse cleanly and are not an answer. Each is something a real
+#: service sends with a 200: an API's error object, an empty object, a bare
+#: list, a bot wall, a feed-shaped document with no channel.
+_WELL_FORMED_NON_ANSWERS = {
+    "json-error-detail": '{"detail": "Invalid cursor"}',
+    "json-errors": '{"errors": {"term": "is invalid"}}',
+    "json-empty-object": "{}",
+    "json-bare-list": "[]",
+    "json-null": "null",
+    "json-message-only": '{"message": {"status": "error"}}',
+    "sveltekit-no-result": ('{"nodes": [{"type": "data", "data": '
+                            '[{"q": 1}, "anything"]}]}'),
+    "html-challenge": ("<html><head><title>Just a moment...</title></head><body>"
+                       + "<p>Verifying you are human. This may take a few seconds.</p>" * 40
+                       + "</body></html>"),
+    "html-maintenance": ("<html><body>" + "<p>We are down for maintenance.</p>" * 40
+                         + "</body></html>"),
+    "xml-not-a-feed": '<?xml version="1.0"?><error><message>bad</message></error>',
+    "empty-body": "",
+}
+
+
+@pytest.mark.filterwarnings("ignore:It looks like you're using an HTML parser")
+@pytest.mark.parametrize("body", list(_WELL_FORMED_NON_ANSWERS.values()),
+                         ids=list(_WELL_FORMED_NON_ANSWERS))
+@pytest.mark.parametrize("label,call", ENTRY_POINTS, ids=[e[0] for e in ENTRY_POINTS])
+def test_wellformed_non_answer_is_never_an_absence(label, call, body, monkeypatch):
+    """A 200 that parses and is not the zero-results shape is not an absence.
+
+    The malformed-payload test above feeds bytes no parser accepts. The live
+    failures were the opposite: bodies that parse perfectly -- a JSON error
+    object, a challenge page -- and simply contain no rows. Zero rows is not
+    a finding; only the source's own zero-results shape is.
+    """
+    import json as _json
+
+    _patch_fetch(monkeypatch, lambda url, *, source, query="", **kw: (body, None))
+    import evidence_search.sources.usaspending as us
+    try:
+        decoded = _json.loads(body)
+    except ValueError:
+        decoded = {"unexpected": body[:40]}
+    monkeypatch.setattr(us, "_post", lambda p, pl: (decoded, None))
+
+    try:
+        out = call(use_cache=False)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return
+    assert not isinstance(out, VerifiedAbsence), (
+        f"{label} certified an absence over a non-answer: {out.claim()}")
+
+
+@pytest.mark.parametrize("label,call", ENTRY_POINTS, ids=[e[0] for e in ENTRY_POINTS])
+def test_every_absence_states_its_scope(label, call, monkeypatch):
+    """Where a source CAN certify an absence, the claim is never a bare 'Not found'.
+
+    Each source is served its own genuine zero-results shape. Those that return
+    an absence must say what was asked (a probe) and at least one limit.
+    """
+    empties = {
+        "searxng.search": '{"results": [], "unresponsive_engines": []}',
+        "news_rss.search": "<rss><channel><title>x</title></channel></rss>",
+        "crossref.search": '{"message": {"total-results": 0, "items": []}}',
+        "federal_register.search": '{"count": 0, "results": []}',
+        "courtlistener.search": '{"count": 0, "results": []}',
+        "propublica_disclosures.search": ('{"nodes": [{"type": "data", "data": '
+                                          '[{"q": 1, "result": 2}, "anything", []]}]}'),
+        "oscn.search": "<html><body>Found No Records</body></html>",
+        "docs.search": "- [Hooks](https://code.claude.com/docs/hooks)\n",
+    }
+
+    def _fetch(url, *, source, query="", **kw):
+        if url.endswith("/config"):
+            return '{"engines": [{"name": "google", "enabled": true, "categories": ["general"]}]}', None
+        return empties.get(label, "{}"), None
+
+    _patch_fetch(monkeypatch, _fetch)
+    import evidence_search.sources.usaspending as us
+    monkeypatch.setattr(us, "_post", lambda p, pl: (
+        {"results": ({g: 0 for g in us.AWARD_GROUPS} if "count" in p else []),
+         "page_metadata": {"hasNext": False}}, None))
+
+    out = call(use_cache=False)
+    if label == "crossref.by_doi":
+        return   # a DOI lookup has no empty shape; its absence is the declared 404
+    assert isinstance(out, VerifiedAbsence), (
+        f"{label} did not recognise its own zero-results shape: "
+        f"{type(out).__name__} {getattr(out, 'detail', '')}")
+    assert out.probes, f"{label}: an absence with no record of what was asked"
+    assert out.not_searched or out.caveats, f"{label}: an absence with no stated limit"
+    assert out.claim() != "Not found"
 
 
 # --- Issue #17: an award ID must be counted in the group it belongs to ------

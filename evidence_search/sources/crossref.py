@@ -30,8 +30,8 @@ import re
 from urllib.parse import quote
 
 from ..core.limits import Limiter
-from ..core.results import Blocker, Coverage, Result, verified_absence
-from ..core.source import run_source
+from ..core.results import Blocker, Result
+from ..core.source import RecognizedEmpty, json_rows, run_source
 from ..core.store import Store
 
 SOURCE = "crossref"
@@ -93,8 +93,10 @@ def _parse_doi(body: str, doi: str, store) -> list[Result]:
     """
     try:
         m = json.loads(body)["message"]
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
         raise ValueError(f"no `message` in response: {e}") from e
+    if not isinstance(m, dict):
+        raise ValueError(f"`message` is {type(m).__name__}, not an object")
 
     try:
         store.put_record(f"{SOURCE}:{m.get('DOI')}", SOURCE, doi, m)
@@ -103,16 +105,13 @@ def _parse_doi(body: str, doi: str, store) -> list[Result]:
     return [_record(m, exact=True)]
 
 
-def _unregistered_doi(doi: str):
-    """A 404 on a DOI lookup means the DOI is not registered -- a FINDING, and
-    a different one from being blocked. Every other status stays a blocker."""
-    def handler(blocked, body):
-        if getattr(blocked, "mechanism", None) is Blocker.NOT_FOUND:
-            return verified_absence(
-                doi, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                f"crossref: DOI {doi} is not registered")
-        return None
-    return handler
+#: A 404 on a DOI lookup means the DOI is not registered -- a FINDING, and a
+#: different one from being blocked. Every other status stays a blocker.
+#: Declared to run_source (answer_on) so the absence carries its probe and is
+#: not counted as a failure toward backoff.
+_404_IS_UNREGISTERED = {Blocker.NOT_FOUND: (
+    "This negative rests on an HTTP 404 from the Crossref works endpoint, read as "
+    "'no such DOI registered with Crossref'. The response body is not inspected.")}
 
 
 def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
@@ -129,7 +128,8 @@ def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
         searched=f"crossref DOI {doi}",
         parse=lambda b: _parse_doi(b, doi, store),
         store=store, limiter=limiter, use_cache=use_cache,
-        on_blocked=_unregistered_doi(doi),
+        answer_on=_404_IS_UNREGISTERED,
+        not_searched=["DOIs registered with an agency other than Crossref"],
         headers={"User-Agent": UA},
         ttl_s=604800,                      # bibliographic metadata is stable
         exact_match_supported=True,
@@ -141,10 +141,12 @@ def by_doi(doi: str, store: Store | None = None, limiter: Limiter | None = None,
 def _parse_title(body: str, query: str, store) -> list[Result]:
     try:
         msg = json.loads(body)["message"]
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
         raise ValueError(f"no `message` in response: {e}") from e
 
-    items = msg.get("items") or []
+    items = json_rows(msg, "items", total_key="total-results")
+    if isinstance(items, RecognizedEmpty):
+        return items
     out = [_record(m, exact=False) for m in items]
     for m in items:
         try:

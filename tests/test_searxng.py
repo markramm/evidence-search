@@ -24,8 +24,10 @@ from evidence_search.engines import searxng
 def _kit():
     s = Store(pathlib.Path(tempfile.mkdtemp()) / "t.db")
     # Pre-seed /config so tests do not depend on a live instance.
-    s.put(cache_key("searxng:config:v2", "http://x"), "searxng",
-          ["searxng:google", "searxng:bing", "searxng:duckduckgo", "searxng:marginalia"], ttl_s=3600)
+    # v3 roster shape: {engine: [categories]}.
+    s.put(cache_key("searxng:config:v3", "http://x"), "searxng",
+          {f"searxng:{e}": ["general"]
+           for e in ("google", "bing", "duckduckgo", "marginalia")}, ttl_s=3600)
     return s, Limiter(s)
 
 

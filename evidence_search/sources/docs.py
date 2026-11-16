@@ -18,8 +18,8 @@ from __future__ import annotations
 import re
 from ..core.http import fetch as _http_fetch
 from ..core.limits import Limiter
-from ..core.results import Coverage, Result, verified_absence
-from ..core.source import run_source
+from ..core.results import AccessBlocker, Blocker, Coverage, Result
+from ..core.source import RecognizedEmpty, run_source
 from ..core.store import Store
 
 SOURCE = "docs"
@@ -45,12 +45,20 @@ def _score(query: str, title: str, url: str) -> int:
 
 def _parser(query: str, site: str, fetch_top: int, store, limiter):
     def _parse(body: str) -> list[Result]:
+        links = _LINK.findall(body)
+        if not links:
+            # An llms.txt index is a list of markdown links. A body with none
+            # is not an index -- an error page, a wall, a moved file -- and
+            # says nothing about what the documentation contains.
+            raise ValueError("no markdown links in the documentation index")
         scored = []
-        for title, url in _LINK.findall(body):
+        for title, url in links:
             sc = _score(query, title, url)
             if sc:
                 scored.append((sc, title.strip(), url.strip()))
         scored.sort(key=lambda x: -x[0])
+        if not scored:
+            return RecognizedEmpty(f"index of {len(links)} pages, none matching")
 
         out = []
         for rank, (sc, title, url) in enumerate(scored[:25], 1):
@@ -81,13 +89,31 @@ def search(query: str, site: str = "claude-code", fetch_top: int = 0,
     limiter = limiter or Limiter(store)
 
     if site not in SITES:
-        return verified_absence(query, Coverage(queried=[SOURCE], responsive=[SOURCE]),
-                                f"unknown docs site {site!r}; known: {', '.join(SITES)}")
+        # An unknown site was never searched, so it cannot be absent from it.
+        # This returned a VerifiedAbsence: a typo in --site read as "the
+        # documentation does not mention this". Refused the way oscn refuses
+        # an unknown county.
+        import difflib
+        near = difflib.get_close_matches(site, sorted(SITES), n=3, cutoff=0.6)
+        return AccessBlocker(
+            query=query, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "unknown-site"}),
+            mechanism=Blocker.NOT_FOUND, url="",
+            detail=(f"{site!r} is not a registered documentation site. "
+                    + (f"Did you mean: {', '.join(near)}? " if near else "")
+                    + f"Known sites: {', '.join(sorted(SITES))}. Nothing was "
+                      "searched, so this is NOT an absence."))
 
     return run_source(
         query, source=SOURCE, url=SITES[site]["index"],
         searched=f"{site} documentation index ({SITES[site]['index']})",
         parse=_parser(query, site, fetch_top, store, limiter),
         store=store, limiter=limiter, use_cache=use_cache,
+        exact_match_supported=False,
+        corpus=(f"{site} documentation INDEX: page titles and URLs listed in "
+                "llms.txt. Page bodies are not searched."),
+        not_searched=["the text of the documentation pages themselves",
+                      "pages the site does not list in its llms.txt"],
+        caveats=["Lexical match on page TITLES and URLS only: a topic covered "
+                 "inside a page whose title does not use these words is not found."],
         cache_params={"site": site},
     )

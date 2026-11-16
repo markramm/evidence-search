@@ -37,7 +37,7 @@ from typing import Any
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
                             Result, replay_cached, verified_absence)
-from ..core.source import run_source
+from ..core.source import RecognizedEmpty, Unanswerable, json_rows, run_source
 from ..core.store import Store, cache_key
 
 SOURCE = "usaspending"
@@ -197,10 +197,21 @@ def _parse_counts(data, query: str, by_recipient: bool) -> list[Result]:
     """The count endpoint returns one summary row, not a list of awards."""
     if not isinstance(data, dict):
         raise ValueError(f"expected a JSON object, got {type(data).__name__}")
-    res = data.get("results") or {}
-    total = sum(v for v in res.values() if isinstance(v, int))
+    # `results` must be the per-group count object. `data.get("results") or
+    # {}` summed a payload with no `results` at all to zero, and zero was
+    # certified as "no federal awards".
+    res = data.get("results")
+    if not isinstance(res, dict) or not res:
+        raise ValueError(
+            "no per-group `results` counts in response "
+            f"(keys: {', '.join(sorted(map(str, data))) or 'none'})")
+    unreadable = [k for k, v in res.items()
+                  if isinstance(v, bool) or not isinstance(v, int)]
+    total = sum(v for k, v in res.items() if k not in unreadable)
     if not total:
-        return []
+        if unreadable:
+            raise ValueError("unreadable count(s) for " + ", ".join(map(str, unreadable)))
+        return RecognizedEmpty("results: every award group counted 0")
 
     mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
     return [Result(
@@ -328,8 +339,14 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                         "the award may well exist. Look it up by name or keyword first "
                         "(`evidence-search usaspending \"<recipient>\"`), then pass the "
                         "numeric id from that result's meta.record_id."))
-        return verified_absence(num, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
-                                f"usaspending award detail for numeric award id {num}")
+        return verified_absence(
+            num, Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"]),
+            f"usaspending award detail for numeric award id {num}",
+            probes=[Probe(source=SOURCE, endpoint=url, query=num,
+                          corpus="USAspending award detail, keyed on its internal numeric id",
+                          result_count=0, exact_match_supported=True, at=time.time())],
+            caveats=["Rests on an HTTP 404 for this internal numeric id. It says "
+                     "nothing about an award known by a PIID or a recipient name."])
     if r.status_code >= 400:
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "status"}),
                              mechanism=Blocker.SERVER_ERROR, url=url,
@@ -480,9 +497,22 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                                  coverage=Coverage(queried=[SOURCE], errored={SOURCE: kind}),
                                  mechanism=Blocker.SERVER_ERROR,
                                  url=f"{API}/search/spending_by_award/", detail=detail)
-        rows = data.get("results") or []
+        try:
+            rows = json_rows(data, "results", total_key=None)
+        except ValueError as e:
+            # No `results` list: an error body or a changed payload. Reading it
+            # as an empty page certified "no awards" for the recipient.
+            return AccessBlocker(
+                query=query,
+                coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
+                mechanism=Blocker.SERVER_ERROR,
+                url=f"{API}/search/spending_by_award/",
+                detail=f"payload shape changed ({e}) -- NOT an absence.")
         seen_rows += len(rows)
         for r in rows:
+            if not isinstance(r, dict):
+                unpriced += 1
+                continue
             v = r.get("Award Amount")
             if isinstance(v, (int, float)):
                 total += v
@@ -570,8 +600,20 @@ def _parse_awards(data, query: str, page: int, store) -> list[Result]:
     """Rows into Results. `data` is already-decoded JSON from _post_transport."""
     if not isinstance(data, dict):
         raise ValueError(f"expected a JSON object, got {type(data).__name__}")
-    rows = data.get("results") or []
+    rows = json_rows(data, "results", total_key=None)
     pm = data.get("page_metadata") or {}
+    if isinstance(rows, RecognizedEmpty):
+        # An empty page is an absence only if it is the FIRST page and the API
+        # says nothing follows it.
+        if isinstance(pm, dict) and pm.get("hasNext"):
+            raise Unanswerable(
+                f"page {page} returned no rows but the API reports hasNext -- "
+                "pages went unread, so absence cannot be certified.")
+        if page > 1:
+            raise Unanswerable(
+                f"page {page} returned no rows: that is the end of the listing, "
+                "NOT an absence. Page 1 answers whether any awards match.")
+        return rows
 
     out = []
     for r in rows:

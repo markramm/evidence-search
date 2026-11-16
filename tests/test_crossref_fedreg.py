@@ -70,7 +70,10 @@ def test_unregistered_doi_is_an_absence_not_a_block(monkeypatch):
     s, L = _kit()
     out = cr.by_doi("10.9999/nope", store=s, limiter=L, use_cache=False)
     assert isinstance(out, VerifiedAbsence)
-    assert "not registered" in out.searched
+    # The absence now comes from the shared shell (answer_on), so it carries a
+    # probe and states that it rests on a 404, rather than a bare "Not found".
+    assert out.probes and out.probes[0].query == "10.9999/nope"
+    assert "registered with Crossref" in out.claim()
 
 
 def test_fedreg_count_is_a_real_total(monkeypatch):

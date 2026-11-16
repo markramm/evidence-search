@@ -25,7 +25,7 @@ from urllib.parse import quote
 
 from ..core.limits import Limiter
 from ..core.results import Result
-from ..core.source import run_source
+from ..core.source import RecognizedEmpty, run_source
 from ..core.store import Store
 
 BASE = "https://projects.propublica.org/trump-team-financial-disclosures"
@@ -51,9 +51,21 @@ def _rows_and_echo(body: str):
         data = json.loads(body)
         arr = [n for n in data["nodes"] if isinstance(n, dict) and n.get("type") == "data"][0]["data"]
         top = arr[0]
-        return _deref(arr, top.get("result")) or [], _deref(arr, top.get("q"))
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+        has_result = "result" in top
+        rows, echoed = (_deref(arr, top["result"]) if has_result else None,
+                        _deref(arr, top.get("q")))
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError) as e:
         raise ValueError(f"ProPublica payload shape changed: {e}") from e
+    # `result` must be present and resolve to a list. `top.get("result") or []`
+    # turned a renamed key into zero rows, i.e. into "no appointee discloses
+    # this asset".
+    if not has_result:
+        raise ValueError("ProPublica payload shape changed: no `result` key "
+                         f"(keys: {', '.join(sorted(map(str, top))) or 'none'})")
+    if not isinstance(rows, list):
+        raise ValueError("ProPublica payload shape changed: `result` is "
+                         f"{type(rows).__name__}, not a list")
+    return rows, echoed
 
 
 def _verify(query: str):
@@ -85,6 +97,8 @@ def _parser(query: str):
 
     def _parse(body: str) -> list[Result]:
         rows, _ = _rows_and_echo(body)
+        if not rows:
+            return RecognizedEmpty("result: []")
         out = []
         for r in rows:
             if not isinstance(r, dict):
@@ -126,6 +140,11 @@ def _parser(query: str):
                       "net_worth_low": nw, "matched_assets": matched,
                       "earliest_document": r.get("document_received_date_earliest")},
             ))
+        if not out:
+            # Rows were sent and none was readable: that is our failure to
+            # read them, not an empty result set.
+            raise ValueError(f"ProPublica payload shape changed: {len(rows)} result "
+                             "row(s), none of them an object")
         return out
 
     return _parse
@@ -140,4 +159,12 @@ def search(query: str, store: Store | None = None, limiter: Limiter | None = Non
         searched="propublica trump-team financial disclosures (~1,600 appointees)",
         parse=_parser(query), verify=_verify(query),
         store=store, limiter=limiter, use_cache=use_cache,
+        corpus=("ProPublica's Trump Team Financial Disclosures: the filings of "
+                "~1,600 appointees, as ProPublica has published them."),
+        not_searched=["officials outside ProPublica's dataset",
+                      "disclosures ProPublica has not yet published",
+                      "the underlying OGE filings themselves"],
+        caveats=["Matched by ProPublica's own site search, whose matching rules "
+                 "are not documented here: an asset reported under another name "
+                 "(a fund vehicle, a ticker, a parent company) may not be found."],
     )

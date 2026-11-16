@@ -10,7 +10,7 @@ import tempfile
 from evidence_search.core.limits import Limiter
 from evidence_search.core.results import (AccessBlocker, Hit, RateLimited,
                                          Result, VerifiedAbsence)
-from evidence_search.core.source import run_source
+from evidence_search.core.source import RecognizedEmpty, run_source
 from evidence_search.core.store import Store
 
 
@@ -27,10 +27,22 @@ def _run(monkeypatch, body, parse, **kw):
                       parse=parse, store=s, limiter=L, **kw)
 
 
-def test_empty_parse_is_a_verified_absence(monkeypatch):
-    out = _run(monkeypatch, "<xml/>", lambda b: [])
+def test_recognized_empty_is_a_verified_absence(monkeypatch):
+    out = _run(monkeypatch, "<xml/>", lambda b: RecognizedEmpty("no items"))
     assert isinstance(out, VerifiedAbsence)
     assert out.coverage.is_clean
+
+
+def test_a_bare_empty_parse_is_not_an_absence(monkeypatch):
+    """Zero rows is what an error body and a bot wall parse to as well.
+
+    This test used to assert the opposite -- `lambda b: []` yielding a
+    VerifiedAbsence -- which was the defect: the shell certified whatever the
+    parser failed to find rows in.
+    """
+    out = _run(monkeypatch, "<xml/>", lambda b: [])
+    assert isinstance(out, AccessBlocker)
+    assert "NOT an absence" in out.detail
 
 
 def test_parse_failure_is_never_an_absence(monkeypatch):
