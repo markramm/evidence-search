@@ -113,7 +113,8 @@ evidence-search oscn --county caddo --lname Frazier --year 2013
 evidence-search oscn --county caddo --case CF-2013-00038      # archives w/ SHA-256
 evidence-search courtlistener "Desert Snow" --type r
 evidence-search propublica "Blue Owl"
-evidence-search limits                                        # policy + live usage
+evidence-search limits                                        # usage, 429 blocks, backoff
+evidence-search --wait-max 90 courtlistener '"Desert Snow"'   # queue for a slot, up to 90s
 evidence-search --json news 'query' | jq '.results[].url'
 ```
 
@@ -338,10 +339,25 @@ would — not to extract at machine speed because it can.
   draw from one budget in a single SQLite ledger with `BEGIN IMMEDIATE`. Fan-out
   cannot be used to multiply your way past a limit, which is the usual way
   polite tooling becomes impolite.
+- **`extract` and `browser` are in the ledger too.** A fetch of an arbitrary
+  URL claims a slot before it goes out. If the host belongs to a source, the
+  source is charged — an OSCN page read with `extract` counts toward OSCN's
+  session cap, because the Turnstile threshold counts it. CourtListener is
+  charged only for `/api/` URLs; its pages and `storage.courtlistener.com` PDFs
+  are not part of the API budget. Every other host gets its own bucket: one
+  request a second and 30 a minute, across all processes. `extract` and
+  `browser` sleep through up to 10 seconds of that on their own, then return
+  `RateLimited` (13).
+- **A 429 stops everyone, not just the process that got it.** The
+  `Retry-After` (seconds or an HTTP date; 60s when absent, capped at a day) is
+  written to the ledger, and every process's next reservation for that source
+  is refused until it passes, with the time left as the retry-after.
 - **Caches for 24 hours by default.** The cheapest courtesy is not asking twice.
 - **Backs off instead of retrying.** A rate limit returns `RateLimited` (13) and
   stops. There is no retry loop, because a retry loop against a struggling
-  server is how a research tool becomes a load test.
+  server is how a research tool becomes a load test. Two consecutive failures
+  of a source start an escalating, shared backoff; a refusal that was about
+  the request itself (a 400, 401 or 404) does not count toward it.
 
 **The browser tier is deliberately narrow.** Escalation to a real browser is
 restricted by an `ALLOWED_HOSTS` allow-list to court systems and government
@@ -509,6 +525,38 @@ too, so fan-out cannot bypass them.
 `--wait` absorbs sub-second *spacing* waits for sequential shell callers. It
 never waits out a budget window: a 50/hr cap must surface as `RateLimited`,
 not as a hang.
+
+`--wait-max SECONDS` (default 0, off) is for contention. Under fan-out every
+agent used to be refused at the same moment and retry at the same moment. With
+it, a call sleeps until the slot it was refused should reopen, plus a random
+extra so waiters do not wake together, and claims again through the same
+atomic reservation; whoever loses is told the next reopening and sleeps again.
+There is no queue, and nothing but the ledger grants a call, so no window can
+be exceeded. It waits for spacing, the per-minute window, a shared 429 block
+and a failure backoff, each only when the wait ends inside the time left. An
+hour or day window, or a session cap, returns `RateLimited` immediately with
+the time the window reopens.
+
+**`limits` says why a call is refused.** Per source: usage in every window
+(the session cap too), `blocked:` with the deadline of any shared 429 block,
+`backoff:` with the failure streak and its reason, and `next call:` — either
+`allowed` or `REFUSED` with the cause and the seconds left. Host buckets used
+in the last hour are listed after the sources. `--json limits` adds `usage`,
+`session`, `min_interval_s`, `blocked_until`, `blocked_for_s`,
+`blocked_reason`, `backoff` and `next_call` to each row; the existing fields
+are unchanged.
+
+**Sharing the ledger with another tool.** A second program that spends the
+same upstream budget can reserve through this one instead of keeping its own
+count:
+
+```bash
+evidence-search limits reserve courtlistener   # exit 0: go ahead; 13: refused, do not call
+evidence-search limits block courtlistener 120 # that tool got a 429 with Retry-After: 120
+```
+
+`reserve` also takes a URL and charges the bucket that owns it. It honours
+`--wait-max` and `--json` like any other command.
 
 **Archive on retrieval.** Anything fetched is written to
 `documents/sources/files/` with SHA-256 and a manifest line. Never an afterthought.

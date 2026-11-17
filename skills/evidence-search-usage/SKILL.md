@@ -80,7 +80,7 @@ $CS propublica "BlackRock"                         # Trump-team disclosures
 $CS fedreg "immigration detention" --type rule     # rules/notices/EOs, real count
 $CS crossref 10.1177/10986111251357498             # exact scholarly record
 $CS docs "prompt caching" --site claude-api        # vendor documentation
-$CS limits                                         # policy + live usage
+$CS limits                                         # usage, 429 blocks, backoff: WHY a call was refused
 $CS gate ui                                        # human gates, in a browser
 $CS --json web "query" | jq '.results[].url'
 ```
@@ -89,7 +89,22 @@ $CS --json web "query" | jq '.results[].url'
 without it, two back-to-back commands return `RateLimited` on the second.
 `--wait` absorbs only that spacing, never a real budget window.
 
-**`--json` and `--wait` are global** — they work in either position, before or
+**Use `--wait-max SECONDS` when other agents are working the same source.** It
+queues for a slot (spacing, the per-minute window, a shared 429 block, a
+backoff) for up to that long instead of returning `RateLimited`, and wakes at a
+slightly different moment from the other waiters. It never waits out an hour or
+day window or a session cap: those return `RateLimited` at once with the time
+the window reopens. On `RateLimited`, do not loop on the command — run
+`$CS limits` and read `next call:` for that source. If it names a 429 block or
+a long window, the wait is the number shown; move to other work.
+
+**`extract` and `browser` are rate-limited too.** Each fetch claims a slot:
+OSCN pages count toward OSCN's session cap (8 per 30 minutes, shared by every
+agent), other source hosts toward that source, and any other host is held to
+one request a second and 30 a minute across all agents. They wait up to 10
+seconds for a slot on their own and then exit 13. Local files are unaffected.
+
+**`--json`, `--wait` and `--wait-max` are global** — they work in either position, before or
 after the subcommand. **`--limit` works on every listing source**, spelled the
 same way everywhere (`--rows` and `--per-page` still work where they always
 did). Trimming the list never hides the total: the header keeps reporting it.
