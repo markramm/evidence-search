@@ -198,6 +198,44 @@ _JSON_ESCAPE_HATCH = {
 }
 
 
+#: Retry-After, when a 429 carries none (or one we cannot read).
+DEFAULT_RETRY_AFTER_S = 60
+#: Ceiling on what a Retry-After may impose. The deadline is written to the
+#: shared store and refuses every process, so one malformed header (a date in
+#: 2099, a count in milliseconds) must not be able to lock a source out
+#: indefinitely. A day is the longest window any policy here models.
+MAX_RETRY_AFTER_S = 86400
+
+
+def retry_after_seconds(value, now: float | None = None) -> int:
+    """Seconds to wait, from a Retry-After header in either RFC 9110 form.
+
+    `120` (delay-seconds) or `Wed, 21 Oct 2015 07:28:00 GMT` (HTTP-date). The
+    date form used to fall through to the 60s default, which is a much shorter
+    wait than the one the source asked for. Absent or unreadable gives
+    DEFAULT_RETRY_AFTER_S; the result is always within 1..MAX_RETRY_AFTER_S.
+    """
+    import time as _time
+    from email.utils import parsedate_to_datetime
+
+    text = str(value or "").strip()
+    seconds: float | None = None
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        seconds = float(text)
+    elif text:
+        try:
+            when = parsedate_to_datetime(text)
+            if when.tzinfo is None:        # RFC 9110: HTTP-dates are GMT
+                from datetime import timezone
+                when = when.replace(tzinfo=timezone.utc)
+            seconds = when.timestamp() - (_time.time() if now is None else now)
+        except (TypeError, ValueError, OverflowError):
+            seconds = None
+    if seconds is None:
+        seconds = DEFAULT_RETRY_AFTER_S
+    return int(min(MAX_RETRY_AFTER_S, max(1, -(-seconds // 1))))
+
+
 def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
           headers: dict | None = None, binary: bool = False):
     """Return (payload, outcome_or_None).
@@ -217,9 +255,12 @@ def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
                                    url=url, detail=str(e))
 
     if r.status_code == 429:
-        ra = r.headers.get("Retry-After")
+        # The caller's limiter.note_outcome() writes this to the shared store,
+        # so the next process's reservation is refused instead of repeating
+        # the request. The detail must keep starting "HTTP 429": that is how
+        # note_outcome tells a 429 from the timeout above.
         return None, RateLimited(query=query, source=source,
-                                 retry_after_s=int(ra) if ra and ra.isdigit() else 60,
+                                 retry_after_s=retry_after_seconds(r.headers.get("Retry-After")),
                                  detail="HTTP 429")
 
     text = "" if binary else r.text

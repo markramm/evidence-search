@@ -199,6 +199,7 @@ def document(storage_url: str, filename: str, store: Store | None = None,
                            source=SOURCE, retry_after_s=int(retry) if retry else None, detail=why)
 
     data, blocked = fetch(storage_url, source=SOURCE, query=filename, binary=True)
+    limiter.note_outcome(SOURCE, blocked)   # a 429 here must stop the next process too
     if blocked:
         return blocked
     info = archive(data, filename, storage_url, "evidence-search:courtlistener")

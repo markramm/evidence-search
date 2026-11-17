@@ -74,6 +74,7 @@ def _parser(query: str, site: str, fetch_top: int, store, limiter):
                     r.meta["text_skipped"] = f"rate limit: {why}"
                 else:
                     page, pblocked = _http_fetch(url, source=SOURCE, query=query)
+                    limiter.note_outcome(SOURCE, pblocked)
                     if page and not pblocked:
                         r.meta["text"] = re.sub(r"\n{3,}", "\n\n", page)[:20000]
             out.append(r)

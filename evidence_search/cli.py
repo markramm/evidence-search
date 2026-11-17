@@ -216,6 +216,35 @@ def _emit(outcome, as_json: bool, limit: int | None = None) -> int:
 EXTRACT_MIN_VISIBLE_CHARS = 200
 
 
+#: Politeness delay `extract` and `browser` absorb on their own before giving
+#: up with RateLimited. Their fetches were never gated at all, so a caller has
+#: no handling for exit 13 from them; a second or two of spacing behind another
+#: agent on the same host is slept through, as is a short queue. Raise it with
+#: --wait-max. A session cap or an hour/day window still refuses at once.
+FETCH_WAIT_S = 10.0
+
+
+def _reserve_fetch(limiter, url: str, via_browser: bool = False):
+    """Claim a ledger slot for a fetch of an arbitrary URL.
+
+    Returns (bucket, None) when the fetch may go ahead, or (bucket, RateLimited)
+    when it may not. The bucket is the source that owns the host (an OSCN page
+    is charged to `oscn`, session cap and all), else a per-host one.
+    """
+    import math
+    from .core.limits import bucket_for_url
+    from .core.results import Coverage as _Cv
+    bucket = bucket_for_url(url)
+    ok, retry, why = limiter.reserve(bucket, wait_s=FETCH_WAIT_S,
+                                     honor_backoff=not via_browser)
+    if ok:
+        return bucket, None
+    return bucket, RateLimited(
+        query=url, coverage=_Cv(queried=[bucket], rate_limited=[bucket]),
+        source=bucket, retry_after_s=math.ceil(retry) if retry else None,
+        detail=f"{why}. Nothing was fetched; `evidence-search limits` shows the state.")
+
+
 def _read_pdf(path, target: str, allow_ocr: bool, max_pages: int, label: str = ""):
     """Decode a PDF for `extract`: (text, provenance, blocker_or_None).
 
@@ -274,6 +303,11 @@ def main(argv=None) -> int:
     p.add_argument("--wait", action="store_true",
                    help="block for short spacing waits instead of returning RateLimited "
                         "(sub-minute only; never waits out a real budget window)")
+    p.add_argument("--wait-max", type=float, default=0.0, metavar="SECONDS",
+                   help="wait up to SECONDS for a slot (spacing, the per-minute "
+                        "window, a shared 429 block or backoff) instead of returning "
+                        "RateLimited; an hour/day window or session cap still "
+                        "returns at once. Default 0: do not wait")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # Every source that returns a list takes --limit, spelled the same way.
@@ -405,7 +439,17 @@ def main(argv=None) -> int:
     rec.add_argument("--query", help="filter --list by the query that produced it")
     rec.add_argument("--fields", help="comma-separated fields to return")
 
-    sub.add_parser("limits", help="show per-source rate policy and current usage")
+    lim = sub.add_parser(
+        "limits", help="show per-source rate policy, usage, 429 blocks and backoff",
+        description="With no arguments: every source's windows and usage, any shared "
+                    "429 block, and the failure backoff. `limits reserve SOURCE` "
+                    "claims one call in the shared ledger for an EXTERNAL tool "
+                    "(exit 0 reserved, 13 refused); `limits block SOURCE RETRY_AFTER` "
+                    "records a 429 that tool received.")
+    lim.add_argument("action", nargs="?", choices=["reserve", "block"])
+    lim.add_argument("source", nargs="?", help="a source name, or a URL (charged to its bucket)")
+    lim.add_argument("retry_after", nargs="?",
+                     help="block only: the Retry-After value (seconds or HTTP-date)")
     sub.add_parser("hosts", help="show the browser-tier public-records allow-list")
 
     # Global flags must PRECEDE the subcommand, and argparse's bare
@@ -416,10 +460,20 @@ def main(argv=None) -> int:
         if _g in _argv and _argv.index(_g) > 0:
             _argv.remove(_g)
             _argv.insert(0, _g)
+    for _i, _tok in enumerate(_argv):
+        if _i > 0 and _tok == "--wait-max" and _i + 1 < len(_argv):
+            _argv[0:0] = [_argv.pop(_i), _argv.pop(_i)]     # the flag and its value
+            break
+        if _i > 0 and _tok.startswith("--wait-max="):
+            _argv.insert(0, _argv.pop(_i))
+            break
     a = p.parse_args(_argv)
+    if a.wait_max < 0:
+        p.error("--wait-max must be 0 or more seconds")
     store = Store(); limiter = Limiter(store); use_cache = not a.no_cache
     if getattr(a, "wait", False):
         limiter.wait_for_spacing = True
+    limiter.wait_max_s = a.wait_max
 
     if a.cmd == "news":
         from .engines.news_rss import search
@@ -513,6 +567,12 @@ def main(argv=None) -> int:
     if a.cmd == "browser":
         from .core import browser
         from .core.archive import archive as _archive
+        # A host the allow-list refuses is never contacted, so it spends no
+        # slot: browser.fetch below returns that refusal itself.
+        if browser.host_allowed(a.url)[0]:
+            _, _refused = _reserve_fetch(limiter, a.url, via_browser=True)
+            if _refused:
+                return _emit(_refused, a.json)
         html, out = browser.fetch(a.url, source="browser", query=a.url,
                                   wait_ms=a.wait_ms, headless=not a.headed, store=store)
         if out:
@@ -562,11 +622,24 @@ def main(argv=None) -> int:
         _pdf_provenance = None
         is_url = a.target.startswith(("http://", "https://"))
         if is_url:
+            # Every fetch claims a slot first. These went out ungated, so a
+            # fan-out of `extract` against one host -- OSCN included -- never
+            # touched the ledger the search commands share.
             if a.browser:
                 from .core import browser as _b
+                if _b.host_allowed(a.target)[0]:
+                    _, _refused = _reserve_fetch(limiter, a.target, via_browser=True)
+                    if _refused:
+                        return _emit(_refused, a.json)
                 raw, out = _b.fetch(a.target, source="extract", query=a.target, store=store)
             else:
-                raw, out = _fetch(a.target, source="docs", query=a.target)
+                _bucket, _refused = _reserve_fetch(limiter, a.target)
+                if _refused:
+                    return _emit(_refused, a.json)
+                raw, out = _fetch(a.target, source=_bucket, query=a.target)
+                # Shares a 429 with every other process; a wall on one page
+                # is not counted against the source that owns the host.
+                limiter.note_outcome(_bucket, out, count_failure=False)
             if out:
                 return _emit(out, a.json)
 
@@ -580,7 +653,11 @@ def main(argv=None) -> int:
                 # re-encoding that string corrupts the PDF -- enough that a file
                 # with a perfect text layer fell back to OCR. The bytes have to
                 # come off the wire undecoded.
-                _bin, _berr = _fetch(a.target, source="docs", query=a.target, binary=True)
+                _bucket, _refused = _reserve_fetch(limiter, a.target)   # a second request
+                if _refused:
+                    return _emit(_refused, a.json)
+                _bin, _berr = _fetch(a.target, source=_bucket, query=a.target, binary=True)
+                limiter.note_outcome(_bucket, _berr, count_failure=False)
                 if _berr:
                     return _emit(_berr, a.json)
                 with _tf.NamedTemporaryFile(suffix=".pdf", delete=False) as _tmp:
@@ -753,23 +830,77 @@ def main(argv=None) -> int:
         return 0
 
     if a.cmd == "limits":
-        from .core.limits import POLICIES, effective_policy
+        from .core.limits import HOST_PREFIX, POLICIES, bucket_for_url, effective_policy
+        if a.action:
+            # The ledger entry points for a tool that is NOT evidence-search but
+            # spends the same upstream budget (see README, "Sharing the ledger").
+            name = a.source or ""
+            if name.startswith(("http://", "https://")):
+                name = bucket_for_url(name)
+            if name not in POLICIES and not name.startswith(HOST_PREFIX):
+                # A typo would otherwise reserve happily under DEFAULT_POLICY,
+                # in a ledger row nothing else reads.
+                print(f"limits {a.action}: unknown source {a.source!r} "
+                      f"(known: {', '.join(sorted(POLICIES))}, or a URL)", file=sys.stderr)
+                return EXIT_USAGE
+            if a.action == "block":
+                from .core.http import retry_after_seconds
+                import time as _t
+                secs = retry_after_seconds(a.retry_after)
+                store.block_until(name, _t.time() + secs, "HTTP 429 (reported by an external tool)")
+                print(json.dumps({"source": name, "blocked_for_s": secs}) if a.json
+                      else f"{name}: blocked for every process for {secs}s")
+                return 0
+            ok, retry, why = limiter.reserve(name)
+            if ok:
+                print(json.dumps({"source": name, "reserved": True}) if a.json
+                      else f"{name}: reserved one call")
+                return 0
+            import math
+            from .core.results import Coverage as _Cv
+            return _emit(RateLimited(
+                query=f"limits reserve {name}",
+                coverage=_Cv(queried=[name], rate_limited=[name]), source=name,
+                retry_after_s=math.ceil(retry) if retry else None, detail=why), a.json)
+
+        import time as _t
         rows = []
-        for name in sorted(POLICIES):
+        for name in sorted(POLICIES) + store.active_sources(HOST_PREFIX):
             pol, origin = effective_policy(name)
-            used = [f"{store.count_calls(name, w)}/{m} per {int(w)}s" for w, m in pol.windows]
+            st = limiter.status(name)
+            used = [f"{u['used']}/{u['max']} per {int(u['window_s'])}s" for u in st["usage"]]
             rows.append({"source": name, "windows": used, "cacheable": pol.cacheable,
                          "index_origin": pol.index_origin, "note": pol.note,
-                         "windows_from": origin or "built-in"})
+                         **{k: v for k, v in st.items() if k != "source"}})
         if a.json:
             print(json.dumps(rows, indent=2))
         else:
             for r in rows:
                 print(f"\n{r['source']}")
                 print(f"  usage:     {', '.join(r['windows'])}")
+                if r["session"]:
+                    ss = r["session"]
+                    print(f"  session:   {ss['used']}/{ss['max']} per {int(ss['window_s'])}s")
                 if r["windows_from"] != "built-in":
                     print(f"  OVERRIDE:  windows set by {r['windows_from']}; "
                           "the note below describes the built-in policy")
+                if r["blocked_until"]:
+                    when = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(r["blocked_until"]))
+                    print(f"  blocked:   until {when} ({int(r['blocked_for_s']) + 1}s left) "
+                          f"-- {r['blocked_reason']}; shared by every process")
+                else:
+                    print("  blocked:   no")
+                bo = r["backoff"]
+                if bo["remaining_s"] > 0:
+                    print(f"  backoff:   {bo['consecutive_failures']} consecutive failures "
+                          f"({bo['last_reason']}), {int(bo['remaining_s']) + 1}s left")
+                elif bo["consecutive_failures"]:
+                    print(f"  backoff:   clear ({bo['consecutive_failures']} consecutive "
+                          f"failure(s) on record: {bo['last_reason']})")
+                else:
+                    print("  backoff:   clear")
+                print("  next call: " + ("allowed" if r["next_call"] == "allowed"
+                                         else f"REFUSED -- {r['next_call']}"))
                 print(f"  cacheable: {r['cacheable']}   index: {r['index_origin']}")
                 if r["note"]:
                     print(f"  note:      {r['note']}")

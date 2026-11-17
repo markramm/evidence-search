@@ -6,10 +6,12 @@ in production. Discovering them at runtime costs a worker's dispatch cycle.
 from __future__ import annotations
 
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .store import Store
 
@@ -95,6 +97,62 @@ POLICIES: dict[str, Policy] = {
 }
 
 DEFAULT_POLICY = Policy(windows=[(60, 20)], min_interval_s=0.5)
+
+
+# --- Arbitrary URLs (`extract`, `browser`) -----------------------------------
+#
+# `extract <url>` and `browser <url>` fetched without reserving anything, so a
+# fan-out of agents reading pages off one host was invisible to the ledger --
+# including hosts whose limits the policies above exist to respect (OSCN's
+# Turnstile counts every fetch from this address, whichever command sent it).
+#
+# Every such fetch now claims a slot in a BUCKET: the source that owns the
+# host where there is one, otherwise a per-host bucket under HOST_POLICY.
+
+HOST_PREFIX = "host:"
+
+#: Politeness for a host with no policy of its own: at most one request a
+#: second and 30 a minute, across every process on this machine. No failure
+#: backoff -- a host that walls a plain fetch (403, Cloudflare) must keep
+#: answering with that named blocker, and `--browser` must stay reachable; a
+#: backoff would replace both with a RateLimited that says "retry".
+HOST_POLICY = Policy(
+    windows=[(60, 30)], min_interval_s=1.0, backoff_base_s=0.0,
+    note="Per-host politeness for extract/browser fetches of arbitrary URLs.")
+
+#: (host, path prefix, source). A host matches itself and its subdomains.
+#:
+#: CourtListener is scoped to /api/ on purpose: its 5/50/125 budget is the
+#: API's. Pages and storage.courtlistener.com PDFs are not counted against it
+#: upstream, and charging them here would spend a day's API budget on
+#: downloads. They fall to per-host buckets instead.
+SOURCE_HOSTS: list[tuple[str, str, str]] = [
+    ("oscn.net", "", "oscn"),
+    ("courtlistener.com", "/api/", "courtlistener"),
+    ("api.usaspending.gov", "", "usaspending"),
+    ("api.crossref.org", "", "crossref"),
+    ("federalregister.gov", "", "federal_register"),
+    ("projects.propublica.org", "", "propublica_disclosures"),
+    ("news.google.com", "", "news_rss"),
+    ("web.archive.org", "", "wayback"),
+    ("archive.org", "", "wayback"),
+]
+
+
+def bucket_for_url(url: str) -> str:
+    """The ledger name a fetch of `url` is charged to."""
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
+        parts, host = None, ""
+    if not host:
+        return HOST_PREFIX + "unknown"
+    for owner, prefix, source in SOURCE_HOSTS:
+        if (host == owner or host.endswith("." + owner)) and \
+                (parts.path or "/").startswith(prefix or "/"):
+            return source
+    return HOST_PREFIX + host.removeprefix("www.")
 
 
 # --- Account-specific overrides ---------------------------------------------
@@ -184,12 +242,66 @@ def load_overrides() -> dict[str, tuple[list[tuple[float, int]], str]]:
 
 def effective_policy(source: str) -> tuple[Policy, str | None]:
     """(policy in force, origin of its windows or None when built in)."""
+    if source.startswith(HOST_PREFIX):
+        return HOST_POLICY, None
     base = POLICIES.get(source, DEFAULT_POLICY)
     override = load_overrides().get(source)
     if override is None:
         return base, None
     windows, origin = override
     return replace(base, windows=list(windows)), origin
+
+
+_HTTP_STATUS = re.compile(r"^HTTP (\d{3})\b")
+
+#: Mechanisms that describe THIS REQUEST, not the health of the source.
+_CALLER_SIDE = {"http-404", "auth-required", "http-unexpected-status",
+                "wrong-identifier-type"}
+
+
+def _detail_of(blocked) -> str:
+    if isinstance(blocked, tuple):
+        return str(blocked[1]) if len(blocked) > 1 else ""
+    return str(getattr(blocked, "detail", "") or "")
+
+
+def _mechanism_of(blocked) -> str:
+    mech = getattr(blocked, "mechanism", None)
+    if mech is None and isinstance(blocked, tuple) and blocked:
+        mech = blocked[0]
+    return str(getattr(mech, "value", mech) or "")
+
+
+def upstream_retry_after(blocked) -> int | None:
+    """Seconds the SOURCE told us to stay away, or None if this is not a 429.
+
+    Two shapes reach here: a RateLimited whose detail starts "HTTP 429" (from
+    core.http.fetch; its timeouts are RateLimited too, and are not this), and
+    usaspending._post's ("rate", <Retry-After header>) tuple.
+    """
+    from .http import DEFAULT_RETRY_AFTER_S, retry_after_seconds
+    if isinstance(blocked, tuple):
+        return retry_after_seconds(blocked[1] if len(blocked) > 1 else "") \
+            if blocked and blocked[0] == "rate" else None
+    if type(blocked).__name__ == "RateLimited" and _detail_of(blocked).startswith("HTTP 429"):
+        return int(getattr(blocked, "retry_after_s", None) or DEFAULT_RETRY_AFTER_S)
+    return None
+
+
+def is_callers_fault(blocked) -> bool:
+    """True when the refusal is about OUR request rather than the source.
+
+    A 400 for a malformed cursor, a 404 for a mistyped path, a 401 for a
+    missing token: the source is up and answered. The failure streak is shared
+    state, so counting these put a source into backoff for every other agent
+    on the strength of one agent's bad request. 403 and 429 are excluded --
+    those are the source pushing back -- and so is 408.
+    """
+    m = _HTTP_STATUS.match(_detail_of(blocked))
+    if m:
+        code = int(m.group(1))
+        return 400 <= code < 500 and code not in (403, 408, 429)
+    return _mechanism_of(blocked) in _CALLER_SIDE
 
 
 class Limiter:
@@ -207,6 +319,16 @@ class Limiter:
     wait_for_spacing: bool = False
     MAX_SPACING_WAIT_S: float = 5.0
 
+    #: Opt-in (`--wait-max SECONDS`): keep re-reserving, for at most this long,
+    #: until a slot is actually claimed. Sleeps through spacing, a busy ledger,
+    #: a shared 429 block, a failure backoff and the per-MINUTE window, each
+    #: only when it ends inside the time left. An hour or day window, or a
+    #: session cap, is never slept on: that returns at once with the time the
+    #: window reopens.
+    wait_max_s: float = 0.0
+    #: Longest budget window `wait_max_s` will sleep out.
+    SHORT_WINDOW_S: float = 60.0
+
     def __init__(self, store: Store):
         self.store = store
 
@@ -217,7 +339,7 @@ class Limiter:
         """(seconds still to wait, streak length, reason). 0 when clear."""
         p = self.policy(source)
         n, last, reason = self.store.failure_state(source)
-        if n < 2:            # one failure is a blip; two is a pattern
+        if n < 2 or p.backoff_base_s <= 0:   # one failure is a blip; two is a pattern
             return 0.0, n, reason
         wait = min(p.backoff_max_s, p.backoff_base_s * (2 ** (n - 2)))
         remaining = (last + wait) - time.time()
@@ -228,8 +350,11 @@ class Limiter:
 
     def note_success(self, source: str) -> None:
         self.store.clear_failures(source)
+        # Drops a 429 block that has run out. One still in force stays: see
+        # Store.clear_block.
+        self.store.clear_block(source)
 
-    def note_outcome(self, source: str, blocked) -> None:
+    def note_outcome(self, source: str, blocked, count_failure: bool = True) -> None:
         """Feed the escalating-backoff counter from a fetch result.
 
         `reserve()` consults backoff_remaining() for EVERY source, but the
@@ -239,6 +364,18 @@ class Limiter:
         failed. Verified: five consecutive failures put a run_source source into
         a 120s backoff and left the others at zero.
 
+        Three things can happen, and only the last feeds the streak:
+
+        * an upstream 429 is written to the store as a block every process's
+          reserve() honours (and is counted as a failure too);
+        * a refusal that is about OUR request -- see is_callers_fault() -- is
+          neither a failure nor a success, and changes nothing;
+        * anything else is a genuine failure of the source.
+
+        `count_failure=False` is for fetches of arbitrary URLs (`extract`,
+        `browser`): a page that will not serve says little about the API that
+        shares its host, so those share a 429 and nothing else.
+
         Bookkeeping must never convert a good answer into an error, so this
         swallows its own exceptions -- same posture as the call site in
         run_source, and the reason that one is wrapped there.
@@ -247,45 +384,133 @@ class Limiter:
             if blocked is None:
                 self.note_success(source)
                 return
+            wait = upstream_retry_after(blocked)
+            if wait is not None:
+                self.store.block_until(source, time.time() + wait, "HTTP 429")
+            if not count_failure or is_callers_fault(blocked):
+                return
             # Sources hand back either an outcome object carrying `mechanism`
             # or, where the transport predates that shape (usaspending._post),
             # a plain ("rate"|"status"|"timeout"|..., detail) tuple. Keep the
             # specific reason in both cases -- backoff_remaining() surfaces it
-            # to the operator, and "error" explains nothing.
-            mech = getattr(blocked, "mechanism", None)
-            if mech is None and isinstance(blocked, tuple) and blocked:
-                mech = blocked[0]
-            self.note_failure(source, str(mech or "error"))
+            # to the operator, and "error" explains nothing. A RateLimited has
+            # no mechanism; its detail ("HTTP 429", "timeout: ...") is the reason.
+            reason = _mechanism_of(blocked) or _detail_of(blocked).split(":")[0].strip()
+            self.note_failure(source, reason or "error")
         except Exception:
             pass
 
-    def reserve(self, source: str) -> tuple[bool, float | None, str]:
-        """Atomically claim one call. (allowed, retry_after_s, reason).
-
-        This is the gate every fetch must pass. Never sleeps; the caller decides.
-        """
-        p = self.policy(source)
-
+    def _attempt(self, source: str, p: Policy, honor_backoff: bool):
+        """One non-sleeping try: (allowed, retry_after_s, reason, kind)."""
         # Refuse early when a source is in escalating backoff, before spending a
         # ledger slot on a call that has failed n times running.
-        remaining, streak, reason = self.backoff_remaining(source)
-        if remaining > 0:
-            return False, round(remaining, 1), (
-                f"{source}: backing off after {streak} consecutive failures "
-                f"({reason[:60]}) -- {int(remaining)}s left")
-
-        allowed, retry, why = self.store.reserve_call(
+        if honor_backoff:
+            remaining, streak, reason = self.backoff_remaining(source)
+            if remaining > 0:
+                return False, round(remaining, 1), (
+                    f"{source}: backing off after {streak} consecutive failures "
+                    f"({reason[:60]}) -- {int(remaining)}s left"), "backoff"
+        return self.store.reserve_call_ex(
             source, p.windows, min_interval_s=p.min_interval_s,
             session_max=p.session_max, session_window_s=p.session_window_s)
 
-        # Retry once after a SHORT spacing wait, when the caller asked for it.
-        if (not allowed and self.wait_for_spacing and "min interval" in why
-                and retry is not None and retry <= self.MAX_SPACING_WAIT_S):
-            time.sleep(retry)
-            allowed, retry, why = self.store.reserve_call(
-                source, p.windows, min_interval_s=p.min_interval_s,
-                session_max=p.session_max, session_window_s=p.session_window_s)
-        return allowed, retry, why
+    def _worth_waiting(self, kind: str) -> bool:
+        if kind.startswith("window:"):
+            return float(kind.split(":", 1)[1]) <= self.SHORT_WINDOW_S
+        return kind in ("busy", "spacing", "blocked", "backoff")
+
+    def reserve(self, source: str, *, wait_s: float | None = None,
+                honor_backoff: bool = True) -> tuple[bool, float | None, str]:
+        """Atomically claim one call. (allowed, retry_after_s, reason).
+
+        This is the gate every fetch must pass. By default it never sleeps and
+        the caller decides. With a wait budget (`wait_max_s`, or `wait_s` for
+        this call -- the larger applies) it re-reserves until a slot is claimed
+        or the budget cannot cover the next wait, and then returns the refusal
+        with its real retry-after.
+
+        Waiters are not queued. Each sleeps until the slot it was refused
+        should reopen, plus a random extra so that waiters refused together do
+        not wake together, and then claims again through the same atomic
+        ledger: whoever loses that claim is told the next reopening and
+        sleeps again. No window can be exceeded, because nothing here grants a
+        call -- only Store.reserve_call_ex does.
+
+        `honor_backoff=False` skips the failure-streak check (never the 429
+        block). It is for the browser retry of a fetch that was just walled:
+        that retry is the remedy for the failure, not a repeat of it.
+        """
+        p = self.policy(source)
+        budget = max(self.wait_max_s, wait_s or 0.0)
+        deadline = time.monotonic() + budget
+        spacing_retry_left = self.wait_for_spacing
+
+        while True:
+            allowed, retry, why, kind = self._attempt(source, p, honor_backoff)
+            if allowed:
+                return True, None, ""
+            left = deadline - time.monotonic()
+            if retry is not None and retry <= left and self._worth_waiting(kind):
+                jitter = random.uniform(0.0, min(2.0, 0.1 + 0.25 * retry))
+                time.sleep(min(left, retry + jitter))
+                continue
+            # `--wait` alone: retry once after a SHORT spacing wait.
+            if (spacing_retry_left and kind == "spacing" and retry is not None
+                    and retry <= self.MAX_SPACING_WAIT_S):
+                spacing_retry_left = False
+                time.sleep(retry)
+                continue
+            return False, retry, why
+
+    def status(self, source: str) -> dict:
+        """Everything that can refuse a call to `source`, read-only.
+
+        For the `limits` command: an agent told "RateLimited" should be able to
+        see WHICH limit, and when it lifts, without reading the ledger.
+        """
+        p, origin = effective_policy(source)
+        now = time.time()
+        usage = []
+        for window_s, max_calls in p.windows:
+            used = self.store.count_calls(source, window_s)
+            oldest = self.store.oldest_call_in_window(source, window_s)
+            usage.append({
+                "window_s": window_s, "max": max_calls, "used": used,
+                "reopens_in_s": (round(max(0.0, oldest + window_s - now), 1)
+                                 if used >= max_calls and oldest else None)})
+        session = None
+        if p.session_max is not None:
+            session = {"window_s": p.session_window_s, "max": p.session_max,
+                       "used": self.store.count_calls(source, p.session_window_s)}
+        until, why = self.store.blocked_until(source)
+        remaining, streak, reason = self.backoff_remaining(source)
+        refused = None
+        if until:
+            refused = f"upstream 429 block, {int(until - now) + 1}s left"
+        elif remaining > 0:
+            refused = f"failure backoff, {int(remaining) + 1}s left"
+        elif session and session["used"] >= session["max"]:
+            refused = f"session cap {session['max']} per {int(session['window_s'])}s reached"
+        else:
+            full = [u for u in usage if u["used"] >= u["max"]]
+            if full:
+                u = max(full, key=lambda u: u["reopens_in_s"] or 0)
+                refused = (f"{u['used']}/{u['max']} in the {int(u['window_s'])}s window, "
+                           f"reopens in {int(u['reopens_in_s'] or 0) + 1}s")
+        return {
+            "source": source,
+            "usage": usage,
+            "session": session,
+            "min_interval_s": p.min_interval_s,
+            "blocked_until": until or None,
+            "blocked_for_s": round(until - now, 1) if until else None,
+            "blocked_reason": why or None,
+            "backoff": {"consecutive_failures": streak,
+                        "remaining_s": round(remaining, 1),
+                        "last_reason": reason or None},
+            "next_call": refused or "allowed",
+            "windows_from": origin or "built-in",
+        }
 
     def check(self, source: str) -> tuple[bool, float | None, str]:
         """Read-only view of whether a call WOULD be allowed.

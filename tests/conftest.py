@@ -56,4 +56,7 @@ def _isolated_state(tmp_path, monkeypatch, request):
     monkeypatch.setattr(
         limits_mod, "DEFAULT_POLICY",
         replace(limits_mod.DEFAULT_POLICY, min_interval_s=0.0))
+    monkeypatch.setattr(
+        limits_mod, "HOST_POLICY",
+        replace(limits_mod.HOST_POLICY, min_interval_s=0.0))
     yield

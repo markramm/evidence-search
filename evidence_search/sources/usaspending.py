@@ -131,7 +131,7 @@ def _post(path: str, body: dict, timeout: float = 45.0):
     except httpx.HTTPError as e:
         return None, ("http", str(e))
     if r.status_code == 429:
-        return None, ("rate", r.headers.get("Retry-After", "60"))
+        return None, ("rate", r.headers.get("Retry-After", ""))
     if r.status_code >= 400:
         return None, ("status", f"HTTP {r.status_code}: {r.text[:200]}")
     try:
@@ -159,7 +159,15 @@ def _post_transport(body: dict):
         if err is None:
             return data, None
         kind, detail = err
-        if kind in ("timeout", "rate"):
+        if kind == "rate":
+            # `detail` is the raw Retry-After header. Honour it, and say what
+            # happened: the detail used to read just "60".
+            from ..core.http import retry_after_seconds
+            return None, RateLimited(
+                query=query, coverage=Coverage(queried=[source], errored={source: kind}),
+                source=source, retry_after_s=retry_after_seconds(detail),
+                detail=f"HTTP 429 (Retry-After: {detail})")
+        if kind == "timeout":
             return None, RateLimited(
                 query=query, coverage=Coverage(queried=[source], errored={source: kind}),
                 source=source, retry_after_s=60, detail=detail)

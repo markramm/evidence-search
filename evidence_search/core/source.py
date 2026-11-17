@@ -224,6 +224,27 @@ def run_source(
     if blocked and escalate and getattr(blocked, "escalate_to_browser", False):
         from . import browser as _browser
         queried.append(f"{source}:browser")
+        # The browser sends a SECOND request to the same host, and it used to
+        # go out unreserved: OSCN's session cap exists to stay under a
+        # Turnstile threshold that counts these fetches like any other.
+        #
+        # Spacing is waited out (the plain fetch was a moment ago, so the
+        # claim would otherwise always be refused), and the failure streak is
+        # not consulted: this retry is the remedy for the failure just
+        # recorded. A budget window, the session cap and a shared 429 block
+        # all still refuse it.
+        b_ok, b_retry, b_why = limiter.reserve(
+            source, wait_s=Limiter.MAX_SPACING_WAIT_S, honor_backoff=False)
+        if not b_ok:
+            return RateLimited(
+                query=query,
+                coverage=Coverage(queried=queried, errored={source: "blocked"},
+                                  rate_limited=[f"{source}:browser"],
+                                  elapsed_ms=int((time.time() - t0) * 1000)),
+                source=source, retry_after_s=int(b_retry) if b_retry else None,
+                detail=(f"The plain fetch was blocked ({blocked.mechanism.value}) and the "
+                        f"browser retry was refused a slot: {b_why}. Neither attempt "
+                        "read the source."))
         b_body, b_out = _browser.fetch(url, source=source, query=query, store=store)
         if b_body:
             body, blocked = b_body, None

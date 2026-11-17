@@ -88,6 +88,18 @@ CREATE TABLE IF NOT EXISTS failures (
     last_at REAL NOT NULL,
     reason TEXT
 );
+-- A shared "do not call before T", written when a source answers 429.
+--
+-- The process that received the 429 knew to stop. Every other process did
+-- not: its reservation passed the windows (which count OUR calls, not the
+-- source's view of them) and it walked into the same wall. On 2026-11-03 that
+-- is how parallel agents starved a limit they were each individually under.
+CREATE TABLE IF NOT EXISTS blocks (
+    source TEXT PRIMARY KEY,
+    until REAL NOT NULL,
+    set_at REAL NOT NULL,
+    reason TEXT
+);
 CREATE TABLE IF NOT EXISTS jobs (
     token TEXT PRIMARY KEY, source TEXT NOT NULL, state TEXT NOT NULL,
     payload TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
@@ -287,6 +299,52 @@ class Store:
             return 0, 0.0, ""
         return row[0], row[1], row[2] or ""
 
+    # ---- shared upstream block (429) -------------------------------------
+    def block_until(self, source: str, until: float, reason: str = "") -> float:
+        """Refuse every reservation for `source` until `until`. Returns the
+        deadline in force. Never shortens a block another process already set:
+        two 429s with different Retry-After values keep the later deadline."""
+        now = time.time()
+        self.conn.execute(
+            "INSERT INTO blocks VALUES (?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
+            "set_at=excluded.set_at, reason=excluded.reason, "
+            "until=MAX(until, excluded.until)",
+            (source, until, now, reason[:200]))
+        return self.blocked_until(source)[0]
+
+    def blocked_until(self, source: str) -> tuple[float, str]:
+        """(deadline, reason) of an ACTIVE block, or (0.0, "") when clear."""
+        row = self.conn.execute(
+            "SELECT until, reason FROM blocks WHERE source=? AND until > ?",
+            (source, time.time())).fetchone()
+        return (row[0], row[1] or "") if row else (0.0, "")
+
+    def clear_block(self, source: str, force: bool = False) -> None:
+        """Drop a block that has run out (any block, with `force`).
+
+        Called on a success. A block still in force is kept: no call can be
+        reserved while it stands, so a success arriving during it belongs to a
+        request sent BEFORE the 429 and says nothing about whether the source
+        has reopened.
+        """
+        if force:
+            self.conn.execute("DELETE FROM blocks WHERE source=?", (source,))
+        else:
+            self.conn.execute("DELETE FROM blocks WHERE source=? AND until <= ?",
+                              (source, time.time()))
+
+    def active_sources(self, prefix: str, window_s: float = 3600.0) -> list[str]:
+        """Ledger names starting with `prefix` that have recent calls, a block
+        or a failure streak. Per-host buckets are not in POLICIES, so this is
+        how `limits` finds the ones worth showing."""
+        like = prefix.replace("%", "") + "%"
+        rows = self.conn.execute(
+            "SELECT DISTINCT source FROM calls WHERE source LIKE ? AND at > ? "
+            "UNION SELECT source FROM blocks WHERE source LIKE ? AND until > ? "
+            "UNION SELECT source FROM failures WHERE source LIKE ?",
+            (like, time.time() - window_s, like, time.time(), like)).fetchall()
+        return sorted(r[0] for r in rows)
+
     # ---- full upstream records ------------------------------------------
     def put_record(self, record_id: str, source: str, query: str, payload: dict) -> None:
         """Persist one upstream object verbatim, keyed for later retrieval."""
@@ -337,12 +395,37 @@ class Store:
 
         Returns (allowed, retry_after_s, reason).
         """
+        return self.reserve_call_ex(source, windows, min_interval_s,
+                                    session_max, session_window_s)[:3]
+
+    def reserve_call_ex(self, source: str, windows, min_interval_s: float = 0.0,
+                        session_max: int | None = None,
+                        session_window_s: float = 3600.0):
+        """reserve_call, plus WHAT refused: (allowed, retry_after_s, reason, kind).
+
+        `kind` is "" when allowed, else one of "busy", "blocked", "spacing",
+        "session" or "window:<seconds>". A caller deciding whether a refusal is
+        worth sleeping through needs that, and parsing it back out of the
+        reason string is how `--wait` came to key on the words "min interval".
+        """
         now = time.time()
         try:
             self.conn.execute("BEGIN IMMEDIATE")
         except sqlite3.OperationalError as e:
-            return False, 1.0, f"{source}: ledger busy ({e})"
+            return False, 1.0, f"{source}: ledger busy ({e})", "busy"
         try:
+            # An upstream 429 another process received. Read inside the same
+            # transaction as the claim, so a block written a moment ago cannot
+            # be missed by a reservation already in progress.
+            row = self.conn.execute(
+                "SELECT until, reason FROM blocks WHERE source=?", (source,)).fetchone()
+            if row and row[0] > now:
+                self.conn.execute("ROLLBACK")
+                left = row[0] - now
+                return False, round(max(1.0, left), 1), (
+                    f"{source}: upstream said stop ({row[1] or 'HTTP 429'}) -- shared "
+                    f"block for every process, {int(left) + 1}s left"), "blocked"
+
             # Spacing and the session cap are read BEFORE claiming: they are
             # properties of prior traffic, not of this claim.
             if min_interval_s:
@@ -353,37 +436,45 @@ class Store:
                     self.conn.execute("ROLLBACK")
                     return False, round(min_interval_s - gap, 3), (
                         f"{source}: min interval {min_interval_s}s "
-                        f"({round(min_interval_s - gap, 2)}s remaining)")
+                        f"({round(min_interval_s - gap, 2)}s remaining)"), "spacing"
 
             if session_max is not None:
-                used = self.conn.execute(
-                    "SELECT COUNT(*) FROM calls WHERE source=? AND at > ?",
-                    (source, now - session_window_s)).fetchone()[0]
+                used, oldest = self.conn.execute(
+                    "SELECT COUNT(*), MIN(at) FROM calls WHERE source=? AND at > ?",
+                    (source, now - session_window_s)).fetchone()
                 if used >= session_max:
                     self.conn.execute("ROLLBACK")
-                    return False, None, (
+                    # When the oldest call leaves the window, one slot reopens.
+                    retry = max(1.0, (oldest + session_window_s) - now) if oldest else None
+                    return False, retry, (
                         f"session cap {session_max} reached for {source} "
-                        f"in the last {int(session_window_s)}s")
+                        f"in the last {int(session_window_s)}s"), "session"
 
             self.conn.execute("INSERT INTO calls (source, at) VALUES (?,?)", (source, now))
 
             # Validate AFTER claiming: the count now includes our own row, so
             # concurrent claimants cannot all see themselves as under the line.
+            #
+            # Every window is checked and the one that reopens LAST is the one
+            # reported. Reporting the first breach told a caller to come back in
+            # 40s for the minute window when the hour window had 50 minutes to
+            # run -- and a caller willing to wait slept for nothing.
+            worst = None
             for window_s, max_calls in windows:
-                n = self.conn.execute(
-                    "SELECT COUNT(*) FROM calls WHERE source=? AND at > ?",
-                    (source, now - window_s)).fetchone()[0]
+                n, oldest = self.conn.execute(
+                    "SELECT COUNT(*), MIN(at) FROM calls WHERE source=? AND at > ?",
+                    (source, now - window_s)).fetchone()
                 if n > max_calls:
-                    oldest = self.conn.execute(
-                        "SELECT MIN(at) FROM calls WHERE source=? AND at > ?",
-                        (source, now - window_s)).fetchone()[0]
-                    self.conn.execute("ROLLBACK")
                     retry = max(1.0, (oldest + window_s) - now) if oldest else window_s
-                    return False, retry, (
-                        f"{source}: {n - 1}/{max_calls} calls in {int(window_s)}s window")
+                    if worst is None or retry > worst[0]:
+                        worst = (retry, f"{source}: {n - 1}/{max_calls} calls in "
+                                        f"{int(window_s)}s window", f"window:{window_s:g}")
+            if worst is not None:
+                self.conn.execute("ROLLBACK")
+                return False, worst[0], worst[1], worst[2]
 
             self.conn.execute("COMMIT")
-            return True, None, ""
+            return True, None, "", ""
         except Exception:
             try:
                 self.conn.execute("ROLLBACK")
