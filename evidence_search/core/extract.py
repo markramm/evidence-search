@@ -109,7 +109,7 @@ def grep(html_or_text: str, patterns: list[str], context_chars: int = 160,
 # and the short ones (UEI/CAGE) require both a letter and a digit.
 IDENTIFIERS = {
     # e.g. 15DDNE21P00000038, 70CDCR21P00000057, 47QSWA20D002K
-    "federal_award":  r"\b\d{2}[A-Z]{2,6}\d{2}[A-Z]\d{5,8}[A-Z]?\b",
+    "federal_award":  r"\b\d{2}[A-Z]{2,6}\d{2}[A-Z][A-Z]?\d{5,8}[A-Z]?\b",
     # 1:16-cv-02237, 4:14-cv-00385, CF-2013-00038, CIV-15-188-M
     "docket":         r"\b\d{1,2}:\d{2}-[a-z]{2}-\d{4,6}\b"
                       r"|\bC[FVJMR]-\d{4}-\d{3,5}\b"
@@ -136,6 +136,8 @@ IDENTIFIERS = {
     "usc_statute":    r"\b\d+\s+U\.?S\.?C\.?\s*§*\s*\d+[a-z]?\b|\b\d+\s+ILCS\s+[\d/.]+\b"
                       r"|\b\d+\s+O\.S\.\s*§*\s*\d+\b",
     "naics_psc":      r"\bNAICS\s*:?\s*\d{6}\b|\bPSC\s*:?\s*[A-Z]\d{3}\b",
+    "cve":            r"\bCVE-\d{4}-\d{4,7}\b",
+    "orcid":          r"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b",
 }
 
 

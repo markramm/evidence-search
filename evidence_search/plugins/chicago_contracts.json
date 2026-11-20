@@ -1,0 +1,26 @@
+{
+  "name": "chicago_contracts",
+  "driver": "socrata",
+  "policy_name": "chicago_contracts",
+  "domain": "data.cityofchicago.org",
+  "dataset_id": "rsxa-ify5",
+  "search_field": "vendor_name",
+  "title_fields": ["vendor_name", "department", "purchase_order_contract_number", "award_amount"],
+  "summary": "City of Chicago Department of Procurement Services Contracts (Socrata)",
+  "corpus": "Chicago Open Data Socrata contracts portal (`data.cityofchicago.org/resource/rsxa-ify5.json`).",
+  "not_searched": [
+    "Cook County or State of Illinois contracts outside City of Chicago DPS",
+    "Subcontracts not itemized on prime City of Chicago PO/contract rows"
+  ],
+  "caveats": [
+    "Vendor names match City of Chicago DPS vendor-master strings; use `--where` SoQL expressions for PO/contract numbers."
+  ],
+  "exact_match_supported": null,
+  "counts": true,
+  "tier": 1,
+  "limits": {
+    "per_minute": 20,
+    "per_hour": 400,
+    "min_interval_s": 0.5
+  }
+}

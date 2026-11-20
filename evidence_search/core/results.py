@@ -133,9 +133,37 @@ class Outcome:
 @dataclass
 class Hit(Outcome):
     results: list[Result] = field(default_factory=list)
+    probes: list["Probe"] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.results)
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        total = next((r.meta.get("total_matches") for r in self.results
+                      if r.meta.get("total_matches") is not None), None)
+        if total is not None:
+            d["total_matches"] = total
+        seen: list[dict] = []
+        for pr in self.probes:
+            q = (pr.query or "").strip()
+            if not q:
+                continue
+            entry = {
+                "query": q,
+                "source": pr.source,
+                "params": {k: v for k, v in (pr.params or {}).items() if v not in (None, "")},
+                "exact_match_supported": pr.exact_match_supported,
+            }
+            if entry not in seen:
+                seen.append(entry)
+        if not seen and (self.query or "").strip():
+            src = (self.results[0].source if self.results else
+                   (self.coverage.queried[0] if self.coverage.queried else ""))
+            seen.append({"query": self.query.strip(), "source": src,
+                         "params": {}, "exact_match_supported": None})
+        d["asked"] = seen
+        return d
 
 
 @dataclass

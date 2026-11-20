@@ -24,9 +24,11 @@ Issues = "https://github.com/markramm/evidence-search/issues"
 # PDF text extraction and OCR shell out to system binaries, not Python
 # packages: `brew install poppler tesseract` (pdftotext, pdftoppm, tesseract).
 test = ["pytest>=8.0"]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 evidence-search = "evidence_search.cli:cli"
+evidence-search-mcp = "evidence_search.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

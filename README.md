@@ -112,7 +112,35 @@ evidence-search news '"Desert Snow" interdiction'
 evidence-search oscn --county caddo --lname Frazier --year 2013
 evidence-search oscn --county caddo --case CF-2013-00038      # archives w/ SHA-256
 evidence-search courtlistener "Desert Snow" --type r
+evidence-search courtlistener --docket dcd:1:26-cv-01352 --since 2026-09-01
 evidence-search propublica "Blue Owl"
+evidence-search usaspending "GEO Group" --agency ICE --count
+evidence-search usaspending --idv 70CDCR20D00000011           # delivery/task orders under an IDV
+evidence-search usaspending --transactions CONT_AWD_...       # modification history (P00001..N)
+evidence-search samgov "detention" --agency 070               # SAM.gov contract notices
+evidence-search lda --client "Purdue Pharma" --year 2008      # Senate LD-1/LD-2 lobbying filings
+evidence-search fec --contributor "Purdue" --recipient "Rogers" --cycles 2006,2008
+evidence-search nonprofit "Donors Trust"                      # IRS Form 990 index + PDFs
+evidence-search sec '"CoreCivic"' --forms 10-K,10-Q,8-K       # SEC EDGAR EFTS full-text
+evidence-search sec --cik CXW --forms 8-K                     # SEC company submission history
+evidence-search sanctions "Intellexa"                         # OFAC SDN + EU Consolidated bulk lists
+evidence-search fara --country "El Salvador"                  # DOJ FARA foreign principals & registrants
+evidence-search wayback "https://vendor.example.com/contracts" --collapse-digest
+evidence-search openalex --author "0000-0002-1234-5678" --retracted-only
+evidence-search socrata "detention" --domain data.cityofnewyork.us --dataset abcd-1234
+evidence-search arcgis "Holdings LLC" --layer-url https://.../FeatureServer/0 --field OwnerName
+evidence-search montana_cadastral "Holdings LLC"              # shipped ArcGIS state parcel plugin
+evidence-search kev "Ivanti" --ransomware-only                # CISA KEV + NIST NVD CVE 2.0
+evidence-search crtsh "%.contractor.gov" --active-only       # Certificate Transparency SAN discovery
+evidence-search epa "Exxon" --state TX --violators-only       # EPA ECHO compliance & non-compliance qtrs
+evidence-search openfda "infusion pump" --endpoint recall     # OpenFDA recalls, 510(k)s, enforcement
+evidence-search cfpb "fees" --company "SECURUS TECHNOLOGIES"  # CFPB consumer complaints & narratives
+evidence-search icij "Holdings" --type entity                 # ICIJ Offshore Leaks bulk SQLite index
+evidence-search brokers "LiveRamp" --state CA                 # CA, VT, TX, OR data-broker registries
+evidence-search gdelt "border surveillance" --country US      # GDELT DOC 2.0 global news discovery
+evidence-search plugin check [--live]                         # 6-point absence-safety audit (+ live canary)
+evidence-search plugin init tx_contracts --driver socrata --domain data.texas.gov --dataset abcd-1234
+evidence-search sources                                       # every source's tier, counts, and scope
 evidence-search limits                                        # usage, 429 blocks, backoff
 evidence-search --wait-max 90 courtlistener '"Desert Snow"'   # queue for a slot, up to 90s
 evidence-search --json news 'query' | jq '.results[].url'
@@ -175,15 +203,43 @@ walk the structure to find what the negative is about.
 |---|---|---|---|
 | `news_rss` | none | 20/min | Google News RSS. Worked when WebSearch was dead. |
 | `oscn` | none | 8/session, 2s | Turnstile engages ~10 fetches. GET form, `db=<county>`. |
-| `courtlistener` | optional token | **5/min · 50/hr · 125/day, concurrent** | `storage.courtlistener.com` serves PDFs where `/recap` 403s. |
+| `courtlistener` | optional token | **5/min · 50/hr · 125/day, concurrent** | `storage.courtlistener.com` serves PDFs where `/recap` 403s. `--docket <court>:<number>` watches entries & deadlines. |
 | `propublica_disclosures` | none | 15/min | SvelteKit `__data.json`; param is **`q=`** not `search=`. |
 | `docs` | none | 25/min | Documentation `llms.txt` indexes. Sites: `claude-code`, `claude-api`. |
-| `searxng` | none | 30/min | General web via a LOCAL instance (native or containerised). 251 engines; coverage rebuilt from its metadata. |
-| `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — the countable primitive. |
+| `web` | none (opt. key) | 30/min | Zero-daemon general web search (keyless Mwmbl default; optional Brave/Serper/Tavily keys or `SEARXNG_URL` override). |
+| `usaspending` | none | 30/min | Federal awards. Returns a REAL total by award type — plus `--agency`, `--idv`, `--transactions`. |
 | `fedreg` | none | 30/min | Federal Register rules/notices/EOs. `count` is a real total. |
 | `crossref` | none | 40/min | Scholarly records. DOI lookup is exact; title search is FUZZY. |
-| `browser` | none | — | Playwright, **public-records hosts only** (allow-listed). |
+| `lda` | optional key | 15/min · 120/hr | U.S. Senate Lobbying Disclosure Act (`lda.senate.gov`) LD-1/LD-2 filings (1999–present). |
+| `fec` | `FEC_API_KEY` or `DEMO_KEY` | 30/min · 900/hr | Federal campaign finance. Prefers FEC bulk SQLite index for donor→committee; falls back to `/v1/schedules/schedule_a/`. |
+| `samgov` | none | 20/min · 300/hr | SAM.gov Contract Opportunities (solicitations, presolicitations, special notices, sources sought, awards, attachments). |
+| `nonprofit` | none | 20/min · 400/hr | ProPublica Nonprofit Explorer IRS Form 990/990-EZ/990-PF index, financials, and PDF links. Warns on multi-EIN collisions. |
+| `sec` | none (descriptive UA) | 8/s · 120/min | SEC EDGAR EFTS full-text search (2001–present) and `data.sec.gov` company submission history by CIK/ticker/name. |
+| `sanctions` | none | 10/min (bulk download) | Tier 3 local SQLite index of U.S. Treasury OFAC SDN (`sdn.csv`) + EU Financial Sanctions (`Entity_LogicalId` alias grouping). |
+| `fara` | none | 10/min · 120/hr | U.S. DOJ Foreign Agents Registration Act (`efile.fara.gov`) foreign principals and registrants (bulk SQLite + API). |
+| `wayback` | none | 15/min · 300/hr | Internet Archive Wayback Machine CDX historical URL capture index, SHA-1 digests, and raw extractable URLs. |
+| `openalex` | none (polite `mailto`) | 30/min · 1000/hr | OpenAlex ~250M scholarly works, author ORCIDs, institution RORs, grant funders, and **Retraction Watch** flags. |
+| `socrata` | optional `SOCRATA_APP_TOKEN` | 20/min · 400/hr | Generic Socrata / Tyler SODA v2 open-data portal driver (`nyc_contracts`, `chicago_contracts` shipped). |
+| `arcgis` | none | 20/min · 400/hr | Generic Esri ArcGIS REST `FeatureServer` / `MapServer` driver (`montana_cadastral` shipped). |
+| `rest` (`datagov_catalog`) | none | configurable | Generic declarative JSON REST manifest driver (`datagov_catalog` shipped; `plugin init --driver rest`). |
+| `investigate` | none | multi-source | Coordinated multi-source sweep with automatic CIK/EIN/UEI/domain pivots. |
+| `mcp` | none | — | Zero-dependency Phase 2 MCP JSON-RPC 2.0 stdio server (`evidence-search-mcp`). |
+| `kev` | none | 15/min · 300/hr | CISA Known Exploited Vulnerabilities (KEV) JSON catalog + `--nvd` NIST NVD CVE 2.0 API. |
+| `crtsh` | none | 10/min · 200/hr | crt.sh Certificate Transparency X.509 logs for subdomain & shared-SAN discovery. |
+| `epa` | none | 20/min · 400/hr | EPA ECHO regulated facilities (Clean Air/Water/RCRA), non-compliance quarters & penalties. |
+| `openfda` | none | 40/min · 1000/hr | OpenFDA device recalls, 510(k) clearances, enforcement & FAERS (`404 NOT_FOUND` = recognized empty). |
+| `cfpb` | none | 25/min · 500/hr | CFPB Consumer Complaint Database search & narratives by company, product, or state. |
+| `icij` | none | 10/min (bulk SQLite) | Tier 3 local SQLite index of ICIJ Offshore Leaks (`full-oldb.LATEST.zip`) with 1-hop relationships. |
+| `brokers` | none | 15/min (bulk SQLite) | CA (CPPA), VT (SOS), TX (SOS), and OR (DCBS) statutory data-broker registries w/ DBA normalization. |
+| `gdelt` | none | 20/min · 400/hr | GDELT DOC 2.0 global news article discovery API (`counts=False`, `exact_match_supported=False`). |
+| `browser` | none | — | Playwright (or `EVIDENCE_BROWSER_CDP`), **public-records hosts only** (allow-listed). |
 | `extract` | none | — | Local dynamic filtering: fields, not pages. |
+
+Run `evidence-search sources` (or `evidence-search --json sources`) to inspect the
+canonical `SourceSpec` registry (`core/registry.py`) — every source's tier,
+rate-limit policy, whether its totals are countable, whether it honours exact
+phrases, and the default `corpus`, `not_searched`, and `caveats` attached to
+its `VerifiedAbsence` outcomes.
 
 Set `COURTLISTENER_TOKEN` for the authenticated tier, or put the token in
 `~/.config/courtlistener/token` (mode 600; `COURTLISTENER_TOKEN_FILE` overrides the
@@ -236,7 +292,18 @@ The CLI path still works, unchanged:
 evidence-search gate list
 evidence-search browser <url> --headed --save /tmp/page.html
 evidence-search gate resume 0e96cf371939 --file /tmp/page.html
+evidence-search gate cancel 0e96cf371939 --reason "duplicate test run"
+evidence-search gate cancel --older-than 7d --source oscn
 ```
+
+When an external Chromium/CDP endpoint is available (for example,
+[Obscura](https://github.com/h4ckf0r0day/obscura) via `deploy/obscura.sh up` or a
+locally running Chrome with `--remote-debugging-port`), set
+`EVIDENCE_BROWSER_CDP=ws://127.0.0.1:9222`. Ungated `JS_ONLY` SPA shells hit
+by `extract` will render through that CDP endpoint and disclose `rendered:
+cdp:<endpoint>` in the provenance header, while CAPTCHA/Turnstile/Cloudflare
+blocks still escalate to the humanomation gate queue (and Obscura's
+anti-detection / `--stealth` flags are intentionally never enabled).
 
 **Ethical boundary, enforced in code.** `core/browser.py` carries an
 `ALLOWED_HOSTS` allow-list of court systems and government registries. Anything
@@ -391,42 +458,34 @@ open an issue.** The limits are configuration, not conviction.
 
 ## What this does NOT do
 
-**It is not a general web search replacement** — though `searxng` now closes
-most of that gap. It covers the sources this beat uses: courts, contracts,
-disclosures, news, docs, and (via a local SearXNG instance) the general web.
+**It is not a primary general web search index** — though `web` covers open web
+discovery without needing a background daemon or container runtime. It focuses
+on primary public-record sources: courts, contracts, disclosures, news, docs,
+and pluggable local/state portals.
 
-## General web, on our terms
+## General web, zero daemon required
 
 ```bash
-deploy/searxng-native.sh up   # no container runtime needed
 evidence-search web "query"
 ```
 
-SearXNG is a Flask app whose dependencies are pure-Python or ship arm64
-wheels, so on a Mac with Python 3.10+ it just runs — no VM, no daemon, no
-Docker Desktop. `searxng-native.sh` clones it into `deploy/.searxng`, builds a
-venv, generates a secret, and starts it on 127.0.0.1. First install takes a few
-minutes; after that a cold start is about a second.
+Out of the box, `web` uses the keyless **Mwmbl** JSON REST API directly in
+process — no local container, no Flask daemon, and no API key needed. If you
+want broader commercial recall or already operate a SearXNG instance,
+`--provider auto` automatically picks them up when configured:
 
-Containerised is still there if you want isolation, and prefers the lightest
-runtime present — Apple's native `container` (macOS 26+), else podman or
-colima, with Docker Desktop last:
+* `BRAVE_API_KEY` -> Brave Web Search API (`--provider brave`)
+* `SERPER_API_KEY` -> Serper Google Search API (`--provider serper`)
+* `TAVILY_API_KEY` -> Tavily Search API (`--provider tavily`)
+* `SEARXNG_URL` or `--base URL` -> optional SearXNG instance (`--provider searxng`)
 
-```bash
-deploy/searxng.sh up
-```
+Because Mwmbl returns a bare `[]` on zero hits, `web` refuses to certify a
+`VerifiedAbsence` on `[]` unless a positive control probe (`wikipedia`)
+confirms the endpoint is live and answering.
 
-SearXNG is 251 maintained engine scrapers behind one JSON API. That catalogue
-is the asset. Its *failure semantics* are not, and this client does not adopt
-them — two things in its source are disqualifying for a defensible negative:
-
-* `json_engine.py` returns an **empty list** when an engine hits a blocked HTTP
-  status, so a wall and an empty shelf are indistinguishable in `results`.
-* failures live in a parallel `unresponsive_engines` channel that an operator
-  can switch **off** per engine via `display_error_messages`.
-
-So the adapter treats the results array as untrusted on its own and rebuilds
-coverage from what the API does report honestly:
+SearXNG's adapter (`engines/searxng.py`) remains supported whenever `--base`,
+`SEARXNG_URL`, or `--provider searxng` is selected, reconstructing coverage from
+`/config` and `unresponsive_engines`:
 
 ```
 queried    = engines enabled on the instance   (/config, cached)
@@ -434,15 +493,9 @@ failed     = unresponsive_engines              (per search)
 responsive = queried - failed
 ```
 
-A search where 3 of 8 engines were throttled **cannot** certify that a thing
-does not exist — it downgrades to `RateLimited`, exactly as a single blocked
-source does. A partial sweep is also never cached, since replaying it would
-present a degraded search as though every engine had answered.
-
-Scoring stays ours. SearXNG ranks by consensus (`weight * len(positions)`), so
-a result four engines agree on scores 4×. On this beat that buries the obscure
-trade-press hit or agency subpage only one index carries, so we keep its
-per-result `engines` set and let `unique_to_engine` mark those instead.
+A SearXNG sweep where upstream engines were throttled downgrades to
+`RateLimited` and is never cached. Regardless of provider, `web` treats quoted
+phrases as fuzzy discovery leads rather than an exhaustive census.
 
 **`usaspending` is the counting source.** Where `web` cannot count and
 `courtlistener` counts filings, this counts federal money:
@@ -469,6 +522,12 @@ three times, so it is now explicit per source:
 | `usaspending` | **yes** | defined corpus, real totals by award type |
 | `fedreg` | **yes** | defined corpus of government documents |
 | `courtlistener` | **yes**, quoted | reports `total_matches`; quote the phrase |
+| `lda` | **yes** | Senate LDA API reports real `count` across LD-1/LD-2 filings |
+| `fec` | **yes** | bulk SQLite index or Schedule A `pagination.count` |
+| `samgov` | **yes** | SAM.gov search API reports `page.totalElements` |
+| `nonprofit` | **yes** | ProPublica Nonprofit Explorer reports `total_results` (verify EIN on collisions) |
+| `sec` | **yes**, quoted | EDGAR EFTS reports `hits.total.value`; quote phrases for exact match |
+| `sanctions` | **yes**, `--exact` | local SQLite index of OFAC SDN + EU Consolidated; fuzzy matches are `possible_match` |
 | `crossref` | **no** | matches loosely across ~150M records |
 | `web` | **no** | engines ignore quotes; totals are not countable |
 
@@ -485,11 +544,9 @@ evidence-search crossref "Forced Science"            # fuzzy, verify the match
 evidence-search fedreg "immigration detention" --type rule
 ```
 
-**`web` is discovery, not census.** Its engines largely ignore quoted phrases,
-and SearXNG's engine model declares `paging`, `time_range_support`, `safesearch`
-and `language_support` but nothing about exact-phrase support — there is no way
-to ask an engine whether it honours quotes. So `web` result sets are fuzzy and
-their totals are not countable.
+**`web` is discovery, not census.** Its upstream engines largely ignore quoted
+phrases, and `web` does not assume a running local SearXNG container. Result sets
+are fuzzy and totals are not countable.
 
 We deliberately do **not** filter locally to compensate. Filtering one page of an
 N-page result set produces a number that looks like a count and is not one:
@@ -498,15 +555,22 @@ page-cap bug in a new place, and a bad count is worse than no count. Instead the
 tier says what it is, and a `web` absence is labelled weaker than one from a
 corpus with known query semantics.
 
-**Run it locally, not as a service.** The instance binds to 127.0.0.1 by
-design. A shared instance means shared rate limits across users — the 200-call
-problem one layer up, which the atomic ledger cannot govern across machines.
-Datacenter IPs also fare *worse* here: Google and Bing throttle cloud ranges
-hardest, so hosting degrades the very engines it exists to reach.
+## Cross-source pivoting & MCP server
 
-Running it natively sidesteps the runtime question entirely, which is why
-that is the default path. Docker Desktop in particular runs a Linux VM plus an
-Electron app to proxy search queries — a lot of machine for the job.
+```bash
+evidence-search investigate "CoreCivic" --domain corecivic.com
+evidence-search mcp --list-tools
+evidence-search-mcp   # stdio JSON-RPC 2.0 server
+```
+
+`investigate` runs a coordinated sweep across core registries, extracts
+discovered identifiers (`CIK`, `EIN`, `UEI`, `award_id`/`piid`, `dockets`, and
+domains), automatically fires secondary deep-dive pivots (`sec.submissions`,
+`nonprofit.by_ein`, `crtsh.search`), and exits `12` (`AccessBlocker`) rather
+than `11` (`VerifiedAbsence`) whenever any requested source fails. `mcp`
+(`evidence-search-mcp`) exposes `evidence_sources`, `evidence_search`,
+`evidence_investigate`, `evidence_extract` (including PDF/OCR and CDP),
+`evidence_record`, and `evidence_limits` over JSON-RPC 2.0 stdio.
 
 ## Design notes
 
@@ -601,9 +665,11 @@ rather than behaviour you can currently observe.
 ## Status
 
 Phase 1, and honestly labelled: this is a tool built for one reporter's beat,
-in the open, with its warts logged in `FEEDBACK.md`. **209 tests passing** on
-Python 3.10-3.13. Browser escalation, the humanomation gate (open/list/resume),
-and local extraction are built and working.
+in the open, with its warts logged in `FEEDBACK.md`. **1,059 offline tests passing**
+(1,065 total including local HTTP gate-UI socket tests) on Python 3.10-3.15.
+Browser escalation, the humanomation gate (open/list/resume/cancel),
+local extraction, declarative JSON manifest plugins, and the 6-point plugin
+conformance harness are built and working.
 
 Not yet built: async job-queue consumption, cross-source federated merge
 (Phase 3b — ranking one result set across `web`/`news`/`courtlistener`

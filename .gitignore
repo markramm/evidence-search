@@ -1,9 +1,12 @@
+.venv
 .venv/
+.venv*/
 __pycache__/
 *.egg-info/
 .pytest_cache/
 *.pyc
 deploy/.searxng/
+deploy/.obscura/
 deploy/searxng/settings.local.yml
 .coverage
 # Raw field reports: may name subjects, tasks and local paths. Never published;

@@ -336,4 +336,5 @@ def run_source(
             # precise confusion this package exists to prevent.
             cov.cache_write_refused = str(e)
 
-    return Hit(query=query, coverage=cov, results=list(results))
+    return Hit(query=query, coverage=cov, results=list(results),
+               probes=_probe(len(results)))

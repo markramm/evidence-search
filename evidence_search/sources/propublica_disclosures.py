@@ -132,7 +132,7 @@ def _parser(query: str):
                 bits.append(f"matched: {matched[0][:120]}")
 
             out.append(Result(
-                url=f"{BASE}/appointee/{slug}" if slug else fallback_url,
+                url=f"{BASE}/appointees/{slug}" if slug else fallback_url,
                 title=name or slug or "(unnamed appointee)",
                 snippet=" | ".join(bits),
                 source=SOURCE, engines=[SOURCE], index_origin=["n/a"],

@@ -1,0 +1,26 @@
+{
+  "name": "nyc_contracts",
+  "driver": "socrata",
+  "policy_name": "nyc_contracts",
+  "domain": "data.cityofnewyork.us",
+  "dataset_id": "7pza-ynkh",
+  "search_field": "vendor_name",
+  "title_fields": ["vendor_name", "agency", "contract_value", "purpose"],
+  "summary": "New York City Open Data procurement & contracts portal (Socrata)",
+  "corpus": "NYC Open Data Socrata procurement contracts dataset (`data.cityofnewyork.us/resource/7pza-ynkh.json`).",
+  "not_searched": [
+    "Subcontractors not listed directly in prime NYC procurement contract rows",
+    "New York State Comptroller (OSC) or federal contracts not issued by New York City agencies"
+  ],
+  "caveats": [
+    "Vendor names reflect registered NYC PASSPort/FMS spellings; use `--where` SoQL queries for contract ID or agency-code filtering."
+  ],
+  "exact_match_supported": null,
+  "counts": true,
+  "tier": 1,
+  "limits": {
+    "per_minute": 20,
+    "per_hour": 400,
+    "min_interval_s": 0.5
+  }
+}

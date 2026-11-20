@@ -20,7 +20,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .gates import list_gates, resume
+from .gates import cancel, list_gates, resume
 from .store import Store
 
 HOST, PORT = "127.0.0.1", 8787
@@ -41,6 +41,7 @@ def _describe(job: dict) -> dict:
     q = " ".join((p.get("query") or "").split())
     gate = p.get("gate_type") or "captcha"
     capture = p.get("capture") or ["the page HTML after you pass the challenge"]
+    req_by = p.get("requested_by") or ""
 
     bits = parse_qs(urlparse(url).query)
     county = (bits.get("db") or [""])[0]
@@ -58,7 +59,7 @@ def _describe(job: dict) -> dict:
         "token": job["token"], "url": url, "query": q, "source": job.get("source", ""),
         "gate": gate, "capture": capture, "seeking": seeking,
         "county": county.title(), "lname": lname.title(), "year": year,
-        "age_s": age_s, "age": _age(age_s),
+        "age_s": age_s, "age": _age(age_s), "requested_by": req_by,
     }
 
 
@@ -167,11 +168,6 @@ def _handler(db_path=None):
             CORS *simple* request and gets no preflight; requiring JSON puts the
             preflight back. Origin: belt and braces where the browser sends it.
             """
-            # Parse via urlparse so a bracketed IPv6 literal is handled the same
-            # way the Origin check below handles it -- rsplit-then-strip turned
-            # a portless "[::1]" into ":" and refused a legitimate local
-            # request. hostname also lowercases, and Host is case-insensitive
-            # per RFC 7230, so "LocalHost:8787" is the operator's own page.
             host = urlparse(f"//{self.headers.get('Host') or ''}").hostname or ""
             if host not in _LOOPBACK:
                 return False
@@ -201,7 +197,8 @@ def _handler(db_path=None):
             self._send(200, render(collect(self.store)))
 
         def do_POST(self):
-            if urlparse(self.path).path != "/resume":
+            path = urlparse(self.path).path
+            if path not in ("/resume", "/cancel"):
                 return self._send(404, "not found", "text/plain")
             if not self._local_only():
                 return self._send(403, json.dumps(
@@ -215,8 +212,20 @@ def _handler(db_path=None):
                                   "application/json")
 
             token = data.get("token", "")
-            body = data.get("body") or ""
             store = self.store
+            if path == "/cancel":
+                reason = data.get("reason") or "dismissed in gate ui"
+                cleared, err = cancel(store, token, reason=reason)
+                if err:
+                    return self._send(404, json.dumps(
+                        {"ok": False, "message": "That gate is no longer open."}),
+                        "application/json")
+                extra = f" Dismissed {len(cleared)} gates." if len(cleared) > 1 else " Gate dismissed."
+                return self._send(200, json.dumps({
+                    "ok": True, "cancelled": cleared, "message": extra.strip(),
+                }), "application/json")
+
+            body = data.get("body") or ""
             gates = {g["token"]: g for g in collect(store)}
             g = gates.get(token)
             if not g:

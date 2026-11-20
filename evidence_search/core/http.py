@@ -5,7 +5,10 @@ browser-escalation candidate, and a genuine absence.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
+import shutil
+import subprocess
 
 import httpx
 
@@ -236,6 +239,57 @@ def retry_after_seconds(value, now: float | None = None) -> int:
     return int(min(MAX_RETRY_AFTER_S, max(1, -(-seconds // 1))))
 
 
+@dataclass
+class _CurlResponse:
+    status_code: int
+    content: bytes
+    text: str
+    headers: dict[str, str]
+
+
+def _curl_verified_fetch(url: str, hdrs: dict, timeout: float, *, binary: bool = False):
+    """macOS system-trust fallback when httpx hits missing TLS intermediates (AIA).
+
+    TLS certificate verification stays strictly ON (no `-k` / `--insecure`).
+    """
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return None
+    cmd = [
+        curl_bin, "-sS", "-L", "--max-time", str(max(1, int(timeout))),
+        "--write-out", "\n__ES_CODE__:%{http_code}\n__ES_CT__:%{content_type}",
+    ]
+    for k, v in hdrs.items():
+        cmd.extend(["-H", f"{k}: {v}"])
+    cmd.append(url)
+    try:
+        proc = subprocess.run(cmd, capture_output=True)
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    raw_out = proc.stdout
+    marker = b"\n__ES_CODE__:"
+    idx = raw_out.rfind(marker)
+    if idx < 0:
+        return None
+    body_bytes = raw_out[:idx]
+    tail = raw_out[idx + len(marker):].decode("ascii", errors="replace").splitlines()
+    try:
+        status = int(tail[0].strip())
+    except (IndexError, ValueError):
+        return None
+    ct = ""
+    if len(tail) > 1 and tail[1].startswith("__ES_CT__:"):
+        ct = tail[1].split(":", 1)[1].strip()
+    return _CurlResponse(
+        status_code=status,
+        content=body_bytes,
+        text="" if binary else body_bytes.decode("utf-8", errors="replace"),
+        headers={"content-type": ct} if ct else {},
+    )
+
+
 def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
           headers: dict | None = None, binary: bool = False):
     """Return (payload, outcome_or_None).
@@ -245,8 +299,17 @@ def fetch(url: str, *, source: str, query: str = "", timeout: float = 45.0,
     """
     hdrs = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}
     hdrs.update(headers or {})
+    hdrs = {k: v for k, v in hdrs.items() if v is not None}
     try:
         r = httpx.get(url, headers=hdrs, timeout=timeout, follow_redirects=True)
+    except httpx.ConnectError as e:
+        msg = str(e)
+        r = None
+        if "CERTIFICATE_VERIFY_FAILED" in msg and "unable to get local issuer certificate" in msg:
+            r = _curl_verified_fetch(url, hdrs, timeout, binary=binary)
+        if r is None:
+            return None, AccessBlocker(query=query, mechanism=Blocker.SERVER_ERROR,
+                                       url=url, detail=msg)
     except httpx.TimeoutException as e:
         return None, RateLimited(query=query, source=source, retry_after_s=30,
                                  detail=f"timeout: {e}")

@@ -28,6 +28,7 @@ anything:
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import time
@@ -36,23 +37,13 @@ from typing import Any
 
 from ..core.limits import Limiter
 from ..core.results import (AccessBlocker, Blocker, Coverage, Hit, Probe, RateLimited,
-                            Result, replay_cached, verified_absence)
+                            Result, absence_meta, replay_cached, verified_absence)
 from ..core.source import RecognizedEmpty, Unanswerable, json_rows, run_source
 from ..core.store import Store, cache_key
 
 SOURCE = "usaspending"
 API = "https://api.usaspending.gov/api/v2"
 
-#: USAspending requires award_type_codes to come from ONE GROUP -- mixing them
-#: returns HTTP 422 ("must only contain types from one group"). The COUNT
-#: endpoint is laxer and accepts a mixed list, which is how a combined
-#: ALL_AWARD_TYPES shipped and then failed only on the LISTING path: --count
-#: worked, --limit 422'd.
-#:
-#: These six groups are read from the API's own 422 response rather than
-#: guessed -- a first correction split them into three and was still wrong,
-#: because loans, grants, direct payments and other-financial-assistance are
-#: four separate groups, not one "assistance" bucket.
 CONTRACT_TYPES = ["A", "B", "C", "D"]
 IDV_TYPES = ["IDV_A", "IDV_B", "IDV_B_A", "IDV_B_B", "IDV_B_C",
              "IDV_C", "IDV_D", "IDV_E"]
@@ -73,22 +64,69 @@ AWARD_GROUPS = {
 #: Valid ONLY on the count endpoint, which accepts a mixed list.
 ALL_AWARD_TYPES = [c for codes in AWARD_GROUPS.values() for c in codes]
 
-#: A uniform PIID (FAR 4.1603): a 6-character agency code, a 2-digit fiscal
-#: year, ONE LETTER naming the instrument type, then a serial. Legacy DoD PIIDs
-#: carry the same fields separated by dashes (W912DY-10-D-0001).
-#:
-#: The 9th character decides which corpus the identifier can be in at all, and
-#: getting it wrong produced a false absence (#17): `70CMSW26D00000016` counted
-#: over contracts only returned zero and exited 11, while the award exists --
-#: as an IDV, a different award group. Nothing in the output said IDVs had not
-#: been searched.
 _PIID = re.compile(r"^[A-Z0-9]{6}\d{2}([A-Z])[A-Z0-9]{4,9}$")
-#: A = blanket purchase agreement, B = basic ordering agreement,
-#: D = indefinite-delivery vehicle. All three are IDVs on USAspending.
 _IDV_INSTRUMENTS = {"A", "B", "D"}
-#: Q = request for quotations, R = request for proposals. A solicitation is not
-#: an award, so USAspending cannot hold it; its absence there proves nothing.
 _SOLICITATION_INSTRUMENTS = {"Q", "R"}
+
+#: Common agency abbreviations used on this beat, mapped to USAspending's
+#: exact toptier/subtier names (#17 follow-on / FEEDBACK.md).
+AGENCY_ALIASES: dict[str, tuple[str, str]] = {
+    "ice": ("subtier", "U.S. Immigration and Customs Enforcement"),
+    "cbp": ("subtier", "U.S. Customs and Border Protection"),
+    "uscis": ("subtier", "U.S. Citizenship and Immigration Services"),
+    "fema": ("subtier", "Federal Emergency Management Agency"),
+    "dhs": ("toptier", "Department of Homeland Security"),
+    "doj": ("toptier", "Department of Justice"),
+    "bop": ("subtier", "Federal Bureau of Prisons"),
+    "usms": ("subtier", "U.S. Marshals Service"),
+    "dea": ("subtier", "Drug Enforcement Administration"),
+    "fbi": ("subtier", "Federal Bureau of Investigation"),
+    "atf": ("subtier", "Bureau of Alcohol, Tobacco, Firearms and Explosives"),
+    "dod": ("toptier", "Department of Defense"),
+    "army": ("subtier", "Department of the Army"),
+    "navy": ("subtier", "Department of the Navy"),
+    "usaf": ("subtier", "Department of the Air Force"),
+    "hhs": ("toptier", "Department of Health and Human Services"),
+    "acf": ("subtier", "Administration for Children and Families"),
+    "gsa": ("toptier", "General Services Administration"),
+    "state": ("toptier", "Department of State"),
+    "dos": ("toptier", "Department of State"),
+    "treasury": ("toptier", "Department of the Treasury"),
+    "irs": ("subtier", "Internal Revenue Service"),
+}
+
+
+def resolve_agency(agency: str | None) -> dict[str, str] | None:
+    """Resolve an agency abbreviation or full name into USAspending's filter shape."""
+    if not agency or not agency.strip():
+        return None
+    raw = agency.strip()
+    hit = AGENCY_ALIASES.get(raw.lower())
+    if hit:
+        tier, name = hit
+        return {"type": "awarding", "tier": tier, "name": name}
+    return {"type": "awarding", "tier": "toptier", "name": raw}
+
+
+def _reporting_lag_caveat(date_from: str | None, date_to: str | None) -> list[str]:
+    """Warn on date-bounded queries near the present (#17 follow-on).
+
+    DoD awards carry an explicit 90-day FPDS/USAspending reporting lag, and
+    civilian agencies can lag 2-4 weeks between award execution and publication.
+    """
+    if not (date_from or date_to):
+        return []
+    today = _dt.date.today()
+    cutoff = (today - _dt.timedelta(days=90)).isoformat()
+    bound = date_to or today.isoformat()
+    if bound >= cutoff or (date_from and date_from >= cutoff):
+        return [
+            "REPORTING LAG: recent awards may not yet appear in USAspending "
+            "(DoD withholds FPDS disclosures for 90 days; civilian agencies "
+            "typically lag 2-4 weeks). Check SAM.gov award notices or agency "
+            "press releases before publishing a recent-window absence."
+        ]
+    return []
 
 
 def _piid_instrument(query: str) -> str | None:
@@ -118,6 +156,12 @@ FIELDS = ["Award ID", "Recipient Name", "Awarding Agency", "Awarding Sub Agency"
           "Award Amount", "Total Outlays", "Start Date", "End Date",
           "Description", "Contract Award Type", "recipient_id"]
 
+TRANSACTION_FIELDS = [
+    "Transaction ID", "Award ID", "Modification Number", "Action Date",
+    "Transaction Amount", "Transaction Description", "Action Type",
+    "Recipient Name", "Awarding Agency", "Awarding Sub Agency",
+]
+
 
 def _post(path: str, body: dict, timeout: float = 45.0):
     """POST JSON. `fetch` is GET-only, so this is deliberate and local."""
@@ -141,18 +185,7 @@ def _post(path: str, body: dict, timeout: float = 45.0):
 
 
 def _post_transport(body: dict):
-    """Adapt _post to the (payload, outcome_or_None) shape run_source expects.
-
-    The shell is GET-only because every other source is. Everything around the
-    request -- cache, reserve, backoff, absence, CachePoisoned -- is identical
-    here, so only the request is swapped rather than the whole shell being
-    re-implemented around it, which is what this module used to do.
-
-    _post already classifies its own failures, so the mapping is direct: a
-    timeout or a 429 is a RateLimited, anything else is a blocker. Returning
-    the decoded dict as the payload means parse callbacks receive JSON rather
-    than re-parsing text.
-    """
+    """Adapt _post to the (payload, outcome_or_None) shape run_source expects."""
     def transport(url, *, source, query="", headers=None):
         path = url[len(API):] if url.startswith(API) else url
         data, err = _post(path, body)
@@ -160,8 +193,6 @@ def _post_transport(body: dict):
             return data, None
         kind, detail = err
         if kind == "rate":
-            # `detail` is the raw Retry-After header. Honour it, and say what
-            # happened: the detail used to read just "60".
             from ..core.http import retry_after_seconds
             return None, RateLimited(
                 query=query, coverage=Coverage(queried=[source], errored={source: kind}),
@@ -178,18 +209,13 @@ def _post_transport(body: dict):
 
 
 def _keep_transport_outcome(blocked, body):
-    """Return the transport's own outcome unchanged.
-
-    run_source otherwise rewrites coverage to errored={source: "blocked"},
-    which would flatten the kind _post worked out -- "rate" and "timeout" are
-    the ones that distinguish a retryable pause from a wall, and a RateLimited
-    that reads as blocked loses its retry_after_s meaning.
-    """
+    """Return the transport's own outcome unchanged."""
     return blocked
 
 
 def _filters(query: str, by_recipient: bool, award_types: list[str],
-             date_from: str | None, date_to: str | None) -> dict:
+             date_from: str | None, date_to: str | None,
+             agency: str | None = None) -> dict:
     f: dict[str, Any] = {"award_type_codes": award_types}
     if by_recipient:
         f["recipient_search_text"] = [query]
@@ -198,6 +224,9 @@ def _filters(query: str, by_recipient: bool, award_types: list[str],
     if date_from or date_to:
         f["time_period"] = [{"start_date": date_from or "2007-10-01",
                              "end_date": date_to or "2030-09-30"}]
+    ag = resolve_agency(agency)
+    if ag:
+        f["agencies"] = [ag]
     return f
 
 
@@ -205,9 +234,6 @@ def _parse_counts(data, query: str, by_recipient: bool) -> list[Result]:
     """The count endpoint returns one summary row, not a list of awards."""
     if not isinstance(data, dict):
         raise ValueError(f"expected a JSON object, got {type(data).__name__}")
-    # `results` must be the per-group count object. `data.get("results") or
-    # {}` summed a payload with no `results` at all to zero, and zero was
-    # certified as "no federal awards".
     res = data.get("results")
     if not isinstance(res, dict) or not res:
         raise ValueError(
@@ -241,14 +267,10 @@ def _parse_counts(data, query: str, by_recipient: bool) -> list[Result]:
 
 def counts(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
            date_from: str | None = None, date_to: str | None = None,
+           agency: str | None = None,
            store: Store | None = None, limiter: Limiter | None = None,
            use_cache: bool = True):
-    """Real totals by award type. The countable primitive this beat needs.
-
-    A count over fewer than every award group NAMES the groups it skipped in
-    `not_searched`: a zero over contracts is not a zero over federal awards,
-    and without the list the negative read as complete (#17).
-    """
+    """Real totals by award type. The countable primitive this beat needs."""
     url = f"{API}/search/spending_by_award_count/"
     blocked = _solicitation_blocker(query, url)
     if blocked:
@@ -257,25 +279,25 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
     routed: list[str] = []
     inst = _piid_instrument(query)
     if inst in _IDV_INSTRUMENTS and not set(types) & set(IDV_TYPES):
-        # The count endpoint accepts a mixed list, so widening is free -- and
-        # widening can only find more, never manufacture an absence.
         types += IDV_TYPES
         routed.append(f"{query!r} is shaped like an IDV PIID (instrument type "
                       f"{inst!r}), so IDVs were counted as well as the groups asked for.")
     excluded = [g for g, codes in AWARD_GROUPS.items() if not set(types) & set(codes)]
     mode = "recipient-name" if by_recipient else "keyword (FUZZY)"
+    ag = resolve_agency(agency)
+    ag_note = f", agency={ag['name']}" if ag else ""
     return run_source(
         query, source=SOURCE, url=url,
-        searched=f"usaspending award counts ({mode})",
+        searched=f"usaspending award counts ({mode}{ag_note})",
         parse=lambda d: _parse_counts(d, query, by_recipient),
         transport=_post_transport(
-            {"filters": _filters(query, by_recipient, types, date_from, date_to)}),
+            {"filters": _filters(query, by_recipient, types, date_from, date_to, agency=agency)}),
         on_blocked=_keep_transport_outcome,
         store=store, limiter=limiter, use_cache=use_cache,
         exact_match_supported=False,
         corpus=("USAspending award counts from FY2008. Unlike a web tier this "
                 "IS a measurement -- the endpoint counts the matching awards."),
-        caveats=routed + ([] if by_recipient else
+        caveats=routed + _reporting_lag_caveat(date_from, date_to) + ([] if by_recipient else
                  ["KEYWORD counts records CONTAINING the words, not awards TO a "
                   "vendor. A count from a keyword search is not a count of "
                   "anything in particular."]),
@@ -286,25 +308,13 @@ def counts(query: str, by_recipient: bool = True, award_types: list[str] | None 
                         if excluded else []),
         cache_params={"mode": "count", "recipient": by_recipient,
                       "types": ",".join(types),
-                      "date_from": date_from, "date_to": date_to},
+                      "date_from": date_from, "date_to": date_to,
+                      "agency": (ag["name"] if ag else None)},
     )
 
 
 def detail(record_id: str, store: Store | None = None, limiter: Limiter | None = None):
-    """Full FPDS detail for one award: PSC, NAICS, the contracting officer's own words.
-
-    THREE separate workers independently reimplemented this against the raw API
-    before it existed, because neither `--group` nor `record` surfaces PSC or
-    NAICS -- both return the search summary, and the codes live only on the
-    award-detail endpoint.
-
-    Those codes are the good evidence on this beat precisely because they are the
-    BUYER's classification, not the vendor's marketing: an ICE award buying a
-    "REALISTIC DE-ESCALATION INSTRUCTOR COURSE" coded U013
-    "EDUCATION/TRAINING-COMBAT" states the purpose/effect gap inside one record.
-
-    Accepts a bare numeric id or the `usaspending:<id>` record_id from a result.
-    """
+    """Full FPDS detail for one award: PSC, NAICS, the contracting officer's own words."""
     store = store or Store()
     limiter = limiter or Limiter(store)
     num = str(record_id).split(":")[-1].strip()
@@ -322,21 +332,11 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
         limiter.note_outcome(SOURCE, ("http", str(e)))
         return AccessBlocker(query=num, coverage=Coverage(queried=[SOURCE], errored={SOURCE: "http"}),
                              mechanism=Blocker.SERVER_ERROR, url=url, detail=str(e))
-    # A 404 is an ANSWER here, not a transport failure -- either the wrong id
-    # type or a genuine absence -- so it must not push the source toward
-    # backoff. Only 5xx/transport trouble counts against it.
     if r.status_code >= 500:
         limiter.note_outcome(SOURCE, ("status", f"HTTP {r.status_code}"))
     elif r.status_code < 400:
         limiter.note_outcome(SOURCE, None)
     if r.status_code == 404:
-        # A 404 here is AMBIGUOUS and must never become a publishable negative.
-        # This endpoint keys on USAspending's INTERNAL numeric award id (the one
-        # in a result's meta.record_id / the /award/<n>/ URL), not on a PIID.
-        # Passing a PIID -- `70CDCR26FR0000001`, the identifier a human actually
-        # has -- 404s even though the award plainly exists and a recipient search
-        # returns it. Reporting that as VerifiedAbsence tells a researcher the
-        # record is not there, which is the single worst thing this tool can say.
         if not num.isdigit():
             return AccessBlocker(
                 query=num,
@@ -373,17 +373,6 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                results=[Result(
                    url=f"https://www.usaspending.gov/award/{num}",
                    title=f"{(rec.get('recipient_name') or '?')} — {d.get('piid') or num}",
-                   # Absent fields are NAMED, never omitted.
-                   #
-                   # Dropping the line when a code is missing makes silence
-                   # ambiguous exactly where the codes are the load-bearing
-                   # evidence: a worker comparing two awards saw one PSC line
-                   # and one none, and could not tell whether the award has no
-                   # PSC or whether --detail failed to print it. Those mean
-                   # different things -- one is a finding, the other is a bug --
-                   # and they nearly wrote "no PSC assigned" on the strength of
-                   # a blank. An explicit "(none in record)" is a fact; a
-                   # missing line is a question.
                    snippet=" | ".join((
                        (f"PSC {c['product_or_service_code']}: "
                         f"{c.get('product_or_service_description') or '?'}"
@@ -391,9 +380,6 @@ def detail(record_id: str, store: Store | None = None, limiter: Limiter | None =
                         else "PSC: (none in record)"),
                        (f"NAICS {c['naics']}: {c.get('naics_description') or '?'}"
                         if c.get("naics") else "NAICS: (none in record)"),
-                       # The award's own words. Already fetched and stored; a
-                       # worker had to drop to raw curl for it because it was
-                       # in meta but never rendered.
                        (f"DESC: {d['description']}" if d.get("description")
                         else "DESC: (none in record)"),
                    )),
@@ -419,19 +405,6 @@ def _name_matches(query: str, names: list[str]) -> bool:
 
 
 def _entity_caveat(query: str, names: list[str], n_distinct: int) -> str | None:
-    """Warn when the recipient search did not resolve to the entity asked for.
-
-    `recipient_search_text` is a SEARCH, not an entity resolver, and two failure
-    modes both produced wrong published figures:
-
-    1. ONE name that is not yours -- querying "Constellis" returns records for
-       TRIPLE CANOPY INC. The name searched is not the name on the awards.
-    2. SEVERAL names -- a parent-company query sweeps in subsidiary records, so
-       two --sum calls that each look authoritative silently count the same
-       contracts twice. Verified: "Constellis" and "Triple Canopy" share 55 of
-       their top 100 PIIDs, and summing the two yields $10.73B -- the exact wrong
-       figure found sitting in a draft with an editor.
-    """
     if not names:
         return None
     if len(names) == 1 and not _name_matches(query, names):
@@ -447,40 +420,29 @@ def _entity_caveat(query: str, names: list[str], n_distinct: int) -> str | None:
 
 def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
                date_from: str | None = None, date_to: str | None = None,
+               agency: str | None = None,
                max_pages: int = 10, store: Store | None = None,
                limiter: Limiter | None = None):
-    """Sum Award Amount across pages. Workers hand-scraped every total before this.
-
-    Reports whether it is COMPLETE or a floor: the API pages, and a vendor with
-    more awards than max_pages*100 yields an understatement. A floor reported as
-    a total is the confident-wrong-number failure this package keeps hitting.
-
-    DATE BOUNDS ARE HONOURED. They were not, originally: this function took no
-    date parameters while the CLI accepted --from/--to, so a bounded query
-    silently returned the ALL-TIME total and labelled it "complete". A worker
-    caught it by cross-checking against --count, which respected the same bounds.
-    A wrong total that says complete is worse than no total.
-    """
+    """Sum Award Amount across pages."""
     blocked = _solicitation_blocker(query, f"{API}/search/spending_by_award/")
     if blocked:
         return blocked
     store = store or Store()
     limiter = limiter or Limiter(store)
-    types = award_types or CONTRACT_TYPES
+    types = list(award_types or CONTRACT_TYPES)
+    inst = _piid_instrument(query)
+    if inst in _IDV_INSTRUMENTS and award_types is None:
+        types = list(IDV_TYPES)
     total = 0.0
     n = 0
-    seen_rows = 0      # award rows returned, priced or not
-    unpriced = 0       # award rows whose amount we could not read
+    seen_rows = 0
+    unpriced = 0
     page = 1
     more = False
     recipients: set[str] = set()
     while page <= max_pages:
         allowed, retry, why = limiter.reserve(SOURCE)
         if not allowed:
-            # Paging is one logical operation, so a spacing wait between pages
-            # should be absorbed rather than abandoning a half-summed total --
-            # a partial sum returned as a result is exactly the floor-as-total
-            # error. Wait out SHORT spacing; a real budget window still stops us.
             if retry and retry <= 5 and "min interval" in why:
                 time.sleep(retry)
                 allowed, retry, why = limiter.reserve(SOURCE)
@@ -492,7 +454,7 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                     detail=(f"{why} -- summed {n} awards across {page-1} page(s) before "
                             "stopping. This is a PARTIAL sum; do not report it as a total."))
         data, err = _post("/search/spending_by_award/", {
-            "filters": _filters(query, by_recipient, types, date_from, date_to),
+            "filters": _filters(query, by_recipient, types, date_from, date_to, agency=agency),
             "fields": ["Award ID", "Recipient Name", "Award Amount"],
             "limit": 100, "page": page,
             **({"sort": "Award Amount", "order": "desc"}
@@ -508,8 +470,6 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
         try:
             rows = json_rows(data, "results", total_key=None)
         except ValueError as e:
-            # No `results` list: an error body or a changed payload. Reading it
-            # as an empty page certified "no awards" for the recipient.
             return AccessBlocker(
                 query=query,
                 coverage=Coverage(queried=[SOURCE], errored={SOURCE: "parse"}),
@@ -526,7 +486,6 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                 total += v
                 n += 1
             else:
-                # An award row we could not price. NOT the same as no award.
                 unpriced += 1
             if r.get("Recipient Name"):
                 recipients.add(r["Recipient Name"])
@@ -537,16 +496,6 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
 
     cov = Coverage(queried=[SOURCE], responsive=[SOURCE], indexes=["n/a"])
     if not n:
-        # `n` counts rows we could PRICE. Reporting "no priced rows" as an
-        # absence conflated two different facts: the recipient has no awards,
-        # and the recipient has awards we failed to parse. The second is a
-        # tooling failure wearing the costume of a publishable negative -- and
-        # it arrived at exit 11, which a shell caller reads as "publishable."
-        #
-        # Verified: feeding two real awards whose `Award Amount` came back as
-        # strings ("5,000,000" -- a shape this module already defends against
-        # in _parse_counts) produced `VerifiedAbsence` with claim() == "Not
-        # found" for a vendor holding $7.5M in awards.
         if seen_rows:
             return AccessBlocker(
                 query=query,
@@ -557,8 +506,6 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                         "unreadable `Award Amount` -- the payload shape may have "
                         "changed. This is NOT an absence: the awards exist."))
         if more:
-            # Page 1 was empty but the API said more pages follow. Certifying
-            # absence without reading them asserts something we did not check.
             return AccessBlocker(
                 query=query,
                 coverage=Coverage(queried=[SOURCE], errored={SOURCE: "unread-pages"}),
@@ -566,22 +513,19 @@ def dollar_sum(query: str, by_recipient: bool = True, award_types: list[str] | N
                 url=f"{API}/search/spending_by_award/",
                 detail=("page 1 returned no rows but the API reports hasNext -- "
                         "pages went unread, so absence cannot be certified."))
+        ag = resolve_agency(agency)
         return verified_absence(
             query, cov, f"usaspending dollar sum ({query})",
             probes=[Probe(source=SOURCE, endpoint=f"{API}/search/spending_by_award/",
-                          query=query, params={"types": ",".join(types)},
+                          query=query,
+                          params={"types": ",".join(types),
+                                  "agency": ag["name"] if ag else ""},
                           corpus="USAspending prime awards",
                           result_count=0, exact_match_supported=False, at=time.time())],
             not_searched=["subawards", "pass-through recipients"],
-            caveats=["recipient_search_text is a fuzzy SEARCH, not an entity resolver"])
+            caveats=["recipient_search_text is a fuzzy SEARCH, not an entity resolver"]
+                    + _reporting_lag_caveat(date_from, date_to))
 
-    # recipient_search_text is a SEARCH, not an entity resolver. A parent-company
-    # name matches subsidiaries' records, so two --sum calls that each look
-    # authoritative can silently count the SAME contracts twice. Verified: a
-    # "Constellis" sum and a "Triple Canopy" sum share 55 of their top 100 PIIDs
-    # and the recipient name returned under "Constellis" is TRIPLE CANOPY INC.
-    # Summing the two produced $10.73B -- the exact wrong figure that had been
-    # sitting in a piece with an editor.
     names = sorted(recipients)[:6]
     complete = not more
     return Hit(query=query, coverage=cov, results=[Result(
@@ -611,8 +555,6 @@ def _parse_awards(data, query: str, page: int, store) -> list[Result]:
     rows = json_rows(data, "results", total_key=None)
     pm = data.get("page_metadata") or {}
     if isinstance(rows, RecognizedEmpty):
-        # An empty page is an absence only if it is the FIRST page and the API
-        # says nothing follows it.
         if isinstance(pm, dict) and pm.get("hasNext"):
             raise Unanswerable(
                 f"page {page} returned no rows but the API reports hasNext -- "
@@ -627,7 +569,6 @@ def _parse_awards(data, query: str, page: int, store) -> list[Result]:
     for r in rows:
         aid = r.get("Award ID") or ""
         internal = r.get("internal_id")
-        # Full record persisted; result carries the fields that answer questions.
         rid = f"{SOURCE}:{internal or aid}"
         try:
             store.put_record(rid, SOURCE, query, r)
@@ -657,18 +598,24 @@ def _parse_awards(data, query: str, page: int, store) -> list[Result]:
 
 
 def search(query: str, by_recipient: bool = True, award_types: list[str] | None = None,
-           date_from: str | None = None, date_to: str | None = None, limit: int = 25,
+           date_from: str | None = None, date_to: str | None = None,
+           agency: str | None = None, limit: int = 25,
            page: int = 1, store: Store | None = None, limiter: Limiter | None = None,
            use_cache: bool = True):
-    """List awards. Carries the real total from the count endpoint alongside."""
+    """List awards."""
     blocked = _solicitation_blocker(query, f"{API}/search/spending_by_award/")
     if blocked:
         return blocked
     store = store or Store()
-    types = award_types or CONTRACT_TYPES
+    routed: list[str] = []
+    inst = _piid_instrument(query)
+    if award_types is None and inst in _IDV_INSTRUMENTS:
+        types = list(IDV_TYPES)
+        routed.append(f"{query!r} is shaped like an IDV PIID (instrument type {inst!r}), "
+                      "so the listing routed to `--group idvs` automatically.")
+    else:
+        types = list(award_types or CONTRACT_TYPES)
 
-    # Refuse a mixed group BEFORE spending a ledger slot: the API 422s on it,
-    # and this is a caller error we can name precisely rather than a wall.
     groups = {g for g, codes in AWARD_GROUPS.items() if set(types) & set(codes)}
     if len(groups) > 1:
         return AccessBlocker(
@@ -682,30 +629,27 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
                     "cannot.)"))
 
     body = {
-        "filters": _filters(query, by_recipient, types, date_from, date_to),
+        "filters": _filters(query, by_recipient, types, date_from, date_to, agency=agency),
         "fields": FIELDS, "limit": limit, "page": page,
-        # Loans have no "Award Amount" field -- sorting on it returns HTTP 400
-        # ("not found in Loan Award mappings"). Sort by the one field every
-        # group shares, and let the caller re-sort if they care.
         **({"sort": "Award Amount", "order": "desc"}
            if set(types) & set(CONTRACT_TYPES + IDV_TYPES)
            else {"sort": "Award ID", "order": "desc"})}
 
+    ag = resolve_agency(agency)
+    ag_note = f", agency={ag['name']}" if ag else ""
     mode = "recipient" if by_recipient else "keyword"
     return run_source(
         query, source=SOURCE, url=f"{API}/search/spending_by_award/",
         searched=(f"usaspending awards, {mode} search across "
-                  f"{len(types)} award types"),
+                  f"{len(types)} award types{ag_note}"),
         parse=lambda d: _parse_awards(d, query, page, store),
         transport=_post_transport(body),
         on_blocked=_keep_transport_outcome,
         store=store, limiter=limiter, use_cache=use_cache,
-        # recipient_search_text is precise on contracts and much fuzzier on
-        # assistance awards; keywords is full-text and fuzzy by construction.
         exact_match_supported=False,
         corpus=("USAspending: federal awards from FY2008. A defined corpus, but "
                 "this LISTING is one page -- `--count` gives the real total."),
-        caveats=([] if by_recipient else
+        caveats=routed + _reporting_lag_caveat(date_from, date_to) + ([] if by_recipient else
                  ["KEYWORD search is full-text across award descriptions: it "
                   "matches records CONTAINING the words, not awards TO a vendor."]),
         not_searched=["awards below the reporting threshold",
@@ -713,5 +657,185 @@ def search(query: str, by_recipient: bool = True, award_types: list[str] | None 
                       f"award-type groups other than {', '.join(sorted(groups)) or 'contracts'}"],
         cache_params={"recipient": by_recipient, "types": ",".join(types),
                       "date_from": date_from, "date_to": date_to,
+                      "agency": (ag["name"] if ag else None),
                       "page": page, "limit": limit},
+    )
+
+
+def idv_orders(piid_or_id: str, limit: int = 25, page: int = 1,
+               store: Store | None = None, limiter: Limiter | None = None,
+               use_cache: bool = True):
+    """Child delivery/task orders issued under an IDV/IDIQ (#17 follow-on).
+
+    Answers: "have any task orders been issued under this IDIQ vehicle yet?"
+    Uses `/api/v2/awards/idvs/awards/` when a numeric or `CONT_IDV_...` id is
+    passed, or `/api/v2/search/spending_by_award/` with `award_ids` / parent
+    PIID search on contract award types A-D.
+    """
+    raw = (piid_or_id or "").strip().removeprefix(f"{SOURCE}:").strip()
+    blocked = _solicitation_blocker(raw, f"{API}/awards/idvs/awards/")
+    if blocked:
+        return blocked
+    store = store or Store()
+
+    url = f"{API}/awards/idvs/awards/"
+    body = {
+        "award_id": int(raw) if raw.isdigit() else raw,
+        "type": "child_awards",
+        "limit": limit,
+        "page": page,
+        "sort": "obligated_amount",
+        "order": "desc",
+    }
+
+    def _parse_child(data) -> list[Result]:
+        if not isinstance(data, dict):
+            raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+        rows = json_rows(data, "results", total_key=None)
+        pm = data.get("page_metadata") or {}
+        if isinstance(rows, RecognizedEmpty):
+            if isinstance(pm, dict) and pm.get("hasNext"):
+                raise Unanswerable("page returned no rows but reports hasNext")
+            return rows
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                raise ValueError("a child award row is not an object")
+            aid = r.get("piid") or r.get("Award ID") or ""
+            internal = r.get("generated_internal_id") or r.get("internal_id") or aid
+            amt = r.get("obligated_amount") if "obligated_amount" in r else r.get("Award Amount")
+            rec_name = r.get("recipient_name") or r.get("Recipient Name") or "?"
+            ag_name = r.get("awarding_agency") or r.get("Awarding Agency") or ""
+            start = r.get("start_date") or r.get("Start Date") or ""
+            end = r.get("end_date") or r.get("End Date") or ""
+            desc = r.get("description") or r.get("Description") or ""
+            rid = f"{SOURCE}:child:{internal}"
+            try:
+                store.put_record(rid, SOURCE, raw, r)
+            except Exception:
+                pass
+            out.append(Result(
+                url=f"https://www.usaspending.gov/award/{internal}",
+                title=f"{rec_name} — {aid} (under {raw})",
+                snippet=" | ".join(x for x in (
+                    f"${amt:,.2f}" if isinstance(amt, (int, float)) else None,
+                    ag_name, f"{start}→{end}" if (start or end) else None,
+                    desc[:100] if desc else None,
+                ) if x),
+                source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
+                meta={"record_id": rid, "parent_idv": raw, "piid": aid,
+                      "recipient": rec_name, "obligated_amount": amt,
+                      "agency": ag_name, "start": start, "end": end,
+                      "description": desc},
+            ))
+        return out
+
+    return run_source(
+        raw, source=SOURCE, url=url,
+        searched=f"usaspending child task orders under IDV {raw}",
+        parse=_parse_child,
+        transport=_post_transport(body),
+        on_blocked=_keep_transport_outcome,
+        store=store, limiter=limiter, use_cache=use_cache,
+        exact_match_supported=True,
+        corpus=f"USAspending child delivery/task orders issued under IDV {raw}.",
+        not_searched=[
+            "solicitations or task-order RFPs not yet awarded (check SAM.gov)",
+            "DoD task orders within the 90-day FPDS reporting lag",
+        ],
+        caveats=["An IDV with zero child orders has been awarded as a vehicle "
+                 "(ceiling only) with no task orders obligated against it yet."],
+        cache_params={"mode": "idv_orders", "page": page, "limit": limit},
+    )
+
+
+def transactions(award_id_or_piid: str, limit: int = 25, page: int = 1,
+                 store: Store | None = None, limiter: Limiter | None = None,
+                 use_cache: bool = True):
+    """Per-award transaction / modification history (FEEDBACK.md top open request).
+
+    Answers: "is this a new contract or a modification to an existing one?"
+    """
+    raw = (award_id_or_piid or "").strip().removeprefix(f"{SOURCE}:").removeprefix("detail:").strip()
+    blocked = _solicitation_blocker(raw, f"{API}/search/spending_by_transaction/")
+    if blocked:
+        return blocked
+    store = store or Store()
+
+    url = f"{API}/search/spending_by_transaction/"
+    body = {
+        "filters": {
+            "award_ids": [raw],
+            "award_type_codes": ALL_AWARD_TYPES,
+        },
+        "fields": TRANSACTION_FIELDS,
+        "limit": limit,
+        "page": page,
+        "sort": "Action Date",
+        "order": "desc",
+    }
+
+    def _parse_tx(data) -> list[Result]:
+        if not isinstance(data, dict):
+            raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+        rows = json_rows(data, "results", total_key=None)
+        pm = data.get("page_metadata") or {}
+        if isinstance(rows, RecognizedEmpty):
+            if isinstance(pm, dict) and pm.get("hasNext"):
+                raise Unanswerable("page returned no rows but reports hasNext")
+            return rows
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                raise ValueError("a transaction row is not an object")
+            aid = r.get("Award ID") or raw
+            mod = r.get("Modification Number")
+            mod_str = f"Mod {mod}" if mod not in (None, "") else "Base/Mod ?"
+            dt = r.get("Action Date") or ""
+            amt = r.get("Transaction Amount")
+            desc = r.get("Transaction Description") or ""
+            rec_name = r.get("Recipient Name") or "?"
+            internal = r.get("internal_id") or r.get("generated_internal_id") or aid
+            tx_id = r.get("Transaction ID") or f"{aid}:{mod}:{dt}"
+            rid = f"{SOURCE}:tx:{tx_id}"
+            try:
+                store.put_record(rid, SOURCE, raw, r)
+            except Exception:
+                pass
+            out.append(Result(
+                url=f"https://www.usaspending.gov/award/{internal}",
+                title=f"{rec_name} — {aid} ({mod_str} on {dt})",
+                snippet=" | ".join(x for x in (
+                    f"${amt:,.2f}" if isinstance(amt, (int, float)) else None,
+                    r.get("Action Type"),
+                    r.get("Awarding Sub Agency") or r.get("Awarding Agency"),
+                    desc[:120] if desc else None,
+                ) if x),
+                source=SOURCE, engines=[SOURCE], index_origin=["n/a"],
+                meta={"record_id": rid, "award_id": aid, "modification_number": mod,
+                      "action_date": dt, "transaction_amount": amt,
+                      "action_type": r.get("Action Type"),
+                      "description": desc, "recipient": rec_name,
+                      "agency": r.get("Awarding Agency"),
+                      "sub_agency": r.get("Awarding Sub Agency"),
+                      "has_next_page": bool(pm.get("hasNext"))},
+            ))
+        return out
+
+    return run_source(
+        raw, source=SOURCE, url=url,
+        searched=f"usaspending transaction history for award {raw}",
+        parse=_parse_tx,
+        transport=_post_transport(body),
+        on_blocked=_keep_transport_outcome,
+        store=store, limiter=limiter, use_cache=use_cache,
+        exact_match_supported=True,
+        corpus=f"USAspending transaction-level modification history for award {raw}.",
+        not_searched=[
+            "subaward transactions",
+            "modifications within the 90-day DoD FPDS reporting lag",
+        ],
+        caveats=["Pass the PIID (e.g. 70CDCR26FR0000001) or generated award ID; "
+                 "an internal numeric surrogate ID belongs to --detail."],
+        cache_params={"mode": "transactions", "page": page, "limit": limit},
     )

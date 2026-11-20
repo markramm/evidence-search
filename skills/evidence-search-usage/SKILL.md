@@ -1,6 +1,6 @@
 ---
 name: evidence-search-usage
-description: Use evidence-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) covering courts, contracts, disclosures, news, vendor docs, and the general web via a local SearXNG instance — and log usability friction back to its maintainers. Use when searching court dockets, federal cases, financial disclosures, news, or the general web during investigation work; when you need a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; when a page must be read cheaply instead of pulled whole into context; when a search hits a CAPTCHA or Cloudflare wall; or when the user says "use evidence-search", "search with the new tool", "log an evidence-search issue", or "/evidence-search-usage".
+description: Use evidence-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) covering courts, contracts, disclosures, news, vendor docs, and zero-daemon general web search — and log usability friction back to its maintainers. Use when searching court dockets, federal cases, financial disclosures, news, or the general web during investigation work; when you need a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; when a page must be read cheaply instead of pulled whole into context; when a search hits a CAPTCHA or Cloudflare wall; or when the user says "use evidence-search", "search with the new tool", "log an evidence-search issue", or "/evidence-search-usage".
 ---
 
 # evidence-search-usage
@@ -69,19 +69,56 @@ esac
 ## Commands
 
 ```bash
-$CS --wait web "warehouse detention contract"      # general web (local SearXNG)
+$CS --wait web "warehouse detention contract"      # zero-daemon web (Mwmbl default; optional API key or SearXNG)
 $CS --wait news '"Boeing" 737 inspection'           # Google News RSS, keyless
 $CS courtlistener '"Boeing"' --type r              # federal + state dockets
+$CS courtlistener --docket dcd:1:26-cv-01352       # watch a specific RECAP docket (Last Updated, deadlines, entries)
 $CS usaspending "Booz Allen Hamilton" --count      # REAL federal award total
 $CS usaspending "Booz Allen Hamilton" --limit 10   # the awards themselves
+$CS usaspending "GEO Group" --agency ICE --sum     # filter by awarding/funding agency (name or alias: ICE, CBP, DHS, DOD, DOJ)
+$CS usaspending --idv 70CDCR20D00000011            # child task/delivery orders under an IDV/BPA umbrella
+$CS usaspending --transactions CONT_AWD_...        # modification timeline (P00001..N, action dates, ceiling changes)
+$CS samgov "detention" --active-only               # SAM.gov pre-award solicitations, special notices, sources sought
+$CS samgov --detail <opportunity_id>               # full solicitation notice description + points of contact
+$CS samgov --attachments <opportunity_id>          # downloadable attachment URLs for `extract`
+$CS lda --client "Purdue Pharma" --year 2008       # Senate LD-1/LD-2 federal lobbying filings (1999-present)
+$CS fec --committee "Purdue" --cycles 2006,2008    # bulk-first FEC committee ID lookup
+$CS fec --from-committee C00370643 --to-committee C00367862 --cycles 2006-2008  # bulk-first FEC PAC transfers
+$CS nonprofit "Donors Trust"                       # IRS Form 990 index (warns on multi-EIN collisions)
+$CS nonprofit --ein 52-2166327 --year 2024         # 990 filing history + PDF URLs for a single EIN
+$CS sec '"CoreCivic"' --forms 10-K,10-Q,8-K        # SEC EDGAR EFTS full-text search (2001-present)
+$CS sec --company CXW --forms 8-K                  # SEC company submission history by CIK (--cik alias), ticker, or name
+$CS sanctions "Intellexa"                          # OFAC SDN + EU Consolidated sanctions (exact_match vs possible_match)
+$CS fara --country "El Salvador"                   # DOJ FARA foreign principals & U.S. registrants
+$CS wayback "https://vendor.com/page" --collapse-digest  # Wayback Machine CDX captures + SHA-1 content digests
+$CS openalex --author "John Doe" --retracted-only  # OpenAlex scholarly works, grants, and Retraction Watch flags
+$CS socrata "Vendor LLC" --domain data.cityofnewyork.us --dataset abcd-1234  # any Socrata state/city portal
+$CS arcgis "Holdings LLC" --layer-url https://.../FeatureServer/0 --field OwnerName  # any Esri ArcGIS parcel/registry layer
+$CS montana_cadastral "Holdings LLC"                # shipped Montana parcel ArcGIS plugin (top-level subcommand)
+$CS datagov_catalog "detention contracts"          # shipped Data.gov REST v1 dataset catalog plugin
+$CS kev "Ivanti" --ransomware-only                 # CISA KEV mandatory-patch list + NIST NVD CVE 2.0
+$CS crtsh "%.contractor.gov" --active-only        # Certificate Transparency subdomain & shared-SAN discovery
+$CS epa "Exxon" --state TX --violators-only        # EPA ECHO facilities, non-compliance quarters, penalties
+$CS openfda "infusion pump" --endpoint recall      # OpenFDA device recalls, 510(k) clearances, enforcement
+$CS cfpb "fees" --company "SECURUS TECHNOLOGIES"   # CFPB consumer complaints & narratives
+$CS icij "Holdings" --type entity                  # ICIJ Offshore Leaks entities, officers & 1-hop links
+$CS brokers "LiveRamp" --state CA                  # CA, VT, TX, OR state data-broker registries
+$CS gdelt "border surveillance" --country US       # GDELT DOC 2.0 global news discovery (uncountable)
+$CS investigate "CoreCivic" --domain corecivic.com # coordinated sweep + automatic CIK/EIN/UEI/domain pivots
+$CS mcp --list-tools                               # Phase 2 MCP stdio server & tool inspector (`evidence-search-mcp`)
+$CS plugin check [--live]                          # 6-point absence-safety conformance suite (+ live canary)
+$CS plugin init my_portal --driver socrata --domain data.example.gov --dataset abcd-1234
+$CS plugin init my_rest --driver rest --endpoint https://data.example.gov/api/search --rows-path results
 $CS oscn --county tulsa --lname Smith --year 2013
 $CS oscn --county tulsa --case CF-2013-00001       # one case, archived w/ SHA-256
 $CS propublica "BlackRock"                         # Trump-team disclosures
 $CS fedreg "immigration detention" --type rule     # rules/notices/EOs, real count
 $CS crossref 10.1177/10986111251357498             # exact scholarly record
 $CS docs "prompt caching" --site claude-api        # vendor documentation
+$CS sources                                        # machine-readable catalog of every source's tier, counts, and caveats
 $CS limits                                         # usage, 429 blocks, backoff: WHY a call was refused
 $CS gate ui                                        # human gates, in a browser
+$CS gate cancel <token> --reason "test fixture"    # dismiss a stale or test-run human gate
 $CS --json web "query" | jq '.results[].url'
 ```
 
@@ -109,15 +146,12 @@ after the subcommand. **`--limit` works on every listing source**, spelled the
 same way everywhere (`--rows` and `--per-page` still work where they always
 did). Trimming the list never hides the total: the header keeps reporting it.
 
-**`web` needs a local instance.** If it reports no instance:
-
-```bash
-./deploy/searxng-native.sh up      # from the repo; no container runtime needed
-```
-
-Start it and retry. The one thing not to do is record a `WebSearch` result as
-*equivalent coverage* — `web` reports which engines answered and `WebSearch` does
-not, so only `web` can support a coverage claim.
+**`web` works zero-daemon out of the box.** By default it queries the keyless
+Mwmbl JSON API in process (and automatically uses `BRAVE_API_KEY`,
+`SERPER_API_KEY`, `TAVILY_API_KEY`, or an optional `SEARXNG_URL` / `--base`
+when configured, or `--provider <name>`). Unlike external `WebSearch`, `web`
+records structured coverage and probes — never record an external `WebSearch`
+result as equivalent coverage.
 
 **That is not a reason to avoid `WebSearch`.** It is a first-class tool for a
 different job: exploratory questions, first leads, and citable news links (this
@@ -141,8 +175,9 @@ that is wrong, which is worse than no number:
 
 | Source | Counts? |
 |---|---|
-| `usaspending`, `fedreg` | **yes** — defined corpora, real totals |
-| `courtlistener` | **yes**, if you quote the phrase — read `total_matches` |
+| `usaspending`, `fedreg`, `lda`, `fec`, `samgov`, `nonprofit` | **yes** — defined corpora, real totals |
+| `courtlistener`, `sec` | **yes**, if you quote the phrase — read `total_matches` |
+| `sanctions` | **yes**, on normalized aliases (`--exact`); fuzzy hits are flagged `possible_match` |
 | `crossref`, `web` | **no** — both match loosely; their totals measure nothing |
 
 **Hit a paywall on a journal article?** `crossref <doi>` returns the
@@ -194,11 +229,75 @@ N documents" is not a count of anything — use `meta.total_matches` for a real 
 source that knows its true total now prints it directly:
 `results:  20 of 293 total_matches  (this page only -- cite 293, not 20)`.
 Cite that number, not the row count — "at least 20" is almost never the honest
-answer. (It is still on `meta.total_matches` in `--json`, nested inside the
-first result; you no longer need to go looking for it.) And CourtListener
+answer. (In `--json`, `total_matches` and `asked` are both exposed at the top
+level of `Hit` as well as on `results[0].meta.total_matches`.) And CourtListener
 tokenises unquoted queries: a real three-word institute name reported 51,622
 matches unquoted and 155 quoted. Quote it, or your count is off by two
 orders of magnitude in the wrong direction.
+
+**Watching a specific federal docket?** `courtlistener --docket <court>:<number>`
+(e.g. `dcd:1:26-cv-01352`, optional `--since YYYY-MM-DD` and `--grep REGEX`)
+requires the court slug because bare docket numbers collide across 94 federal
+districts. It scrapes the public docket page alongside the RECAP search API so
+you get full docket entry text (including text-only minute orders that have no
+PDF), `storage.courtlistener.com` PDF URLs, parsed deadlines, and the RECAP
+`Last Updated` timestamp. Any `VerifiedAbsence` from `--docket` is explicitly
+bounded by that `Last Updated` timestamp — RECAP is crowd-sourced, not real-time
+PACER.
+
+**IDV umbrellas vs. task orders on `usaspending`.** An Indefinite Delivery Vehicle
+(IDV / BPA) has `$0` obligated on the parent header; the real money lives on its
+child delivery/task orders. Passing an IDV PIID (`70CDCR20D00000011`) to
+`usaspending` or `usaspending --sum` automatically queries both the parent award
+and its child orders, or use `usaspending --idv <PIID>` directly. Use
+`usaspending --transactions <generated_internal_id>` for the modification
+history (`P00001..N`) and action dates. Note that DoD procurement carries a
+statutory 90-day reporting delay on USAspending.
+
+**Pre-award solicitations live on `samgov`, not `usaspending`.** RFPs, RFIs,
+Sources Sought, Special Notices, and Sole-Source J&As appear on SAM.gov before
+any contract is awarded. Use `samgov <query> [--agency 070] [--notice-type r,p,s]`,
+`samgov --detail <opp_id>`, and `samgov --attachments <opp_id>` (pass attachment
+download URLs straight into `extract`).
+
+**Lobbying vs. campaign contributions (`lda` and `fec`).**
+- `lda` searches U.S. Senate Lobbying Disclosure Act filings (`LD-1` registrations
+  and `LD-2` quarterly activity reports, 1999–present) by `--client`,
+  `--registrant`, `--lobbyist`, `--issue`, `--query`, and `--year`. It does NOT
+  cover LD-203 political-contribution reports, FARA foreign-agent filings, or
+  state lobbying commissions.
+- `fec` traces federal campaign contributions (`--contributor <name> --recipient
+  <candidate-or-committee> --cycles 2006,2008`). If a local FEC bulk SQLite
+  index is built (`fec --index-bulk ...`), it answers offline; otherwise it
+  queries `/v1/schedules/schedule_a/`, checking both individual (`is_individual=true`)
+  and PAC/committee (`is_individual=false`) schedules plus `--employer`. Never
+  use `DEMO_KEY` for multi-query sweeps; set `FEC_API_KEY`.
+
+**Nonprofit 990s (`nonprofit`) and entity collisions.** `nonprofit <name>`
+queries ProPublica Nonprofit Explorer (`--state`, `--ntee`), and `nonprofit --ein
+<EIN> [--year YYYY]` pulls filing financials and IRS 990 PDF links. **Watch the
+`entity_caveat` warning:** unrelated nonprofits frequently share a name (e.g.
+`"Donors Trust"` matches two distinct EINs in NE and VA), and ProPublica's
+fuzzy stemming can match `"DonorsTrust"` to `"Donorsrus Inc"`. Note also that
+public Form 990s redact Schedule B donor names and report grants made (Schedule I),
+not grants received.
+
+**SEC EDGAR (`sec`).** `sec <query>` runs EFTS full-text search across post-2001
+EDGAR filings (`--forms 10-K,10-Q,8-K`, `--since`, `--until`); quote phrases for
+exact match. `sec --cik <CIK-or-ticker-or-name>` pulls a company's submission
+history and warns if a company name substring matches multiple CIKs. Private
+companies, pre-2001 paper filings, and foreign issuers without U.S. reporting
+obligations are not in EDGAR.
+
+**Sanctions (`sanctions`).** `sanctions <name> [--list ofac|eu|all] [--exact]`
+downloads and indexes the U.S. Treasury OFAC SDN list and the EU Financial
+Sanctions Consolidated list into a local SQLite database (`~/.evidence-search/bulk/sanctions/`),
+grouping EU rows by `Entity_LogicalId`. Every result is labelled either
+`exact_match` (normalized name/alias match) or `possible_match` (token-sort
+Jaro-Winkler >= 0.85, which carries a verify-against-DOB/passport warning).
+Neither list expands OFAC's 50 Percent Rule (unnamed subsidiaries >=50% owned
+by a blocked person are sanctioned by operation of law without appearing on the
+list), nor UK OFSI or UN lists.
 
 ## Read coverage before you trust a result
 

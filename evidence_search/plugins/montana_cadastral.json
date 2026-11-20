@@ -1,0 +1,25 @@
+{
+  "name": "montana_cadastral",
+  "driver": "arcgis",
+  "policy_name": "montana_cadastral",
+  "layer_url": "https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1",
+  "search_field": "OwnerName",
+  "title_fields": ["OwnerName", "CountyName", "PARCELID", "TotalValue"],
+  "summary": "Montana Statewide Cadastral Parcel Registry (ArcGIS MSDI Parcels)",
+  "corpus": "Montana State Library MSDI Framework Cadastral Parcels layer (taxpayer owner name, geocode, assessment value, county).",
+  "not_searched": [
+    "Unrecorded deeds or recent property transfers not yet synced from county assessors to MSDI",
+    "Parcels held in states outside Montana or beneficial owners behind Montana/Delaware/Wyoming LLCs"
+  ],
+  "caveats": [
+    "Owner names match assessor tax-roll strings (often LAST FIRST or LLC name); pass `--where \"UPPER(OwnerName) LIKE '%...%'\"` for custom SQL queries."
+  ],
+  "exact_match_supported": true,
+  "counts": true,
+  "tier": 1,
+  "limits": {
+    "per_minute": 20,
+    "per_hour": 400,
+    "min_interval_s": 0.5
+  }
+}

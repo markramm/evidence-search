@@ -1,0 +1,25 @@
+{
+  "name": "datagov_catalog",
+  "driver": "rest",
+  "policy_name": "datagov_catalog",
+  "endpoint": "https://catalog.data.gov/api/v1/search",
+  "query_param": "q",
+  "limit_param": "per_page",
+  "rows_path": "results",
+  "title_fields": ["dcat.title", "slug"],
+  "snippet_fields": ["organization", "description"],
+  "item_url_template": "https://catalog.data.gov/dataset/{slug}",
+  "summary": "Data.gov U.S. federal open-data dataset catalog (v1 REST API plugin)",
+  "corpus": "U.S. federal, state, and local open-data dataset metadata catalog at catalog.data.gov.",
+  "not_searched": [
+    "Contents inside downloadable CSV/ZIP/GeoJSON dataset files (only catalog dataset metadata is searched)",
+    "Restricted agency datasets excluded from Data.gov harvesting"
+  ],
+  "caveats": [
+    "Data.gov catalogs datasets and API endpoints rather than individual record rows; inspect DCAT distributions in `meta.row`."
+  ],
+  "exact_match_supported": false,
+  "counts": false,
+  "tier": 1,
+  "limits": {"per_minute": 30, "per_hour": 600, "min_interval_s": 0.4}
+}

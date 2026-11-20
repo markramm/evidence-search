@@ -84,16 +84,122 @@ POLICIES: dict[str, Policy] = {
         windows=[(60, 25)], min_interval_s=0.3,
         note="Documentation llms.txt/sitemap indexes. No key, no search engine.",
     ),
-    # A local instance we operate: the constraint is the UPSTREAM engines it
-    # proxies, not the container. Paced so a fan-out of workers cannot make
-    # SearXNG hammer Google on our behalf and get the whole instance banned.
+    # Zero-daemon general web search (keyless Mwmbl default; optional API key or SearXNG).
+    "web": Policy(
+        windows=[(60, 30)], min_interval_s=0.4, index_origin="mixed",
+        note="Zero-daemon general web search (keyless Mwmbl default; optional "
+             "BRAVE_API_KEY, SERPER_API_KEY, TAVILY_API_KEY, or SEARXNG_URL override).",
+    ),
+    # Optional local SearXNG override (`--provider searxng` / `SEARXNG_URL`):
+    # the constraint is the UPSTREAM engines it proxies, not the container.
     "searxng": Policy(
         windows=[(60, 30)], min_interval_s=0.4, index_origin="mixed",
-        note="Local container (SEARXNG_URL, default 127.0.0.1:8888). Limits protect "
+        note="Optional SearXNG instance (SEARXNG_URL / --base). Limits protect "
              "the UPSTREAM engines it proxies. Needs `formats: [json]` in settings.yml.",
     ),
     "news_rss": Policy(windows=[(60, 20)], min_interval_s=0.5, index_origin="google"),
     "wayback": Policy(windows=[(60, 15)], min_interval_s=1.0, index_origin="own-crawl"),
+    # Senate LDA API (lda.gov/api/v1; lda.senate.gov 301s there). Verified keyless
+    # JSON on 2026-09-29 (#19). Paced politely for paginated --bill scans.
+    "lda": Policy(
+        windows=[(60, 30)], min_interval_s=0.5,
+        note="Keyless JSON (lda.gov/api/v1/filings/). Electronic coverage starts 1999. "
+             "client_name/registrant_name are substring matches; --bill scans descriptions client-side.",
+    ),
+    # FEC bulk files (fec.gov/files/bulk-downloads) + optional OpenFEC API.
+    # Downloads are once per (file, cycle) into the local SQLite index (#16).
+    "fec": Policy(
+        windows=[(60, 20)], min_interval_s=0.5, index_origin="own-index",
+        note="Bulk-first (pas2/oth/cm zips cached locally in SQLite); rate limit "
+             "governs bulk-file downloads and optional OpenFEC API calls.",
+    ),
+    # SAM.gov contract opportunities (sam.gov/api/prod/sgs/v1/search + opps/v2) (#2).
+    "samgov": Policy(
+        windows=[(60, 20)], min_interval_s=0.5,
+        note="Keyless JSON API for contract opportunities and public attachments. "
+             "Entity-registration detail pages are JS-only SPAs (use browser tier).",
+    ),
+    # ProPublica Nonprofit Explorer v2 API (projects.propublica.org/nonprofits/api/v2) (#4).
+    "nonprofit": Policy(
+        windows=[(60, 20)], min_interval_s=0.5,
+        note="Keyless JSON API wrapping IRS Form 990 filings. Name searches often "
+             "match multiple distinct EINs -- check entity_caveat before attributing.",
+    ),
+    # SEC EDGAR (efts.sec.gov + data.sec.gov). SEC guidance: <=10 req/s and a
+    # declared User-Agent with contact mailto (#1).
+    "sec": Policy(
+        windows=[(1, 8), (60, 120)], min_interval_s=0.15,
+        note="Keyless JSON (EFTS full-text from 2001 + company submissions by CIK). "
+             "Honours SEC's 10 req/s ceiling and declared User-Agent.",
+    ),
+    # Sanctions bulk CSVs (OFAC SDN + EU Consolidated financial sanctions) (#3).
+    "sanctions": Policy(
+        windows=[(60, 10)], min_interval_s=1.0, index_origin="own-index",
+        note="Open bulk CSV downloads (OFAC SDN + EU Consolidated) indexed locally "
+             "in SQLite with alias grouping and exact/fuzzy transliteration matching.",
+    ),
+    # U.S. DOJ Foreign Agents Registration Act (efile.fara.gov/bulk + /api/v1).
+    # FARA API throttles at 5 req / 10s (HTTP 429).
+    "fara": Policy(
+        windows=[(60, 10), (3600, 120)], min_interval_s=2.0, index_origin="own-index",
+        note="DOJ FARA eFile bulk CSV zips + API v1. Throttled at 5 req / 10s upstream.",
+    ),
+    # OpenAlex scholarly index (api.openalex.org). Polite pool via mailto.
+    "openalex": Policy(
+        windows=[(60, 30), (3600, 1000)], min_interval_s=0.3,
+        note="Keyless JSON scholarly index (~250M works, authors, institutions, "
+             "grants, and Retraction Watch flags). Polite pool enabled via mailto.",
+    ),
+    # Generic Socrata / Tyler SODA v2 open-data portal driver.
+    "socrata": Policy(
+        windows=[(60, 20), (3600, 400)], min_interval_s=0.5,
+        note="Generic Socrata SODA v2 driver; optional X-App-Token via SOCRATA_APP_TOKEN.",
+    ),
+    # Generic Esri ArcGIS REST FeatureServer / MapServer driver.
+    "arcgis": Policy(
+        windows=[(60, 20), (3600, 400)], min_interval_s=0.5,
+        note="Generic Esri ArcGIS REST FeatureServer/MapServer driver for state/county layers.",
+    ),
+    # CISA Known Exploited Vulnerabilities (KEV) JSON catalog + NIST NVD API v2.
+    "kev": Policy(
+        windows=[(60, 15), (3600, 300)], min_interval_s=0.5,
+        note="CISA Known Exploited Vulnerabilities JSON catalog + NIST NVD CVE API v2.",
+    ),
+    # Certificate Transparency log search (crt.sh).
+    "crtsh": Policy(
+        windows=[(60, 10), (3600, 200)], min_interval_s=1.0,
+        note="crt.sh Certificate Transparency JSON log search.",
+    ),
+    # EPA ECHO facility compliance and enforcement REST API.
+    "epa": Policy(
+        windows=[(60, 20), (3600, 400)], min_interval_s=0.5,
+        note="EPA ECHO facility compliance and enforcement REST API.",
+    ),
+    # OpenFDA device recalls, 510(k) clearances, enforcement, and adverse events.
+    "openfda": Policy(
+        windows=[(60, 40), (3600, 1000)], min_interval_s=0.3,
+        note="OpenFDA device recalls, 510(k) clearances, enforcement, and adverse events.",
+    ),
+    # CFPB Consumer Complaint Database REST API.
+    "cfpb": Policy(
+        windows=[(60, 25), (3600, 500)], min_interval_s=0.4,
+        note="CFPB Consumer Complaint Database REST API.",
+    ),
+    # ICIJ Offshore Leaks bulk CSV/ZIP index in local SQLite (#5).
+    "icij": Policy(
+        windows=[(60, 10), (3600, 60)], min_interval_s=1.0, index_origin="own-index",
+        note="ICIJ Offshore Leaks bulk CSV/ZIP index in local SQLite.",
+    ),
+    # Four-state data-broker registries (CA, VT, TX, OR) (#20).
+    "brokers": Policy(
+        windows=[(60, 15), (3600, 120)], min_interval_s=1.0, index_origin="own-index",
+        note="CA, VT, TX, OR state data-broker registries indexed locally in SQLite.",
+    ),
+    # GDELT DOC 2.0 global news article discovery API (#6).
+    "gdelt": Policy(
+        windows=[(60, 20), (3600, 400)], min_interval_s=0.5,
+        note="GDELT DOC 2.0 global news article discovery API.",
+    ),
 }
 
 DEFAULT_POLICY = Policy(windows=[(60, 20)], min_interval_s=0.5)
@@ -132,10 +238,40 @@ SOURCE_HOSTS: list[tuple[str, str, str]] = [
     ("api.usaspending.gov", "", "usaspending"),
     ("api.crossref.org", "", "crossref"),
     ("federalregister.gov", "", "federal_register"),
+    ("projects.propublica.org", "/nonprofits/", "nonprofit"),
     ("projects.propublica.org", "", "propublica_disclosures"),
     ("news.google.com", "", "news_rss"),
     ("web.archive.org", "", "wayback"),
     ("archive.org", "", "wayback"),
+    ("lda.gov", "", "lda"),
+    ("lda.senate.gov", "", "lda"),
+    ("fec.gov", "/files/bulk-downloads/", "fec"),
+    ("api.open.fec.gov", "", "fec"),
+    ("sam.gov", "/api/", "samgov"),
+    ("efts.sec.gov", "", "sec"),
+    ("data.sec.gov", "", "sec"),
+    ("www.sec.gov", "/files/company_tickers.json", "sec"),
+    ("sanctionslistservice.ofac.treas.gov", "", "sanctions"),
+    ("webgate.ec.europa.eu", "", "sanctions"),
+    ("efile.fara.gov", "", "fara"),
+    ("fara.gov", "", "fara"),
+    ("api.openalex.org", "", "openalex"),
+    ("cisa.gov", "/sites/default/files/feeds/", "kev"),
+    ("services.nvd.nist.gov", "", "kev"),
+    ("crt.sh", "", "crtsh"),
+    ("echodata.epa.gov", "", "epa"),
+    ("api.fda.gov", "", "openfda"),
+    ("www.consumerfinance.gov", "/data-research/consumer-complaints/", "cfpb"),
+    ("offshoreleaks-data.icij.org", "", "icij"),
+    ("cppa.ca.gov", "", "brokers"),
+    ("sos.vermont.gov", "", "brokers"),
+    ("www.sos.state.tx.us", "", "brokers"),
+    ("dfr.oregon.gov", "", "brokers"),
+    ("api.gdeltproject.org", "", "gdelt"),
+    ("api.mwmbl.org", "", "web"),
+    ("api.search.brave.com", "", "web"),
+    ("google.serper.dev", "", "web"),
+    ("api.tavily.com", "", "web"),
 ]
 
 

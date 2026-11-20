@@ -153,6 +153,21 @@ function wire(card){
     i.onchange = async () => { if (i.files[0]) hand(token, await i.files[0].text(), 'file:' + i.files[0].name); };
     i.click();
   });
+  const dis = card.querySelector('.dismiss');
+  if (dis) dis.addEventListener('click', async () => {
+    const r = await fetch('/cancel', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token, reason:'dismissed in gate ui'})
+    });
+    const d = await r.json();
+    const v = card.querySelector('.verdict');
+    v.className = 'verdict ' + (d.ok ? 'ok' : 'bad');
+    v.textContent = d.message;
+    if (d.ok){
+      card.dataset.done = '1';
+      card.querySelectorAll('button,.drop').forEach(el => el.setAttribute('disabled',''));
+    }
+  });
 }
 document.querySelectorAll('.gate').forEach(wire);
 """
@@ -223,7 +238,7 @@ def _card(g: dict) -> str:
            aria-label="Paste the page here, or drop a saved file">
         Select all on that tab, copy, and paste here.<br>Or drop the saved file.
       </div>
-      <p class="hint">No clipboard? <button class="linkish pick" type="button">choose a saved file</button>.</p>
+      <p class="hint">No clipboard? <button class="linkish pick" type="button">choose a saved file</button> · <button class="linkish dismiss" type="button">dismiss gate</button>.</p>
     </div>
   </div>
   <div class="verdict" role="status" aria-live="polite"></div>
