@@ -673,7 +673,7 @@ conformance harness are built and working.
 
 Not yet built: async job-queue consumption, cross-source federated merge
 (Phase 3b — ranking one result set across `web`/`news`/`courtlistener`
-together), local semantic layer, MCP shim (Phase 2).
+together), local semantic layer.
 
 ## Using it from an agent
 
