@@ -328,3 +328,41 @@ def test_web_key_file_fallback_and_env_precedence(tmp_path, monkeypatch):
 
     monkeypatch.setenv("BRAVE_API_KEY", "env-token")
     assert web._provider_key("brave") == "env-token"
+
+
+def test_web_brave_freshness_and_goggles_params(tmp_path, monkeypatch):
+    """freshness and goggles reach Brave's query string; a local goggle file is sent inline."""
+    from urllib.parse import parse_qs, urlparse
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
+    s, L = _kit(tmp_path)
+    captured: list[str] = []
+
+    def _brave(url, *, source, query="", headers=None, **kw):
+        captured.append(url)
+        return json.dumps({"type": "search", "query": {"original": query},
+                           "web": {"results": [{"url": "https://ex.gov/a", "title": "A", "description": "d"}]}}), None
+
+    monkeypatch.setattr(web, "fetch", _brave)
+    gfile = tmp_path / "tcp.goggle"
+    gfile.write_text("! name: TCP\n$boost=3,site=courtlistener.com\n$discard,site=nytimes.com\n", encoding="utf-8")
+    hit = web.search("x", provider="brave", store=s, limiter=L, use_cache=False,
+                     freshness="2026-11-20to2026-11-25", goggles=[str(gfile), "$boost=2,site=gov"])
+    assert isinstance(hit, Hit)
+    q = parse_qs(urlparse(captured[0]).query)
+    assert q["freshness"] == ["2026-11-20to2026-11-25"]
+    assert q["goggles"][0] == "$boost=3,site=courtlistener.com\n$discard,site=nytimes.com"
+    assert q["goggles"][1] == "$boost=2,site=gov"
+
+
+def test_web_freshness_validation_and_non_brave_refusal(tmp_path, monkeypatch):
+    """A malformed freshness is refused; freshness/goggles on a non-Brave provider are refused, not ignored."""
+    for var in ("SEARXNG_URL", "BRAVE_API_KEY", "SERPER_API_KEY", "TAVILY_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    s, L = _kit(tmp_path)
+    with pytest.raises(ValueError):
+        web._check_freshness("last-week")
+    assert web._check_freshness("pw") == "pw"
+    with pytest.raises(ValueError):
+        web.search("x", provider="mwmbl", store=s, limiter=L, use_cache=False, freshness="pw")
+    with pytest.raises(ValueError):
+        web._goggle_values(["a", "b", "c", "d"])

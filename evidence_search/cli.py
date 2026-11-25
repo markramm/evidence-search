@@ -224,7 +224,8 @@ def _dispatch_source_cmd(a, store: Store, limiter: Limiter, use_cache: bool,
         if cmd == "web":
             from .engines.web import search as web_search
             return _emit(web_search(a.query, a.categories, a.page, a.base, store, limiter, use_cache,
-                                    provider=a.provider, limit=a.limit), a.json, a.limit)
+                                    provider=a.provider, limit=a.limit,
+                                    freshness=a.freshness, goggles=a.goggle), a.json, a.limit)
         if cmd == "crossref":
             from .sources import crossref as cr_src
             return _emit(cr_src.search(a.query, a.rows, store, limiter, use_cache), a.json)
@@ -537,6 +538,10 @@ def main(argv=None) -> int:
                    help="general, news, science, files, images…")
     w.add_argument("--page", type=int, default=1)
     w.add_argument("--base", help="optional SearXNG instance URL (implies --provider searxng)")
+    w.add_argument("--freshness", default=None,
+                   help="Brave only: pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD")
+    w.add_argument("--goggle", action="append", default=None,
+                   help="Brave only, repeatable up to 3: a goggle URL, inline rules, or a local .goggle file")
 
     us = sub.add_parser("usaspending", help="federal awards (no key; real counts)")
     us.add_argument("query", nargs="?", default=None,

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlencode
 
@@ -95,6 +96,39 @@ def _provider_key(provider: str) -> str:
             return fh.read().strip()
     except OSError:
         return ""
+
+
+_FRESHNESS_RE = re.compile(r"^(pd|pw|pm|py|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$")
+
+
+def _check_freshness(freshness: str | None) -> str | None:
+    """Brave's freshness: pd, pw, pm, py, or a YYYY-MM-DDtoYYYY-MM-DD range."""
+    if freshness is None or not str(freshness).strip():
+        return None
+    f = str(freshness).strip()
+    if not _FRESHNESS_RE.match(f):
+        raise ValueError(
+            f"freshness {freshness!r} must be pd, pw, pm, py or YYYY-MM-DDtoYYYY-MM-DD"
+        )
+    return f
+
+
+def _goggle_values(goggles: list[str] | None) -> list[str]:
+    """Up to three goggles: a URL, an inline definition, or a local file whose text is sent inline."""
+    out: list[str] = []
+    for g in goggles or []:
+        g = (g or "").strip()
+        if not g:
+            continue
+        path = os.path.expanduser(g)
+        if not g.startswith(("http://", "https://")) and os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                lines = [ln.rstrip() for ln in fh if ln.strip() and not ln.lstrip().startswith("!")]
+            g = "\n".join(lines)
+        out.append(g)
+    if len(out) > 3:
+        raise ValueError("Brave accepts at most 3 goggles per query")
+    return out
 
 
 def resolve_provider(provider: str = "auto", base: str | None = None) -> str:
@@ -392,6 +426,8 @@ def search(
     *,
     provider: str = "auto",
     limit: int = 25,
+    freshness: str | None = None,
+    goggles: list[str] | None = None,
 ) -> Outcome:
     """Search the general web without requiring any background daemon.
 
@@ -439,6 +475,14 @@ def search(
                 ),
             )
 
+    fresh = _check_freshness(freshness)
+    goggle_vals = _goggle_values(goggles)
+    if (fresh or goggle_vals) and prov != "brave":
+        raise ValueError(
+            f"freshness and goggles are Brave options; provider {prov!r} would ignore them "
+            "and return undated, unranked results (pass --provider brave or omit them)"
+        )
+
     headers: dict[str, str] | None = None
     transport = _get_text
     index_origin = prov
@@ -454,7 +498,11 @@ def search(
         params: dict[str, Any] = {"q": query, "count": min(cap, 20)}
         if pageno > 1:
             params["offset"] = pageno - 1
-        url = f"{BRAVE_URL}?{urlencode(params)}"
+        if fresh:
+            params["freshness"] = fresh
+        if goggle_vals:
+            params["goggles"] = goggle_vals
+        url = f"{BRAVE_URL}?{urlencode(params, doseq=True)}"
         headers = {
             "Accept": "application/json",
             "X-Subscription-Token": api_key,
@@ -508,6 +556,8 @@ def search(
             "categories": categories,
             "pageno": pageno,
             "limit": cap,
+            "freshness": fresh or "",
+            "goggles": goggle_vals,
         },
         headers=headers,
         transport=transport,
