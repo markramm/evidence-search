@@ -305,3 +305,26 @@ def test_cli_web_subcommand_end_to_end(tmp_path, monkeypatch, capsys):
     assert rc == EXIT_HIT
     data = json.loads(capsys.readouterr().out)
     assert data["results"][0]["url"] == "https://www.courtlistener.com/"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_key_files(tmp_path_factory, monkeypatch):
+    """Keep a real ~/.config/<provider>/api_key from changing provider selection in tests."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-empty")))
+
+
+def test_web_key_file_fallback_and_env_precedence(tmp_path, monkeypatch):
+    """A key file under <config>/<provider>/api_key is used when the env var is unset; env wins."""
+    for var in ("SEARXNG_URL", "BRAVE_API_KEY", "SERPER_API_KEY", "TAVILY_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = tmp_path / "cfg"
+    (cfg / "brave").mkdir(parents=True)
+    (cfg / "brave" / "api_key").write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+
+    assert web._provider_key("brave") == "file-token"
+    assert web.resolve_provider() == "brave"
+    assert web._provider_key("serper") == ""
+
+    monkeypatch.setenv("BRAVE_API_KEY", "env-token")
+    assert web._provider_key("brave") == "env-token"

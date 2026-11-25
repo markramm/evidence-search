@@ -73,6 +73,30 @@ CORPUS, NOT_SEARCHED, STANDING_CAVEATS = spec_bounds(
 )
 
 
+def _key_file(provider: str) -> str:
+    """Path of the optional key file for a keyed provider: <config>/<provider>/api_key."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, provider, "api_key")
+
+
+def _provider_key(provider: str) -> str:
+    """The provider's API key: the environment first, then a file.
+
+    The file exists for the same reason as CourtListener's token file: a key
+    exported from a shell profile reaches login shells only, and agent tool
+    shells, cron and cloud setup scripts start without it.
+    """
+    env_var = _KEY_ENV[provider]
+    key = os.environ.get(env_var, "").strip()
+    if key:
+        return key
+    try:
+        with open(_key_file(provider), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
 def resolve_provider(provider: str = "auto", base: str | None = None) -> str:
     """Resolve which backend fulfills a `web` search call."""
     prov = (provider or "auto").strip().lower()
@@ -85,7 +109,7 @@ def resolve_provider(provider: str = "auto", base: str | None = None) -> str:
     if (base or "").strip() or os.environ.get("SEARXNG_URL", "").strip():
         return "searxng"
     for candidate in ("brave", "serper", "tavily"):
-        if os.environ.get(_KEY_ENV[candidate], "").strip():
+        if _provider_key(candidate):
             return candidate
     return "mwmbl"
 
@@ -402,7 +426,7 @@ def search(
     api_key = ""
     if prov in _KEY_ENV:
         env_var = _KEY_ENV[prov]
-        api_key = os.environ.get(env_var, "").strip()
+        api_key = _provider_key(prov)
         if not api_key:
             return AccessBlocker(
                 query=query,
@@ -410,8 +434,8 @@ def search(
                 mechanism=Blocker.AUTH_WALL,
                 url=_PROVIDER_URL[prov],
                 detail=(
-                    f"{env_var} is not set for provider {prov!r}; omit --provider "
-                    f"for keyless Mwmbl or set {env_var}."
+                    f"{env_var} is not set and {_key_file(prov)} is absent for provider "
+                    f"{prov!r}; omit --provider for keyless Mwmbl, set {env_var}, or write the key to that file."
                 ),
             )
 
