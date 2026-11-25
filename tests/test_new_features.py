@@ -746,3 +746,34 @@ def test_cdp_render_backend_for_ungated_js_pages(monkeypatch, capsys):
     assert "rendered: cdp:ws://127.0.0.1:9222/devtools/browser/obscura" in out2
     assert "70CDCR26FR0000001" in out2
 
+
+
+def test_usaspending_transaction_fields_are_api_accepted_names():
+    """Every requested transaction field is one the spending_by_transaction API accepts
+    (an unknown name makes the API return HTTP 400 for the whole request)."""
+    from evidence_search.sources import usaspending as u
+    accepted = {
+        "Action Date", "Action Type", "Award ID", "Award Type", "Awarding Agency",
+        "awarding_agency_id", "awarding_agency_slug", "Awarding Sub Agency", "cfda_number",
+        "cfda_title", "def_codes", "Funding Agency", "funding_agency_slug", "Funding Sub Agency",
+        "generated_internal_id", "internal_id", "Issued Date", "Last Date to Order", "Loan Value",
+        "Mod", "naics_code", "naics_description", "pop_city_name", "pop_country_name",
+        "pop_state_code", "product_or_service_code", "product_or_service_description",
+        "recipient_id", "Recipient Name", "Recipient UEI", "Subsidy Cost", "Transaction Amount",
+        "Transaction Description", "Assistance Listing", "NAICS", "Primary Place of Performance",
+        "PSC", "Recipient Location",
+    }
+    assert set(u.TRANSACTION_FIELDS) <= accepted
+
+
+def test_usaspending_post_4xx_is_not_labelled_server_error(monkeypatch):
+    """A 4xx from the POST transport is reported as an unexpected status, not http-5xx."""
+    from evidence_search.sources import usaspending as u
+    from evidence_search.core.results import Blocker
+    monkeypatch.setattr(u, "_post", lambda path, body, timeout=45.0: (None, ("status", "HTTP 400: bad fields")))
+    t = u._post_transport({})
+    data, outcome = t(u.API + "/search/spending_by_transaction/", source="usaspending", query="x")
+    assert data is None and outcome.mechanism == Blocker.HTTP_STATUS
+    monkeypatch.setattr(u, "_post", lambda path, body, timeout=45.0: (None, ("status", "HTTP 503: down")))
+    data, outcome = u._post_transport({})(u.API + "/x", source="usaspending", query="x")
+    assert outcome.mechanism == Blocker.SERVER_ERROR

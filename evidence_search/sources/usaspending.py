@@ -156,10 +156,13 @@ FIELDS = ["Award ID", "Recipient Name", "Awarding Agency", "Awarding Sub Agency"
           "Award Amount", "Total Outlays", "Start Date", "End Date",
           "Description", "Contract Award Type", "recipient_id"]
 
+# Names must match the spending_by_transaction API's accepted `fields` values
+# exactly; an unknown name makes the API reject the whole request with HTTP 400.
 TRANSACTION_FIELDS = [
-    "Transaction ID", "Award ID", "Modification Number", "Action Date",
-    "Transaction Amount", "Transaction Description", "Action Type",
-    "Recipient Name", "Awarding Agency", "Awarding Sub Agency",
+    "Award ID", "Mod", "Action Date", "Transaction Amount",
+    "Transaction Description", "Action Type", "Recipient Name",
+    "Awarding Agency", "Awarding Sub Agency", "internal_id",
+    "generated_internal_id",
 ]
 
 
@@ -202,9 +205,14 @@ def _post_transport(body: dict):
             return None, RateLimited(
                 query=query, coverage=Coverage(queried=[source], errored={source: kind}),
                 source=source, retry_after_s=60, detail=detail)
+        mechanism = Blocker.SERVER_ERROR
+        if kind == "status" and detail.startswith("HTTP 4"):
+            # A 4xx is the request being refused as malformed or unauthorised,
+            # not the server failing: say so, so nobody retries a bad request.
+            mechanism = Blocker.HTTP_STATUS
         return None, AccessBlocker(
             query=query, coverage=Coverage(queried=[source], errored={source: kind}),
-            mechanism=Blocker.SERVER_ERROR, url=url, detail=detail)
+            mechanism=mechanism, url=url, detail=detail)
     return transport
 
 
@@ -789,7 +797,7 @@ def transactions(award_id_or_piid: str, limit: int = 25, page: int = 1,
             if not isinstance(r, dict):
                 raise ValueError("a transaction row is not an object")
             aid = r.get("Award ID") or raw
-            mod = r.get("Modification Number")
+            mod = r.get("Mod", r.get("Modification Number"))
             mod_str = f"Mod {mod}" if mod not in (None, "") else "Base/Mod ?"
             dt = r.get("Action Date") or ""
             amt = r.get("Transaction Amount")
