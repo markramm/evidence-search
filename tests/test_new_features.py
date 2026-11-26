@@ -66,6 +66,9 @@ def test_cli_version_flag(capsys):
 def test_gao_gov_is_on_browser_allow_list():
     ok, why = core_browser.host_allowed("https://www.gao.gov/products/gao-26-101")
     assert ok and "Accountability" in why
+    # The reason tells an agent the route that works (FEEDBACK 2026-11-26: "gao.gov blocks
+    # scripts" was logged as a gap though pages render through the browser route).
+    assert "web search" in why and "browser" in why
 
 
 def test_propublica_disclosures_emits_plural_appointees_url(monkeypatch):
