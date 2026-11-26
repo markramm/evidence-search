@@ -60,7 +60,11 @@ ALLOWED_HOSTS = {
     "projects.propublica.org": "ProPublica public data projects",
     "schuylkillcountypa.gov": "Schuylkill County PA -- Recorder of Deeds / Assessment, public real-property records",
     "berkspa.gov":            "Berks County PA -- Assessment / property records (propertyrecords.berkspa.gov), public real-property records",
-    "www.gao.gov":            "U.S. Government Accountability Office -- published audit reports (legislative-branch public records; direct fetch returns 403)",
+    # Checked 2026-11-26: report and decision pages render through this browser route;
+    # direct fetch (extract) returns 403, and GAO's own search pages (bid-protest search,
+    # /api/*) return Akamai "Access Denied" even here. Find a decision by web search
+    # (site:gao.gov plus the B-number or GAO-number), then fetch its page with `browser`.
+    "www.gao.gov":            "U.S. Government Accountability Office -- published reports and bid-protest decisions (legislative-branch public records). Pages render here; extract gets 403 and GAO's own search is blocked: find the page by web search (site:gao.gov B-number), then use browser",
 }
 
 # Signals that a human gate is on screen and no amount of waiting will clear it.
