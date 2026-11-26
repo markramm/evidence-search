@@ -1,6 +1,6 @@
 ---
 name: evidence-search-usage
-description: Use evidence-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) covering courts, contracts, disclosures, news, vendor docs, and zero-daemon general web search — and log usability friction back to its maintainers. Use when searching court dockets, federal cases, financial disclosures, news, or the general web during investigation work; when you need a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; when a page must be read cheaply instead of pulled whole into context; when a search hits a CAPTCHA or Cloudflare wall; or when the user says "use evidence-search", "search with the new tool", "log an evidence-search issue", or "/evidence-search-usage".
+description: Use evidence-search — the federated research client with typed outcomes (Hit / VerifiedAbsence / AccessBlocker / RateLimited / AwaitingHuman) over ~30 sources: court dockets, federal awards and contract opportunities (USAspending, SAM.gov), Federal Register, SEC, FEC, lobbying, FARA, 990s, sanctions, regulators (EPA, FDA, CFPB), data-broker registries, news and general web — and log usability friction back to its maintainers. Use it whenever investigation work needs a court record, an award amount or ID, a filing, or a DEFENSIBLE NEGATIVE ("we searched properly and it isn't there") rather than an empty list; whenever a page must be read to quote or cite it (extract returns the page's own words, WebFetch a paraphrase); when a search hits a 403, CAPTCHA or Cloudflare wall; or when the user says "use evidence-search", "fetch this with evidence-search", "search with the new tool", "log an evidence-search issue", or "/evidence-search-usage".
 ---
 
 # evidence-search-usage
@@ -70,6 +70,8 @@ esac
 
 ```bash
 $CS --wait web "warehouse detention contract"      # zero-daemon web (Mwmbl default; optional API key or SearXNG)
+$CS web "ICE detention contract" --provider brave --freshness pw   # Brave only: past day/week/month/year (pd|pw|pm|py) or YYYY-MM-DDtoYYYY-MM-DD
+$CS web "detention audit" --provider brave --goggle ~/.config/brave/tcp-sources.goggle  # Brave only: re-rank by a goggle (URL, inline rules or file; up to 3)
 $CS --wait news '"Boeing" 737 inspection'           # Google News RSS, keyless
 $CS courtlistener '"Boeing"' --type r              # federal + state dockets
 $CS courtlistener --docket dcd:1:26-cv-01352       # watch a specific RECAP docket (Last Updated, deadlines, entries)
@@ -119,6 +121,9 @@ $CS sources                                        # machine-readable catalog of
 $CS limits                                         # usage, 429 blocks, backoff: WHY a call was refused
 $CS gate ui                                        # human gates, in a browser
 $CS gate cancel <token> --reason "test fixture"    # dismiss a stale or test-run human gate
+$CS record <result-id>                             # the FULL upstream record behind a result
+$CS hosts                                          # the browser-tier allow-list (public-records hosts only)
+$CS browser <url> [--headed] [--save page.html]    # real-browser fetch, allow-listed public-records hosts only
 $CS --json web "query" | jq '.results[].url'
 ```
 
@@ -180,50 +185,13 @@ that is wrong, which is worse than no number:
 | `sanctions` | **yes**, on normalized aliases (`--exact`); fuzzy hits are flagged `possible_match` |
 | `crossref`, `web` | **no** — both match loosely; their totals measure nothing |
 
-**Hit a paywall on a journal article?** `crossref <doi>` returns the
-authoritative record — exact title, journal, year, every author — which is
-usually what a citation needs even when the full text is walled. A DOI lookup is
-exact; a *title* search is fuzzy and carries a verify-before-citing warning
-(probing "Forced Science" returns "Forced to Pursue Science" on top).
-
-**Need the PSC/NAICS on a federal award?** `usaspending --detail <record_id>` returns
-them; the search results carry only a summary. Those codes are the strongest evidence on
-this beat because they are the *contracting officer's* classification, not the vendor's
-marketing — an ICE award buying a "REALISTIC DE-ESCALATION INSTRUCTOR COURSE" coded
-`U013 "EDUCATION/TRAINING-COMBAT"` states the purpose/effect gap inside one record.
-
-**Need a dollar total?** `usaspending --sum` pages the award list and tells you whether
-the figure is complete or a floor. Do not hand-scrape one.
-
-**Never add two `--sum` totals together without checking for shared award IDs.**
-`recipient_search_text` is a search, not an entity resolver: a parent-company name matches
-subsidiary records. Querying a PARENT can return records whose recipient is a SUBSIDIARY, and the
-two queries share 55 of their top 100 PIIDs — summing them produced a $10.7B figure that
-sat in an edited draft until someone checked. The tool now warns, but read
-`meta.recipient_names_matched` before citing any total.
-
-**Attributing an assistance award to a vendor? Check the UEI.**
-`usaspending` recipient matching is precise on CONTRACTS but much fuzzier on
-grants, loans and direct payments. A worker checking one vendor found 14 "extra"
-awards that were all unrelated SBA COVID-era small businesses with similar names
-— different UEI, different state. Also: list one `--group` at a time (contracts,
-idvs, grants, loans, direct_payments, other_assistance); the API rejects a mixed
-listing, though `--count --all-types` accepts one.
-
-**Counting federal money?** `usaspending --count` returns a real total by award
-type. Two modes, and the difference decides whether your number means anything:
-the default matches the recipient **name** (precise — use it for a vendor total),
-while `--keywords` is full-text and **fuzzy** (searching a two-word name returns
-NURAD Technologies, because the words appear somewhere in the record). Keyword
-counts carry a caveat in the output; do not report one as a vendor total.
-
-**A quoted firm name on `courtlistener` matches ATTORNEY-OF-RECORD appearances, not
-party status.** A worker nearly reported a firm as a litigant on that basis. Check which
-role the match reflects before writing it up.
-
-**`fedreg` is relevance-ranked, not a filter.** A query returns ~20 rows whether or not
-they are all relevant; the top hits are the match, the tail is noise. "This query returned
-N documents" is not a count of anything — use `meta.total_matches` for a real total.
+**Per-source traps live in `references/sources.md`.** Read the section for your
+source before citing a total or a record from it: USAspending (PSC/NAICS, `--sum`,
+shared award IDs across parent and subsidiary, UEIs on assistance awards,
+`--count` vs `--keywords`, IDVs and modification timelines), CourtListener
+(attorney-of-record matches, `--docket` watches), Federal Register ranking,
+SAM.gov, LDA/FEC, nonprofit 990 name collisions, SEC EDGAR, sanctions, and
+Crossref for paywalled articles.
 
 **Counting filings? Quote the phrase, and read the total off the header.** A
 source that knows its true total now prints it directly:
@@ -235,69 +203,6 @@ tokenises unquoted queries: a real three-word institute name reported 51,622
 matches unquoted and 155 quoted. Quote it, or your count is off by two
 orders of magnitude in the wrong direction.
 
-**Watching a specific federal docket?** `courtlistener --docket <court>:<number>`
-(e.g. `dcd:1:26-cv-01352`, optional `--since YYYY-MM-DD` and `--grep REGEX`)
-requires the court slug because bare docket numbers collide across 94 federal
-districts. It scrapes the public docket page alongside the RECAP search API so
-you get full docket entry text (including text-only minute orders that have no
-PDF), `storage.courtlistener.com` PDF URLs, parsed deadlines, and the RECAP
-`Last Updated` timestamp. Any `VerifiedAbsence` from `--docket` is explicitly
-bounded by that `Last Updated` timestamp — RECAP is crowd-sourced, not real-time
-PACER.
-
-**IDV umbrellas vs. task orders on `usaspending`.** An Indefinite Delivery Vehicle
-(IDV / BPA) has `$0` obligated on the parent header; the real money lives on its
-child delivery/task orders. Passing an IDV PIID (`70CDCR20D00000011`) to
-`usaspending` or `usaspending --sum` automatically queries both the parent award
-and its child orders, or use `usaspending --idv <PIID>` directly. Use
-`usaspending --transactions <generated_internal_id>` for the modification
-history (`P00001..N`) and action dates. Note that DoD procurement carries a
-statutory 90-day reporting delay on USAspending.
-
-**Pre-award solicitations live on `samgov`, not `usaspending`.** RFPs, RFIs,
-Sources Sought, Special Notices, and Sole-Source J&As appear on SAM.gov before
-any contract is awarded. Use `samgov <query> [--agency 070] [--notice-type r,p,s]`,
-`samgov --detail <opp_id>`, and `samgov --attachments <opp_id>` (pass attachment
-download URLs straight into `extract`).
-
-**Lobbying vs. campaign contributions (`lda` and `fec`).**
-- `lda` searches U.S. Senate Lobbying Disclosure Act filings (`LD-1` registrations
-  and `LD-2` quarterly activity reports, 1999–present) by `--client`,
-  `--registrant`, `--lobbyist`, `--issue`, `--query`, and `--year`. It does NOT
-  cover LD-203 political-contribution reports, FARA foreign-agent filings, or
-  state lobbying commissions.
-- `fec` traces federal campaign contributions (`--contributor <name> --recipient
-  <candidate-or-committee> --cycles 2006,2008`). If a local FEC bulk SQLite
-  index is built (`fec --index-bulk ...`), it answers offline; otherwise it
-  queries `/v1/schedules/schedule_a/`, checking both individual (`is_individual=true`)
-  and PAC/committee (`is_individual=false`) schedules plus `--employer`. Never
-  use `DEMO_KEY` for multi-query sweeps; set `FEC_API_KEY`.
-
-**Nonprofit 990s (`nonprofit`) and entity collisions.** `nonprofit <name>`
-queries ProPublica Nonprofit Explorer (`--state`, `--ntee`), and `nonprofit --ein
-<EIN> [--year YYYY]` pulls filing financials and IRS 990 PDF links. **Watch the
-`entity_caveat` warning:** unrelated nonprofits frequently share a name (e.g.
-`"Donors Trust"` matches two distinct EINs in NE and VA), and ProPublica's
-fuzzy stemming can match `"DonorsTrust"` to `"Donorsrus Inc"`. Note also that
-public Form 990s redact Schedule B donor names and report grants made (Schedule I),
-not grants received.
-
-**SEC EDGAR (`sec`).** `sec <query>` runs EFTS full-text search across post-2001
-EDGAR filings (`--forms 10-K,10-Q,8-K`, `--since`, `--until`); quote phrases for
-exact match. `sec --cik <CIK-or-ticker-or-name>` pulls a company's submission
-history and warns if a company name substring matches multiple CIKs. Private
-companies, pre-2001 paper filings, and foreign issuers without U.S. reporting
-obligations are not in EDGAR.
-
-**Sanctions (`sanctions`).** `sanctions <name> [--list ofac|eu|all] [--exact]`
-downloads and indexes the U.S. Treasury OFAC SDN list and the EU Financial
-Sanctions Consolidated list into a local SQLite database (`~/.evidence-search/bulk/sanctions/`),
-grouping EU rows by `Entity_LogicalId`. Every result is labelled either
-`exact_match` (normalized name/alias match) or `possible_match` (token-sort
-Jaro-Winkler >= 0.85, which carries a verify-against-DOB/passport warning).
-Neither list expands OFAC's 50 Percent Rule (unnamed subsidiaries >=50% owned
-by a blocked person are sanctioned by operation of law without appearing on the
-list), nor UK OFSI or UN lists.
 
 ## Read coverage before you trust a result
 
@@ -330,8 +235,16 @@ $CS extract <url-or-file> --text     # chrome stripped, for open-ended reading
 Measured on a live article: **96,655 → 5,724 tokens (94.1%)**, and `--ids`
 pulled the exact dollar figures in 27 tokens. Every run reports its reduction.
 
-Fall back to `--text` or plain WebFetch only when the question is genuinely
-open-ended and the whole document must be read.
+**To quote or cite a page, read it with `extract` and copy the words from its
+output.** `extract --text` and `--grep` return the page's own sentences.
+WebFetch returns a model's paraphrase of the page: fine for orientation, never a
+quotation, a span or a figure you cite. A worker who checked ten claims through
+WebFetch summaries came back with nothing citable, and a second worker had to
+re-read every source with `extract`.
+
+**Output is capped for display at about 4,000 characters.** A long page ends with
+`[TRUNCATED for display: ... Use --json for the full text, or --max-chars N]`.
+Raise `--max-chars` or use `--json` rather than assuming the page ended there.
 
 **PDFs are handled.** `extract` reads the embedded text layer — exact and fast,
 which is what court filings, procurement records, and the Federal Register all
@@ -351,13 +264,24 @@ text nobody has checked.
 
 ## When you hit a wall
 
-`AccessBlocker` names the mechanism. Browser-passable walls (Cloudflare,
-Turnstile, reCAPTCHA, DataDome, JS-only) escalate to a real browser
-automatically. If the browser also fails, the job parks as `AwaitingHuman` with
-a resume token rather than dying.
+`AccessBlocker` names the mechanism (403, Cloudflare, Turnstile, DataDome,
+JS-only, paywall). It may also print `ESCALATABLE: a real browser session could
+plausibly pass this gate.` That line is information, not an instruction.
 
-**Do not treat a gate as a dead end, and never as an absence.** Record the token
-in your work log and move on; Mark clears gates in batches via `$CS gate ui`.
+**The browser tier is for public-records hosts on the allow-list, nothing
+else.** `$CS hosts` lists them (state courts, SAM, SBA, county property and
+business registries): public records whose sites block scripts for load reasons.
+Use `extract --browser` or `browser` there. On any other site, a wall is the
+publisher declining automated access: record it as access-blocked with the
+mechanism, stop on that source, and do not retry it with another tool, a
+browser, a different user agent or an archive copy fetched to get around it. If
+the page matters, hand the URL to a human to read and paste (that is how
+HPCwire and an Argonne page reached the record on 2026-11-25). A 429 may be
+retried once after the window `limits` names.
+
+When an allow-listed host's browser fetch also fails, the job parks as
+`AwaitingHuman` with a resume token. Record the token in your work log and move
+on; gates are cleared in batches via `$CS gate ui`. A gate is never an absence.
 
 **A 404 is not a wall.** It prints `NOT a negative finding, and NOT a block —
 the URL does not exist`, and it means you guessed the path wrong (`/about` vs
@@ -368,9 +292,11 @@ retry. The exit code is still 12 (AccessBlocker) — a 404 is never a verified a
 
 ## Report the friction
 
-**This is the second half of the task**, and it is not optional. evidence-search
-is new and under active evaluation; your account of where it confused you is the
-primary evidence for what gets fixed next.
+**This is the second half of the task.** evidence-search is under active
+evaluation; your account of where it confused you is the primary evidence for
+what gets fixed next. Size it to what happened: when nothing surprised you, one
+line in `FEEDBACK.local.md` (date, task kind, sources used, "no friction") is
+enough. When something did, use the full method below.
 
 Invoke the `hallway-agent-testing` skill — it carries the method (what counts as
 friction, how to write it so it is actionable, how to report a command
